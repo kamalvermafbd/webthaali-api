@@ -37,7 +37,10 @@ app.post(
       const invoice =
         req.body;
 
-      
+      console.log(
+  "REQ BODY:",
+  req.body
+);
 
 
   const isEdit =
