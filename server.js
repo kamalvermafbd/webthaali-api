@@ -177,23 +177,20 @@ if (isEdit) {
       state_code:
         invoice.customer?.stateCode || "",
 
-      taxable_amount:
-        invoice.totals?.taxableAmount || 0,
+      subtotal:
+  invoice.totals?.taxableAmount || 0,
 
-      cgst_total:
-        invoice.totals?.cgstTotal || 0,
+cgst:
+  invoice.totals?.cgstTotal || 0,
 
-      sgst_total:
-        invoice.totals?.sgstTotal || 0,
+sgst:
+  invoice.totals?.sgstTotal || 0,
 
-      igst_total:
-        invoice.totals?.igstTotal || 0,
+igst:
+  invoice.totals?.igstTotal || 0,
 
-      gst_total:
-        invoice.totals?.gstTotal || 0,
-
-      rounded_total:
-        invoice.totals?.rounded || 0,
+grand_total:
+  invoice.totals?.rounded || 0,
 
       payment_terms:
         invoice.paymentTerms || "",
@@ -287,23 +284,20 @@ if (isEdit) {
       state_code:
         invoice.customer?.stateCode || "",
 
-      taxable_amount:
-        invoice.totals?.taxableAmount || 0,
+      subtotal:
+  invoice.totals?.taxableAmount || 0,
 
-      cgst_total:
-        invoice.totals?.cgstTotal || 0,
+cgst:
+  invoice.totals?.cgstTotal || 0,
 
-      sgst_total:
-        invoice.totals?.sgstTotal || 0,
+sgst:
+  invoice.totals?.sgstTotal || 0,
 
-      igst_total:
-        invoice.totals?.igstTotal || 0,
+igst:
+  invoice.totals?.igstTotal || 0,
 
-      gst_total:
-        invoice.totals?.gstTotal || 0,
-
-      rounded_total:
-        invoice.totals?.rounded || 0,
+grand_total:
+  invoice.totals?.rounded || 0,
 
       payment_terms:
         invoice.paymentTerms || "",
