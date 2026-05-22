@@ -249,7 +249,9 @@ if (isEdit) {
 
 } else {
 
-  await supabase
+  const {
+  error: invoiceError
+} = await supabase
 
     .from("invoices")
 
@@ -350,6 +352,23 @@ if (isEdit) {
 
     }]);
 
+    if (invoiceError) {
+
+  console.log(
+    "INVOICE ERROR:",
+    invoiceError
+  );
+
+  return res.status(400).json({
+
+    success: false,
+
+    error:
+      invoiceError.message
+
+  });
+
+}
 }
 
 
