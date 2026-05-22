@@ -37,217 +37,454 @@ app.post(
       const invoice =
         req.body;
 
-      // =====================
-      // INSERT INVOICE
-      // =====================
+      
 
-      const {
-        data: invoiceData,
-        error: invoiceError
-      } = await supabase
 
-        .from("invoices")
+  const isEdit =
+  invoice.isEdit === true;
 
-        .insert([{
+  // =========================
+  // GENERATE INVOICE ID
+  // =========================
 
-          invoice_id:
-            invoice.invoiceId,
+  const companyCode =
 
-          invoice_number:
-            invoice.invoiceNumber,
+    String(
+      invoice.company?.company_code || ""
+    ).trim();
 
-          invoice_date:
-            invoice.invoiceDate,
 
-          customer_name:
-            invoice.customerName,
+  const clientCode =
 
-          customer_mobile:
-            invoice.customerMobile,
+    String(
+      invoice.customer?.client_code || ""
+    ).trim();
 
-          customer_gst:
-            invoice.customerGST,
+  const documentNumber =
 
-          billing_address:
-            invoice.billingAddress,
+  String(
 
-          shipping_address:
-            invoice.shippingAddress,
+    invoice.doc_type === "quotation"
 
-          state:
-            invoice.state,
+      ? invoice.Quote_No || ""
 
-          state_code:
-            invoice.stateCode,
+      : invoice.invoiceNumber || ""
 
-          subtotal:
-            invoice.subtotal,
+  ).trim();
 
-          cgst:
-            invoice.cgst,
+// INV/26-27/0018
+const parts =
+  documentNumber.split("/");
 
-          sgst:
-            invoice.sgst,
+  const fy =
+    parts[1]
+      ? parts[1].replace("-", "")
+      : "";
 
-          igst:
-            invoice.igst,
+  const sequence =
+    parts[2] || "";
 
-          gst_percent:
-            invoice.gstPercent,
+  const invoiceId =
 
-          grand_total:
-            invoice.grandTotal,
+  invoice.doc_type === "quotation"
 
-          payment_mode:
-            invoice.paymentMode,
+    ? `QT-${companyCode}-${clientCode}-${fy}-${sequence}`
 
-          notes:
-            invoice.notes,
+    : `${companyCode}-${clientCode}-${fy}-${sequence}`;
 
-          terms:
-            invoice.terms,
+const creditPeriod =
+  Number(invoice.creditPeriod || 0);
 
-          company_code:
-            invoice.company_code,
 
-          client_code:
-            invoice.client_code,
+// =========================
+// CALCULATE DUE DATE
+// =========================
+let dueDate =
 
-          billing_pincode:
-            invoice.billing_pincode,
+  invoice.doc_type === "quotation"
 
-          shipping_state:
-            invoice.shipping_state,
+    ? invoice.Quote_Dt || ""
 
-          shipping_state_code:
-            invoice.shipping_stateCode,
+    : invoice.invoiceDate || "";
 
-          shipping_pincode:
-            invoice.shipping_pincode,
+if (creditPeriod > 0) {
 
-          due_date:
-            invoice.due_date,
+ const date = new Date(
 
-          credit_period:
-            invoice.credit_period,
+  invoice.doc_type === "quotation"
 
-          status:
-            invoice.status,
+    ? invoice.Quote_Dt
 
-          doc_type:
-            invoice.doc_type,
+    : invoice.invoiceDate
 
-          quote_no:
-            invoice.Quote_No,
+);
 
-          quote_dt:
-            invoice.Quote_Dt
+  date.setDate(
+    date.getDate() + creditPeriod
+  );
 
-        }])
+ dueDate =
+  date
+    .toISOString()
+    .split("T")[0];
 
-        .select();
+}
 
-      if (invoiceError) {
+  // =========================
+  // SAVE MAIN INVOICE
+  // =========================
 
-        return res.status(400).json({
+ // =========================
+// UPDATE / SAVE MAIN INVOICE
+// =========================
 
-          success: false,
 
-          error:
-            invoiceError.message
+if (isEdit) {
 
-        });
+  await supabase
 
-      }
+    .from("invoices")
 
-      // =====================
-      // INSERT ITEMS
-      // =====================
+    .update({
 
-      if (
-        invoice.items &&
-        invoice.items.length > 0
-      ) {
+      invoice_number:
+        invoice.invoiceNumber || "",
 
-        const itemsData =
-          invoice.items.map(
-            (item) => ({
+      invoice_date:
+        invoice.invoiceDate || "",
 
-              invoice_id:
-                invoice.invoiceId,
+      customer_name:
+        invoice.customer?.name || "",
 
-              item_name:
-                item.itemName,
+      customer_mobile:
+        invoice.customer?.mobile || "",
 
-              hsn:
-                item.hsn,
+      customer_gst:
+        invoice.customer?.gstin || "",
 
-              qty:
-                item.qty,
+      billing_address:
+        invoice.customer?.billingAddress || "",
 
-              rate:
-                item.rate,
+      shipping_address:
+        invoice.customer?.shippingAddress || "",
 
-              gst_percent:
-                item.gstPercent,
+      state:
+        invoice.customer?.state || "",
 
-              taxable_amount:
-                item.taxableAmount,
+      state_code:
+        invoice.customer?.stateCode || "",
 
-              cgst:
-                item.cgst,
+      taxable_amount:
+        invoice.totals?.taxableAmount || 0,
 
-              sgst:
-                item.sgst,
+      cgst_total:
+        invoice.totals?.cgstTotal || 0,
 
-              igst:
-                item.igst,
+      sgst_total:
+        invoice.totals?.sgstTotal || 0,
 
-              total:
-                item.total,
+      igst_total:
+        invoice.totals?.igstTotal || 0,
 
-              disc_percent:
-                item.Disc_Percent,
+      gst_total:
+        invoice.totals?.gstTotal || 0,
 
-              disc_amt:
-                item.Disc_Amt,
+      rounded_total:
+        invoice.totals?.rounded || 0,
 
-              source:
-                item.source
+      payment_terms:
+        invoice.paymentTerms || "",
 
-            })
-          );
+      notes:
+        invoice.notes || "",
 
-        const {
-          error: itemsError
-        } = await supabase
+      terms:
+        invoice.terms || "",
 
-          .from("invoice_items")
+      company_code:
+        companyCode,
 
-          .insert(itemsData);
+      client_code:
+        clientCode,
 
-        if (itemsError) {
+      billing_pincode:
+        invoice.customer?.billingPincode || "",
 
-          return res.status(400).json({
+      shipping_state:
+        invoice.customer?.shippingState || "",
 
-            success: false,
+      shipping_state_code:
+        invoice.customer?.shippingStateCode || "",
 
-            error:
-              itemsError.message
+      shipping_pincode:
+        invoice.customer?.shippingPincode || "",
 
-          });
+      due_date:
+        dueDate,
 
-        }
+      credit_period:
+        creditPeriod,
 
-      }
+      status:
+        invoice.status || "",
 
-      return res.json({
+      doc_type:
+        invoice.doc_type || "invoice",
 
-        success: true,
+      quote_no:
+        invoice.Quote_No || "",
 
-        data: invoiceData
+      quote_dt:
+        invoice.Quote_Dt || ""
 
-      });
+    })
+
+    .eq(
+      "invoice_id",
+      invoiceId
+    );
+
+} else {
+
+  await supabase
+
+    .from("invoices")
+
+    .insert([{
+
+      invoice_id:
+        invoiceId,
+
+      invoice_number:
+        invoice.invoiceNumber || "",
+
+      invoice_date:
+        invoice.invoiceDate || "",
+
+      customer_name:
+        invoice.customer?.name || "",
+
+      customer_mobile:
+        invoice.customer?.mobile || "",
+
+      customer_gst:
+        invoice.customer?.gstin || "",
+
+      billing_address:
+        invoice.customer?.billingAddress || "",
+
+      shipping_address:
+        invoice.customer?.shippingAddress || "",
+
+      state:
+        invoice.customer?.state || "",
+
+      state_code:
+        invoice.customer?.stateCode || "",
+
+      taxable_amount:
+        invoice.totals?.taxableAmount || 0,
+
+      cgst_total:
+        invoice.totals?.cgstTotal || 0,
+
+      sgst_total:
+        invoice.totals?.sgstTotal || 0,
+
+      igst_total:
+        invoice.totals?.igstTotal || 0,
+
+      gst_total:
+        invoice.totals?.gstTotal || 0,
+
+      rounded_total:
+        invoice.totals?.rounded || 0,
+
+      payment_terms:
+        invoice.paymentTerms || "",
+
+      notes:
+        invoice.notes || "",
+
+      terms:
+        invoice.terms || "",
+
+      company_code:
+        companyCode,
+
+      client_code:
+        clientCode,
+
+      billing_pincode:
+        invoice.customer?.billingPincode || "",
+
+      shipping_state:
+        invoice.customer?.shippingState || "",
+
+      shipping_state_code:
+        invoice.customer?.shippingStateCode || "",
+
+      shipping_pincode:
+        invoice.customer?.shippingPincode || "",
+
+      due_date:
+        dueDate,
+
+      credit_period:
+        creditPeriod,
+
+      status:
+        invoice.status || "",
+
+      doc_type:
+        invoice.doc_type || "invoice",
+
+      quote_no:
+        invoice.Quote_No || "",
+
+      quote_dt:
+        invoice.Quote_Dt || ""
+
+    }]);
+
+}
+
+
+// =========================
+// DELETE OLD ITEMS ON EDIT
+// =========================
+
+if (isEdit) {
+
+  await supabase
+
+    .from("invoice_items")
+
+    .delete()
+
+    .eq(
+      "invoice_id",
+      invoiceId
+    );
+
+}
+
+  // =========================
+  // SAVE ITEMS
+  // =========================
+
+  const items = invoice.items || [];
+
+  for (const item of items) {
+
+    const qty =
+      Number(item.quantity || 0);
+
+    const rate =
+      Number(item.rate || 0);
+
+    const gstPct =
+      Number(item.gstPct || 0);
+
+    const discountPct =
+      Number(item.discountPct || 0);
+
+    const gross =
+      qty * rate;
+
+    const discountAmt =
+      gross * discountPct / 100;
+
+    const taxable =
+      gross - discountAmt;
+
+    const gstAmt =
+      taxable * gstPct / 100;
+
+    const isInterState =
+      invoice.isInterState || false;
+
+    const cgst =
+      isInterState
+        ? 0
+        : gstAmt / 2;
+
+    const sgst =
+      isInterState
+        ? 0
+        : gstAmt / 2;
+
+    const igst =
+      isInterState
+        ? gstAmt
+        : 0;
+
+    const total =
+      taxable + gstAmt;
+
+    await supabase
+
+  .from("invoice_items")
+
+  .insert([{
+
+    invoice_id:
+      invoiceId,
+
+    item_name:
+      item.name || "",
+
+    hsn:
+      String(item.hsn || ""),
+
+    qty:
+      qty,
+
+    rate:
+      rate,
+
+    gst_percent:
+      gstPct,
+
+    taxable_amount:
+      taxable,
+
+    cgst:
+      cgst,
+
+    sgst:
+      sgst,
+
+    igst:
+      igst,
+
+    total:
+      total,
+
+    disc_percent:
+      discountPct,
+
+    disc_amt:
+      discountAmt,
+
+    source:
+      item.invoiceMode || "free"
+
+  }]);
+
+ }
+
+
+  res.json({
+
+  success: true,
+
+  message:
+    "Invoice saved successfully",
+
+  invoiceId
+
+});
 
     }
 
