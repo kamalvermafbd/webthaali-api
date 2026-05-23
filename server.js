@@ -150,20 +150,20 @@ if (isEdit) {
 
     .update({
 
-      invoiceNumber:
-        invoice.invoiceNumber || "",
+     invoice_number:
+  invoice.invoiceNumber || "",
 
-      invoiceDate:
-        invoice.invoiceDate || "",
+invoice_date:
+  invoice.invoiceDate || "",
 
-      customerName:
-        invoice.customer?.name || "",
+customer_name:
+  invoice.customer?.name || "",
 
-      customerMobile:
-        invoice.customer?.mobile || "",
+customer_mobile:
+  invoice.customer?.mobile || "",
 
-      customerGST:
-        invoice.customer?.gstin || "",
+customer_gst:
+  invoice.customer?.gstin || "",
 
       billingAddress:
         invoice.customer?.billingAddress || "",
@@ -257,23 +257,23 @@ grandTotal:
 
     .insert([{
 
-invoiceId:
+invoice_id:
   invoiceId,
 
-      invoiceNumber:
-        invoice.invoiceNumber || "",
+invoice_number:
+  invoice.invoiceNumber || "",
 
-      invoiceDate:
-        invoice.invoiceDate || "",
+invoice_date:
+  invoice.invoiceDate || "",
 
-      customerName:
-        invoice.customer?.name || "",
+customer_name:
+  invoice.customer?.name || "",
 
-      customerMobile:
-        invoice.customer?.mobile || "",
+customer_mobile:
+  invoice.customer?.mobile || "",
 
-      customerGST:
-        invoice.customer?.gstin || "",
+customer_gst:
+  invoice.customer?.gstin || "",
 
       billingAddress:
         invoice.customer?.billingAddress || "",
