@@ -580,6 +580,7 @@ app.get(
           req.query.company_code || ""
         ).trim();
 
+        
       if (!invoiceId) {
 
         return res.status(400).json({
@@ -1630,6 +1631,487 @@ app.get(
   }
 );
 
+
+
+// =========================
+// POST INVOICE
+// =========================
+
+app.post(
+  "/postInvoice",
+  async (req, res) => {
+
+    try {
+
+      const invoiceId =
+
+        String(
+          req.body.invoiceId || ""
+        ).trim();
+
+      const company_code =
+
+        String(
+          req.body.company_code || ""
+        ).trim();
+
+      console.log(
+        "========================="
+      );
+
+      console.log(
+        "POST INVOICE HIT"
+      );
+
+      console.log(
+        "INVOICE ID:",
+        invoiceId
+      );
+
+      console.log(
+        "COMPANY CODE:",
+        company_code
+      );
+
+      if (!invoiceId) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "invoiceId missing"
+
+        });
+
+      }
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // GET CURRENT INVOICE
+      // =========================
+
+      const {
+        data: currentInvoice,
+        error: currentError
+      } = await supabase
+
+        .from("invoices")
+
+        .select("*")
+
+        .eq(
+          "invoice_id",
+          invoiceId
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .single();
+
+      if (currentError || !currentInvoice) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Invoice not found"
+
+        });
+
+      }
+
+      console.log(
+        "CURRENT INVOICE NUMBER:",
+        currentInvoice.invoice_number
+      );
+
+      console.log(
+        "CURRENT INVOICE DATE:",
+        currentInvoice.invoice_date
+      );
+
+      // =========================
+      // EXTRACT FY + SEQUENCE
+      // =========================
+
+      const currentParts =
+
+        String(
+          currentInvoice.invoice_number || ""
+        ).split("/");
+
+      const currentFY =
+        currentParts[1] || "";
+
+      const currentSequence =
+        currentParts[2] || "";
+
+      console.log(
+        "CURRENT FY:",
+        currentFY
+      );
+
+      console.log(
+        "CURRENT SEQUENCE:",
+        currentSequence
+      );
+
+      // =========================
+      // FIND DUPLICATE
+      // SAME COMPANY
+      // SAME FY
+      // SAME SEQUENCE
+      // POSTED ONLY
+      // =========================
+
+      const {
+        data: postedInvoices,
+        error: postedError
+      } = await supabase
+
+        .from("invoices")
+
+        .select(`
+          invoice_id,
+          invoice_number,
+          invoice_date,
+          status
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "status",
+          "Posted"
+        );
+
+      if (postedError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            postedError.message
+
+        });
+
+      }
+
+      let duplicateFound =
+        false;
+
+      let maxSequence = 0;
+
+      let latestPostedDate =
+
+        currentInvoice.invoice_date;
+
+      (postedInvoices || []).forEach((row) => {
+
+        const parts =
+
+          String(
+            row.invoice_number || ""
+          ).split("/");
+
+        const fy =
+          parts[1] || "";
+
+        const seq =
+          Number(parts[2] || 0);
+
+        // =========================
+        // SAME FY
+        // =========================
+
+        if (fy === currentFY) {
+
+          // latest sequence
+
+          maxSequence =
+            Math.max(
+              maxSequence,
+              seq
+            );
+
+          // latest invoice date
+
+          if (
+
+            row.invoice_date >
+
+            latestPostedDate
+
+          ) {
+
+            latestPostedDate =
+              row.invoice_date;
+
+          }
+
+          // duplicate sequence
+console.log(
+  "CHECKING SEQUENCE:",
+  seq,
+  currentSequence
+);
+          if (
+
+  Number(seq) ===
+  Number(currentSequence)
+
+)  {
+
+            duplicateFound =
+              true;
+
+          }
+
+        }
+
+      });
+
+      console.log(
+        "DUPLICATE FOUND:",
+        duplicateFound
+      );
+
+      console.log(
+        "MAX SEQUENCE:",
+        maxSequence
+      );
+
+      console.log(
+        "LATEST POSTED DATE:",
+        latestPostedDate
+      );
+
+      let finalInvoiceNumber =
+
+        currentInvoice.invoice_number;
+
+      let finalInvoiceDate =
+
+        currentInvoice.invoice_date;
+
+      // =========================
+      // DUPLICATE CASE
+      // =========================
+
+      if (duplicateFound) {
+
+        console.log(
+          "DUPLICATE CASE STARTED"
+        );
+
+        const {
+          data: company,
+          error: companyError
+        } = await supabase
+
+          .from("company")
+
+          .select("*")
+
+          .eq(
+            "company_code",
+            company_code
+          )
+
+          .single();
+
+        if (companyError || !company) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              "Company not found"
+
+          });
+
+        }
+
+        const prefix =
+
+          company.invoiceprefix || "INV";
+
+        const nextSequence =
+
+          maxSequence + 1;
+
+        finalInvoiceNumber =
+
+          `${prefix}/${currentFY}/${String(nextSequence).padStart(4, "0")}`;
+
+        finalInvoiceDate =
+          latestPostedDate;
+
+        console.log(
+          "NEW INVOICE NUMBER:",
+          finalInvoiceNumber
+        );
+
+        console.log(
+          "NEW INVOICE DATE:",
+          finalInvoiceDate
+        );
+
+        // =========================
+        // UPDATE INVOICE
+        // =========================
+
+        const {
+          error: updateError
+        } = await supabase
+
+          .from("invoices")
+
+          .update({
+
+            invoice_number:
+              finalInvoiceNumber,
+
+            invoice_date:
+              finalInvoiceDate
+
+          })
+
+          .eq(
+            "invoice_id",
+            invoiceId
+          )
+
+          .eq(
+            "company_code",
+            company_code
+          );
+
+        if (updateError) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              updateError.message
+
+          });
+
+        }
+
+      }
+
+      // =========================
+      // FINAL POST
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("invoices")
+
+        .update({
+
+          status:
+            "Posted"
+
+        })
+
+        .eq(
+          "invoice_id",
+          invoiceId
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .select();
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      console.log(
+        "FINAL POST SUCCESS"
+      );
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Invoice posted",
+
+        data: {
+
+          invoiceNumber:
+            finalInvoiceNumber,
+
+          invoiceDate:
+            finalInvoiceDate
+
+        }
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "POST ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
 
 app.listen(
   process.env.PORT,
