@@ -150,31 +150,31 @@ if (isEdit) {
 
     .update({
 
-      invoice_number:
+      invoiceNumber:
         invoice.invoiceNumber || "",
 
-      invoice_date:
+      invoiceDate:
         invoice.invoiceDate || "",
 
-      customer_name:
+      customerName:
         invoice.customer?.name || "",
 
-      customer_mobile:
+      customerMobile:
         invoice.customer?.mobile || "",
 
-      customer_gst:
+      customerGST:
         invoice.customer?.gstin || "",
 
-      billing_address:
+      billingAddress:
         invoice.customer?.billingAddress || "",
 
-      shipping_address:
+      shippingAddress:
         invoice.customer?.shippingAddress || "",
 
       state:
         invoice.customer?.state || "",
 
-      state_code:
+      stateCode:
         invoice.customer?.stateCode || "",
 
       subtotal:
@@ -189,11 +189,14 @@ sgst:
 igst:
   invoice.totals?.igstTotal || 0,
 
-grand_total:
+  gstPercent:
+  invoice.totals?.gstPercent || 0,
+
+grandTotal:
   invoice.totals?.rounded || 0,
 
-      payment_terms:
-        invoice.paymentTerms || "",
+ paymentMode:
+  invoice.paymentMode || "",     
 
       notes:
         invoice.notes || "",
@@ -213,7 +216,7 @@ grand_total:
       shipping_state:
         invoice.customer?.shippingState || "",
 
-      shipping_state_code:
+      shipping_stateCode:
         invoice.customer?.shippingStateCode || "",
 
       shipping_pincode:
@@ -231,16 +234,16 @@ grand_total:
       doc_type:
         invoice.doc_type || "invoice",
 
-      quote_no:
+      Quote_No:
         invoice.Quote_No || "",
 
-      quote_dt:
+      Quote_Dt:
         invoice.Quote_Dt || ""
 
     })
 
-    .eq(
-      "invoice_id",
+ .eq(
+  "invoiceId",
       invoiceId
     );
 
@@ -254,34 +257,34 @@ grand_total:
 
     .insert([{
 
-      invoice_id:
-        invoiceId,
+invoiceId:
+  invoiceId,
 
-      invoice_number:
+      invoiceNumber:
         invoice.invoiceNumber || "",
 
-      invoice_date:
+      invoiceDate:
         invoice.invoiceDate || "",
 
-      customer_name:
+      customerName:
         invoice.customer?.name || "",
 
-      customer_mobile:
+      customerMobile:
         invoice.customer?.mobile || "",
 
-      customer_gst:
+      customerGST:
         invoice.customer?.gstin || "",
 
-      billing_address:
+      billingAddress:
         invoice.customer?.billingAddress || "",
 
-      shipping_address:
+      shippingAddress:
         invoice.customer?.shippingAddress || "",
 
       state:
         invoice.customer?.state || "",
 
-      state_code:
+      stateCode:
         invoice.customer?.stateCode || "",
 
       subtotal:
@@ -296,12 +299,15 @@ sgst:
 igst:
   invoice.totals?.igstTotal || 0,
 
-grand_total:
+  gstPercent:
+  invoice.totals?.gstPercent || 0,
+
+grandTotal:
   invoice.totals?.rounded || 0,
 
-      payment_terms:
-        invoice.paymentTerms || "",
-
+  paymentMode:
+  invoice.paymentMode || "",
+   
       notes:
         invoice.notes || "",
 
@@ -320,7 +326,7 @@ grand_total:
       shipping_state:
         invoice.customer?.shippingState || "",
 
-      shipping_state_code:
+      shipping_stateCode:
         invoice.customer?.shippingStateCode || "",
 
       shipping_pincode:
@@ -338,10 +344,10 @@ grand_total:
       doc_type:
         invoice.doc_type || "invoice",
 
-      quote_no:
+      Quote_No:
         invoice.Quote_No || "",
 
-      quote_dt:
+      Quote_Dt:
         invoice.Quote_Dt || ""
 
     }]);
@@ -378,8 +384,8 @@ if (isEdit) {
 
     .delete()
 
-    .eq(
-      "invoice_id",
+  .eq(
+  "invoice_id",
       invoiceId
     );
 
@@ -444,8 +450,8 @@ if (isEdit) {
 
   .insert([{
 
-    invoice_id:
-      invoiceId,
+   invoice_id:
+  invoiceId,
 
     item_name:
       item.name || "",
