@@ -251,7 +251,9 @@ grand_total:
   invoice.Quote_No || "",
 
 quote_dt:
-  invoice.Quote_Dt || null
+  invoice.Quote_Dt || null,
+
+  
 
     })
 
@@ -665,6 +667,30 @@ const {
 
   .single();
 
+
+  console.log(
+  "COMPANY STATE CODE:",
+  company?.statecode
+);
+
+console.log(
+  "CUSTOMER STATE CODE:",
+  invoice.state_code
+);
+
+console.log(
+  "isInterState:",
+  String(
+    company?.statecode || ""
+  ).trim()
+
+  !==
+
+  String(
+    invoice.state_code || ""
+  ).trim()
+);
+
       // =========================
       // GET ITEMS
       // =========================
@@ -791,6 +817,18 @@ console.log(
 
           stateCode:
             invoice.state_code,
+          
+          isInterState:
+
+  String(
+    company?.statecode || ""
+  ).trim()
+
+  !==
+
+  String(
+    invoice.state_code || ""
+  ).trim(),  
 
           subtotal:
             invoice.subtotal,
@@ -858,7 +896,21 @@ console.log(
           Quote_Dt:
             invoice.quote_dt,
 
+transporter_name:
+  invoice.transporter_name,
 
+vehicle_no:
+  invoice.vehicle_no,
+
+driver_mobile:
+  invoice.driver_mobile,
+
+gr_rr_no:
+  invoice.gr_rr_no,
+
+eway_bill_no:
+  invoice.eway_bill_no,
+  
             company: {
 
 name:
@@ -880,7 +932,10 @@ name:
     company?.state || "",
 
   statecode:
-    company?.statecode || ""
+    company?.statecode || "",
+
+  pincode:
+  company?.pincode || ""  
 
 },
          items:
@@ -1601,8 +1656,23 @@ app.get(
           quote_no:
             row.quote_no,
 
-          quote_dt:
-            row.quote_dt
+         quote_dt:
+  row.quote_dt,
+
+transporter_name:
+  row.transporter_name,
+
+vehicle_no:
+  row.vehicle_no,
+
+driver_mobile:
+  row.driver_mobile,
+
+gr_rr_no:
+  row.gr_rr_no,
+
+eway_bill_no:
+  row.eway_bill_no
 
         }));
 
@@ -1632,6 +1702,134 @@ app.get(
 );
 
 
+// =========================
+// UPDATE TRANSPORT
+// =========================
+
+app.post(
+  "/updateTransport",
+
+  async (req, res) => {
+
+    try {
+
+      console.log(
+        "UPDATE TRANSPORT BODY:",
+        req.body
+      );
+
+      const invoiceId =
+
+        String(
+          req.body.invoiceId || ""
+        ).trim();
+
+      const company_code =
+
+        String(
+          req.body.company_code || ""
+        ).trim();
+
+      if (!invoiceId) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "invoiceId missing"
+
+        });
+
+      }
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+        error
+      } = await supabase
+
+        .from("invoices")
+
+        .update({
+
+          transporter_name:
+            req.body.transporter_name || "",
+
+          vehicle_no:
+            req.body.vehicle_no || "",
+
+          driver_mobile:
+            req.body.driver_mobile || "",
+
+          gr_rr_no:
+            req.body.gr_rr_no || "",
+
+          eway_bill_no:
+            req.body.eway_bill_no || ""
+
+        })
+
+        .eq(
+          "invoice_id",
+          invoiceId
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Transport updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
 
 // =========================
 // POST INVOICE
@@ -2096,6 +2294,589 @@ console.log(
 
       console.log(
         "POST ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+
+// =========================
+// GET CLIENTS
+// =========================
+
+app.get(
+  "/getClients",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      console.log(
+        "GET CLIENTS API HIT"
+      );
+
+      console.log(
+        "COMPANY CODE:",
+        company_code
+      );
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH CLIENTS
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("client")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "created_at",
+          {
+            ascending: false
+          }
+        );
+
+      console.log(
+        "RAW CLIENT DATA:",
+        data
+      );
+
+      if (error) {
+
+        console.log(
+          "GET CLIENTS ERROR:",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESPONSE
+      // =========================
+
+      const result =
+
+        (data || []).map((row) => ({
+
+          company_code:
+            String(
+              row.company_code || ""
+            ),
+
+          client_code:
+            String(
+              row.client_code || ""
+            ),
+
+          client_name:
+            row.client_name || "",
+
+          gstin:
+            row.gstin || "",
+
+          billing_address:
+            row.billing_address || "",
+
+          bill_state:
+            row.bill_state || "",
+
+          bill_stateCode:
+            String(
+              row.bill_statecode || ""
+            ),
+
+          bill_pincode:
+            String(
+              row.bill_pincode || ""
+            ),
+
+          mobile:
+            String(
+              row.mobile || ""
+            ),
+
+          email:
+            row.email || "",
+
+          same_address:
+            row.same_address || "",
+
+          shipping_address:
+            row.shipping_address || "",
+
+          shipping_state:
+            row.shipping_state || "",
+
+          shipping_stateCode:
+            String(
+              row.shipping_statecode || ""
+            ),
+
+          shipping_pincode:
+            String(
+              row.shipping_pincode || ""
+            ),
+
+          createdAt:
+            row.created_at || "",
+
+          updatedAt:
+            row.updated_at || "",
+
+          is_active:
+            row.is_active,
+
+          contact_person:
+            row.contact_person || "",
+
+          credit_limit:
+            row.credit_limit || 0,
+
+          opening_balance:
+            row.opening_balance || 0,
+
+          remarks:
+            row.remarks || "",
+
+          credit_period:
+            row.credit_period || 0
+
+        }));
+
+      console.log(
+        "FINAL CLIENT RESPONSE:",
+        result
+      );
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "GET CLIENTS CATCH ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// SAVE CLIENT
+// =========================
+
+app.post(
+  "/saveClient",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      console.log(
+        "SAVE CLIENT API HIT"
+      );
+
+      console.log(
+        "REQ BODY:",
+        body
+      );
+
+      // =========================
+      // COMPANY CODE
+      // =========================
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH ALL CLIENTS
+      // =========================
+
+      const {
+        data: allClients,
+        error: fetchError
+      } = await supabase
+
+        .from("client")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        console.log(
+          "FETCH CLIENT ERROR:",
+          fetchError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      console.log(
+        "ALL CLIENTS:",
+        allClients
+      );
+
+      // =========================
+      // DUPLICATE GST CHECK
+      // =========================
+
+      const duplicateGST =
+
+        (allClients || []).find((row) => {
+
+          return (
+
+            String(
+              row.gstin || ""
+            )
+              .trim()
+              .toUpperCase()
+
+            ===
+
+            String(
+              body.gstin || ""
+            )
+              .trim()
+              .toUpperCase()
+
+          );
+
+        });
+
+      if (duplicateGST) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Client with same GSTIN already exists"
+
+        });
+
+      }
+
+      // =========================
+      // GENERATE CLIENT CODE
+      // =========================
+
+      let maxNumber = 0;
+
+      (allClients || []).forEach((row) => {
+
+        const code =
+
+          String(
+            row.client_code || ""
+          );
+
+        const num =
+
+          parseInt(
+            code.replace("CL", "")
+          );
+
+        if (!isNaN(num)) {
+
+          maxNumber =
+
+            Math.max(
+              maxNumber,
+              num
+            );
+
+        }
+
+      });
+
+      const nextClientCode =
+
+        "CL" +
+
+        String(maxNumber + 1)
+          .padStart(4, "0");
+
+      console.log(
+        "NEXT CLIENT CODE:",
+        nextClientCode
+      );
+
+      // =========================
+      // FALLBACK DUPLICATE
+      // =========================
+
+      const duplicateClientCode =
+
+        (allClients || []).find((row) => {
+
+          return (
+
+            String(
+              row.client_code || ""
+            ).trim()
+
+            ===
+
+            nextClientCode
+
+          );
+
+        });
+
+      if (duplicateClientCode) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Client code already exists. Please save again."
+
+        });
+
+      }
+
+      // =========================
+      // INSERT CLIENT
+      // =========================
+
+      const insertObj = {
+
+        company_code:
+          company_code,
+
+        client_code:
+          nextClientCode,
+
+        client_name:
+          body.client_name || "",
+
+        gstin:
+          body.gstin || "",
+
+        billing_address:
+          body.billing_address || "",
+
+        bill_state:
+          body.bill_state || "",
+
+        bill_statecode:
+          body.bill_stateCode || "",
+
+        bill_pincode:
+          body.bill_pincode || "",
+
+        mobile:
+          body.mobile || "",
+
+        email:
+          body.email || "",
+
+        same_address:
+          body.same_address || "",
+
+        shipping_address:
+          body.shipping_address || "",
+
+        shipping_state:
+          body.shipping_state || "",
+
+        shipping_statecode:
+          body.shipping_stateCode || "",
+
+        shipping_pincode:
+          body.shipping_pincode || "",
+
+        created_at:
+          new Date(),
+
+        updated_at:
+          new Date(),
+
+        is_active:
+
+          body.is_active !== false,
+
+        contact_person:
+          body.contact_person || "",
+
+        credit_limit:
+          Number(
+            body.credit_limit || 0
+          ),
+
+        opening_balance:
+          Number(
+            body.opening_balance || 0
+          ),
+
+        remarks:
+          body.remarks || "",
+
+        credit_period:
+          Number(
+            body.credit_period || 0
+          )
+
+      };
+
+      console.log(
+        "FINAL INSERT OBJECT:",
+        insertObj
+      );
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("client")
+
+        .insert([
+
+          insertObj
+
+        ]);
+
+      if (insertError) {
+
+        console.log(
+          "INSERT ERROR:",
+          insertError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      console.log(
+        "CLIENT SAVED SUCCESS"
+      );
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Client saved successfully",
+
+        client_code:
+          nextClientCode
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "SAVE CLIENT ERROR:",
         err
       );
 
