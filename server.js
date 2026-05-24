@@ -496,6 +496,14 @@ if (isEdit) {
     unit:
   item.unit || "",
 
+  packingqty:
+  Number(
+    item.packingQty || 0
+  ),
+
+packingunit:
+  item.packingUnit || "",
+
     rate:
       rate,
 
@@ -750,6 +758,12 @@ console.log(
      unit:
       item.unit,
 
+      packingQty:
+  item.packingqty,
+
+packingUnit:
+  item.packingunit,
+
     rate:
       item.rate,
 
@@ -957,6 +971,13 @@ name:
     unit:
       item.unit,
 
+     packingQty:
+      Number(
+        item.packingqty || 0
+      ),
+
+    packingUnit:
+      item.packingunit || "",
 
     rate:
       item.rate,
