@@ -1810,7 +1810,10 @@ gr_rr_no:
   row.gr_rr_no,
 
 eway_bill_no:
-  row.eway_bill_no
+  row.eway_bill_no,
+
+share_token:
+  row.share_token
 
         }));
 
