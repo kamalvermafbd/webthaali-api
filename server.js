@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
+const crypto = require("crypto");
 
 const {
   createClient
@@ -289,6 +290,10 @@ quote_dt:
 
 invoice_id:
   invoiceId,
+
+share_token:
+  crypto.randomBytes(16).toString("hex"),
+
 
 invoice_number:
   invoice.invoiceNumber || "",
@@ -1033,6 +1038,118 @@ name:
   }
 );
 
+
+app.get(
+  "/publicInvoice/:token",
+
+  async (req, res) => {
+
+    try {
+
+      const token =
+
+        String(
+          req.params.token || ""
+        ).trim();
+
+      if (!token) {
+
+        return res.json({
+
+          success: false,
+
+          error: "token missing"
+
+        });
+
+      }
+
+      const {
+        data: invoice,
+        error: invoiceError
+      } = await supabase
+
+        .from("invoices")
+
+        .select("*")
+
+        .eq(
+          "share_token",
+          token
+        )
+
+        .single();
+
+      if (invoiceError || !invoice) {
+
+        return res.json({
+
+          success: false,
+
+          error: "Invoice not found"
+
+        });
+
+      }
+
+      const {
+        data: company
+      } = await supabase
+
+        .from("company")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          invoice.company_code
+        )
+
+        .single();
+
+      const {
+        data: items
+      } = await supabase
+
+        .from("invoice_items")
+
+        .select("*")
+
+        .eq(
+          "invoice_id",
+          invoice.invoice_id
+        );
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          invoice,
+          company,
+          items
+
+        }
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error: err.message
+
+      });
+
+    }
+
+  }
+);
 
 app.get("/api/getNextInvoiceNumber", async (req, res) => {
 
