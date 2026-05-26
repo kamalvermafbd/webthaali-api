@@ -7303,6 +7303,2145 @@ app.post(
 );
 
 
+// =========================
+// GENERATE VARIANT ROWS
+// =========================
+
+async function generateVariantRows(
+  materialId,
+  variantCode,
+  body,
+  packaging
+) {
+
+  const rows = [];
+
+  // =========================
+  // GET LAST ROW ID
+  // =========================
+
+  const {
+    data: lastVariant
+  } = await supabase
+
+    .from("variant")
+
+    .select("row_id")
+
+    .order(
+      "row_id",
+      {
+        ascending: false
+      }
+    )
+
+    .limit(1)
+
+    .single();
+
+  let rowId =
+
+    lastVariant?.row_id
+
+      ? Number(
+          lastVariant.row_id
+        ) + 1
+
+      : 1;
+
+  // =========================
+  // LOOP PACKAGING
+  // =========================
+
+  packaging.forEach((p) => {
+
+    // =========================
+    // FINAL MULTIPLIER
+    // =========================
+
+    let finalMultiplier = 1;
+
+    const currentIndex =
+
+      packaging.findIndex(
+        row =>
+          row.variant === p.variant
+      );
+
+    for (
+      let i = currentIndex;
+      i < packaging.length;
+      i++
+    ) {
+
+      finalMultiplier =
+
+        finalMultiplier *
+
+        Number(
+          packaging[i].qty || 1
+        );
+
+    }
+
+    // =========================
+    // DESCRIPTION
+    // =========================
+
+    const cleanPackaging =
+
+      String(
+        p.item_packaging || ""
+      ).trim();
+
+    const parentItemName =
+
+      String(
+        body.item_name || ""
+      ).trim();
+
+    const description =
+
+      String(
+        body.measurement || ""
+      )
+        .toLowerCase() === "weight"
+
+        ? cleanPackaging
+            .toLowerCase()
+            .startsWith(
+              parentItemName
+                .trim()
+                .toLowerCase()
+            )
+
+            ? cleanPackaging
+
+            : `${parentItemName}-${cleanPackaging}`
+
+        : body.item_name || "";
+
+    // =========================
+    // PUSH ROW
+    // =========================
+
+    rows.push({
+
+      row_id:
+        rowId++,
+
+      material_id:
+        materialId,
+
+      variant_code:
+        variantCode,
+
+      item_name:
+        parentItemName,
+
+      measurement:
+        body.measurement || "",
+
+      item_packaging:
+        p.item_packaging || "",
+
+      description:
+        description,
+
+      variant:
+        p.variant || "",
+
+      sub_variant:
+        p.sub_variant || "",
+
+      qty:
+        Number(p.qty || 1),
+
+      final_multiplier:
+        finalMultiplier,
+
+      base_unit:
+        body.base_unit || "",
+
+      purchase_rate:
+        Number(body.purchase_rate || 0),
+
+      mrp:
+        Number(p.mrp || 0),
+
+      disc_percent:
+  Number(
+    p.Disc_Percent
+    ?? p.disc_percent
+    ?? 0
+  ),
+
+disc_amt:
+  Number(
+    p.Disc_Amt
+    ?? p.disc_amt
+    ?? 0
+  ),
+
+      selling_rate:
+        Number(p.selling_rate || 0),
+
+      opening_stock:
+        Number(body.opening_stock || 0),
+
+      purchase: 0,
+
+      sale: 0,
+
+      retrun: 0,
+
+      closing:
+        Number(body.opening_stock || 0),
+
+      min_stock:
+        Number(body.min_stock || 0),
+
+      barcode: "",
+
+      sku: "",
+
+      item_type:
+        body.item_type || "Goods",
+
+      batch_required:
+        false,
+
+      expiry_required:
+        false,
+
+      serial_required:
+        false,
+
+      is_active:
+        true,
+
+      remarks: "",
+
+      created_at:
+        new Date(),
+
+      updated_at:
+        new Date(),
+
+      company_code:
+        body.company_code || "",
+
+      branch_id:
+        body.branch_id || ""
+
+    });
+
+  });
+
+  return rows;
+
+}
+
+
+
+// =========================
+// SAVE MATERIAL
+// =========================
+
+app.post(
+  "/saveMaterial",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!body.company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const {
+        data: existingItems,
+        error: fetchError
+      } = await supabase
+
+        .from("mm")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          body.company_code
+        )
+
+        .eq(
+          "branch_id",
+          body.branch_id || ""
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      const duplicateItem =
+
+        (existingItems || []).find((row) => {
+
+          return (
+
+            String(
+              row.item_name || ""
+            )
+              .trim()
+              .toUpperCase()
+
+            ===
+
+            String(
+              body.item_name || ""
+            )
+              .trim()
+              .toUpperCase()
+
+          );
+
+        });
+
+      if (duplicateItem) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Item already exists for this branch"
+
+        });
+
+      }
+
+      // =========================
+      // NEXT MATERIAL ID
+      // =========================
+
+      const {
+        data: lastMaterial
+      } = await supabase
+
+        .from("mm")
+
+        .select("material_id")
+
+        .order(
+          "material_id",
+          {
+            ascending: false
+          }
+        )
+
+        .limit(1)
+
+        .single();
+
+      const materialId =
+
+        lastMaterial?.material_id
+
+          ? Number(
+              lastMaterial.material_id
+            ) + 1
+
+          : 1;
+
+      // =========================
+      // ITEM NUMBER
+      // =========================
+
+      let itemNumber = 1;
+
+      const companyRows =
+
+        (existingItems || []).filter(
+          row =>
+
+            String(
+              row.company_code || ""
+            ).trim()
+
+            ===
+
+            String(
+              body.company_code || ""
+            ).trim()
+        );
+
+      if (companyRows.length > 0) {
+
+        let maxItem = 0;
+
+        companyRows.forEach((row) => {
+
+          const code =
+
+            String(
+              row.item_code || ""
+            );
+
+          const num =
+
+            parseInt(
+              code.replace("ITM", "")
+            );
+
+          if (!isNaN(num)) {
+
+            maxItem =
+
+              Math.max(
+                maxItem,
+                num
+              );
+
+          }
+
+        });
+
+        itemNumber = maxItem + 1;
+
+      }
+
+      // =========================
+      // AUTO ITEM CODE
+      // =========================
+
+      const itemCode =
+
+        "ITM" +
+
+        String(itemNumber)
+          .padStart(3, "0");
+
+      // =========================
+      // BLOCK VARIANT MODE
+      // =========================
+
+      if (
+        body.mode ===
+        "add_variant"
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Variant mode cannot create material"
+
+        });
+
+      }
+
+      // =========================
+      // SAVE MM
+      // =========================
+
+      const insertObj = {
+
+        material_id:
+          materialId,
+
+        item_code:
+          itemCode,
+
+        mat_type:
+          body.mat_type || "",
+
+        item_name:
+          body.item_name || "",
+
+        short_name:
+          body.short_name || "",
+
+        measurement:
+          body.measurement || "",
+
+        category:
+          body.category || "",
+
+        sub_category:
+          body.sub_category || "",
+
+        brand:
+          body.brand || "",
+
+        hsn_code:
+          String(
+            body.hsn_code || ""
+          ),
+
+        gst_percent:
+          Number(
+            body.gst_percent || 0
+          ),
+
+        cess_percent:
+          Number(
+            body.cess_percent || 0
+          ),
+
+        base_unit:
+          body.base_unit || "",
+
+        purchase_rate:
+          Number(
+            body.purchase_rate || 0
+          ),
+
+        mrp:
+          Number(
+            body.mrp || 0
+          ),
+
+        disc_percent:
+  Number(
+    body.Disc_Percent
+    ?? body.disc_percent
+    ?? body.discount_percent
+    ?? 0
+  ),
+
+disc_amt:
+  Number(
+    body.Disc_Amt
+    ?? body.disc_amt
+    ?? body.discount_amount
+    ?? 0
+  ),
+
+        sale_rate:
+          Number(
+            body.sale_rate || 0
+          ),
+
+        opening_stock:
+          Number(
+            body.opening_stock || 0
+          ),
+
+        purchase: 0,
+
+        sale: 0,
+
+        retrun: 0,
+
+        closing:
+          Number(
+            body.opening_stock || 0
+          ),
+
+        min_stock:
+          Number(
+            body.min_stock || 0
+          ),
+
+        barcode:
+          body.barcode || "",
+
+        sku:
+          body.sku || "",
+
+        item_type:
+          body.item_type || "Goods",
+
+        batch_required:
+          body.batch_required || false,
+
+        expiry_required:
+          body.expiry_required || false,
+
+        serial_required:
+          body.serial_required || false,
+
+        is_active:
+          true,
+
+        remarks:
+          body.remarks || "",
+
+        created_at:
+          new Date(),
+
+        updated_at:
+          new Date(),
+
+        company_code:
+          body.company_code || "",
+
+        branch_id:
+          body.branch_id || "",
+
+        image_url:
+          body.image_url || ""
+
+      };
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("mm")
+
+        .insert([
+
+          insertObj
+
+        ]);
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      // =========================
+      // GENERATE VARIANTS
+      // =========================
+
+      const packaging =
+        body.packaging || [];
+
+      const variantRows =
+
+        await generateVariantRows(
+
+          materialId,
+
+          `${materialId}A`,
+
+          body,
+
+          packaging
+
+        );
+
+      // =========================
+      // SAVE VARIANTS
+      // =========================
+
+      if (variantRows.length > 0) {
+
+        const {
+          error: variantError
+        } = await supabase
+
+          .from("variant")
+
+          .insert(
+            variantRows
+          );
+
+        if (variantError) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              variantError.message
+
+          });
+
+        }
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        material_id:
+          materialId,
+
+        item_code:
+          itemCode,
+
+        message:
+          "Material saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// UPDATE SINGLE MATERIAL
+// =========================
+
+app.post(
+  "/updateSingleMaterial",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!body.material_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      if (!body.company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FIND MATERIAL
+      // =========================
+
+      const {
+        data: material,
+        error: materialError
+      } = await supabase
+
+        .from("mm")
+
+        .select("*")
+
+        .eq(
+          "material_id",
+          Number(body.material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        )
+
+        .single();
+
+      if (materialError || !material) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Material not found"
+
+        });
+
+      }
+
+      // =========================
+      // CHECK VARIANTS
+      // =========================
+
+      const {
+        data: variants,
+        error: variantError
+      } = await supabase
+
+        .from("variant")
+
+        .select("row_id")
+
+        .eq(
+          "material_id",
+          Number(body.material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        );
+
+      if (variantError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            variantError.message
+
+        });
+
+      }
+
+      const hasVariants =
+
+        (variants || []).length > 0;
+
+      // =========================
+      // PREVENT TYPE CHANGE
+      // =========================
+
+      if (hasVariants) {
+
+        const currentType =
+
+          String(
+            material.mat_type || ""
+          ).trim();
+
+        if (
+
+          currentType !==
+
+          String(
+            body.mat_type || ""
+          ).trim()
+
+        ) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              "Material type cannot change because variants exist"
+
+          });
+
+        }
+
+      }
+
+      // =========================
+      // UPDATE MM
+      // =========================
+
+      const updateObj = {
+
+        mat_type:
+          body.mat_type || "",
+
+        item_name:
+          body.item_name || "",
+
+        measurement:
+          body.measurement || "",
+
+        category:
+          body.category || "",
+
+        sub_category:
+          body.sub_category || "",
+
+        brand:
+          body.brand || "",
+
+        hsn_code:
+          String(
+            body.hsn_code || ""
+          ),
+
+        gst_percent:
+          Number(
+            body.gst_percent || 0
+          ),
+
+        base_unit:
+          body.base_unit || "",
+
+        mrp:
+          Number(
+            body.mrp || 0
+          ),
+
+        disc_percent:
+          Number(
+
+            body.Disc_Percent
+
+            ?? body.disc_percent
+
+            ?? body.discount_percent
+
+            ?? 0
+
+          ),
+
+        disc_amt:
+          Number(
+
+            body.Disc_Amt
+
+            ?? body.disc_amt
+
+            ?? body.discount_amount
+
+            ?? 0
+
+          ),
+
+        sale_rate:
+          Number(
+            body.sale_rate || 0
+          ),
+
+        updated_at:
+          new Date(),
+
+      };
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("mm")
+
+        .update(updateObj)
+
+        .eq(
+          "material_id",
+          Number(body.material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Material updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// ADD MATERIAL VARIANT
+// =========================
+
+app.post(
+  "/addMaterialVariant",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!body.material_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      if (!body.company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FIND MATERIAL
+      // =========================
+
+      const {
+        data: material,
+        error: materialError
+      } = await supabase
+
+        .from("mm")
+
+        .select("*")
+
+        .eq(
+          "material_id",
+          Number(body.material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        )
+
+        .single();
+
+      if (materialError || !material) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Material not found"
+
+        });
+
+      }
+
+      // =========================
+      // EXISTING ITEM CODE
+      // =========================
+
+      const materialId =
+        Number(body.material_id);
+
+      const itemCode =
+        String(
+          material.item_code || ""
+        );
+
+      const parentItemName =
+        String(
+          material.item_name || ""
+        ).trim();
+
+      // =========================
+      // DUPLICATE VARIANT CHECK
+      // =========================
+
+      const newDescription =
+
+        `${parentItemName}-${body.variant_label}`
+          .trim()
+          .toUpperCase();
+
+      const {
+        data: existingVariants,
+        error: variantError
+      } = await supabase
+
+        .from("variant")
+
+        .select("*")
+
+        .eq(
+          "material_id",
+          materialId
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        );
+
+      if (variantError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            variantError.message
+
+        });
+
+      }
+
+      const duplicateVariant =
+
+        (existingVariants || []).find(
+          (row) =>
+
+            String(
+              row.description || ""
+            )
+              .trim()
+              .toUpperCase()
+
+            ===
+
+            newDescription
+        );
+
+      if (duplicateVariant) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Variant already exists"
+
+        });
+
+      }
+
+      // =========================
+      // PREPARE PACKAGING
+      // =========================
+
+      const packaging =
+        body.packaging || [];
+
+      body.item_name =
+        parentItemName;
+
+      body.packaging =
+
+        packaging.map((row) => ({
+
+          ...row,
+
+          item_packaging:
+            body.variant_label || ""
+
+        }));
+
+      // =========================
+      // GENERATE VARIANT CODE
+      // =========================
+
+      const existingVariantCodes =
+
+        (existingVariants || []).map(
+          (row) =>
+
+            String(
+              row.variant_code || ""
+            )
+        );
+
+      let nextLetter = "A";
+
+      while (
+
+        existingVariantCodes.includes(
+          `${materialId}${nextLetter}`
+        )
+
+      ) {
+
+        nextLetter =
+
+          String.fromCharCode(
+
+            nextLetter.charCodeAt(0) + 1
+
+          );
+
+      }
+
+      const variantCode =
+
+        `${materialId}${nextLetter}`;
+
+      // =========================
+      // GENERATE VARIANT ROWS
+      // =========================
+
+      const variantRows =
+
+        await generateVariantRows(
+
+          materialId,
+
+          variantCode,
+
+          body,
+
+          body.packaging
+
+        );
+
+      // =========================
+      // INSERT VARIANTS
+      // =========================
+
+      if (variantRows.length > 0) {
+
+        const {
+          error: insertError
+        } = await supabase
+
+          .from("variant")
+
+          .insert(variantRows);
+
+        if (insertError) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              insertError.message
+
+          });
+
+        }
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        material_id:
+          materialId,
+
+        item_code:
+          itemCode,
+
+        message:
+          "Variant added successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// UPDATE MATERIAL HIERARCHY
+// =========================
+
+app.post(
+  "/updateMaterialHierarchy",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!body.company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!body.material_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      // =========================
+      // FIND MATERIAL
+      // =========================
+
+      const {
+        data: material,
+        error: materialError
+      } = await supabase
+
+        .from("mm")
+
+        .select("*")
+
+        .eq(
+          "material_id",
+          Number(body.material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        )
+
+        .single();
+
+      if (materialError || !material) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Material not found"
+
+        });
+
+      }
+
+      // =========================
+      // GET ITEM CODE
+      // =========================
+
+      const materialId =
+        Number(body.material_id);
+
+      const itemCode =
+        String(
+          material.item_code || ""
+        );
+
+      const variantCode =
+
+        String(
+          body.variant_code || ""
+        ).trim();
+
+      // =========================
+      // UPDATE MM
+      // =========================
+
+      const updateObj = {
+
+        mat_type:
+          body.mat_type || "",
+
+        base_unit:
+          body.base_unit || "",
+
+        mrp:
+          Number(
+            body.mrp || 0
+          ),
+
+        disc_percent:
+          Number(
+
+            body.Disc_Percent
+
+            ?? body.disc_percent
+
+            ?? body.discount_percent
+
+            ?? 0
+
+          ),
+
+        disc_amt:
+          Number(
+
+            body.Disc_Amt
+
+            ?? body.disc_amt
+
+            ?? body.discount_amount
+
+            ?? 0
+
+          ),
+
+        sale_rate:
+          Number(
+            body.sale_rate || 0
+          ),
+
+        updated_at:
+          new Date(),
+
+      };
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("mm")
+
+        .update(updateObj)
+
+        .eq(
+          "material_id",
+          materialId
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      // =========================
+      // DELETE OLD VARIANTS
+      // =========================
+
+      const {
+        error: deleteError
+      } = await supabase
+
+        .from("variant")
+
+        .delete()
+
+        .eq(
+          "variant_code",
+          variantCode
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        )
+
+        .eq(
+          "material_id",
+          materialId
+        );
+
+      if (deleteError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            deleteError.message
+
+        });
+
+      }
+
+      // =========================
+      // GENERATE NEW VARIANTS
+      // =========================
+
+      const packaging =
+        body.packaging || [];
+
+      const variantRows =
+
+        await generateVariantRows(
+
+          materialId,
+
+          variantCode,
+
+          body,
+
+          packaging
+
+        );
+
+      // =========================
+      // INSERT NEW VARIANTS
+      // =========================
+
+      if (variantRows.length > 0) {
+
+        const {
+          error: insertError
+        } = await supabase
+
+          .from("variant")
+
+          .insert(variantRows);
+
+        if (insertError) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              insertError.message
+
+          });
+
+        }
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        material_id:
+          materialId,
+
+        item_code:
+          itemCode,
+
+        message:
+          "Hierarchy updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// GET MATERIALS
+// =========================
+
+app.get(
+  "/getMaterials",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH MATERIALS
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("mm")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "material_id",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FORMAT RESULT
+      // =========================
+
+      const result =
+
+        (data || []).map((row) => {
+
+          return {
+
+            ...row,
+
+                // =========================
+      // DISCOUNT FIELDS
+      // =========================
+
+      Disc_Percent:
+        Number(
+          row.disc_percent || 0
+        ),
+
+      Disc_Amt:
+        Number(
+          row.disc_amt || 0
+        ),
+
+    
+            item_code:
+              String(
+                row.item_code || ""
+              ),
+
+            hsn_code:
+              String(
+                row.hsn_code || ""
+              ),
+
+            barcode:
+              String(
+                row.barcode || ""
+              ),
+
+            sku:
+              String(
+                row.sku || ""
+              ),
+
+            company_code:
+              String(
+                row.company_code || ""
+              ),
+
+            branch_id:
+              String(
+                row.branch_id || ""
+              ),
+
+
+
+          };
+
+        });
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// GET MATERIAL VARIANTS
+// =========================
+
+app.get(
+  "/getMaterialVariants",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      const material_id =
+
+        String(
+          req.query.material_id || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!material_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH VARIANTS
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("variant")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "material_id",
+          Number(material_id)
+        )
+
+        .order(
+          "row_id",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FORMAT RESULT
+      // =========================
+
+      const result =
+
+        (data || []).map((row) => {
+
+          return {
+
+            // =========================
+            // RAW DATA
+            // =========================
+
+            ...row,
+
+                // =========================
+      // DISCOUNT FIELDS
+      // =========================
+
+      Disc_Percent:
+        Number(
+          row.disc_percent || 0
+        ),
+
+      Disc_Amt:
+        Number(
+          row.disc_amt || 0
+        ),
+
+            // =========================
+            // SAFE STRING FIELDS
+            // =========================
+
+            material_id:
+              String(
+                row.material_id || ""
+              ),
+
+            variant_code:
+              String(
+                row.variant_code || ""
+              ),
+
+            barcode:
+              String(
+                row.barcode || ""
+              ),
+
+            sku:
+              String(
+                row.sku || ""
+              ),
+
+            company_code:
+              String(
+                row.company_code || ""
+              ),
+
+            branch_id:
+              String(
+                row.branch_id || ""
+              ),
+
+            item_name:
+              String(
+                row.item_name || ""
+              ),
+
+            description:
+              String(
+                row.description || ""
+              ),
+
+            variant:
+              String(
+                row.variant || ""
+              ),
+
+            sub_variant:
+              String(
+                row.sub_variant || ""
+              ),
+
+            item_packaging:
+              String(
+                row.item_packaging || ""
+              ),
+
+            // =========================
+            // SAFE NUMBER FIELDS
+            // =========================
+
+            Qty:
+              Number(
+                row.qty || 0
+              ),
+
+            final_multiplier:
+              Number(
+                row.final_multiplier || 0
+              ),
+
+            mrp:
+              Number(
+                row.mrp || 0
+              ),
+
+            purchase_rate:
+              Number(
+                row.purchase_rate || 0
+              ),
+
+            selling_rate:
+              Number(
+                row.selling_rate || 0
+              ),
+
+            Disc_Percent:
+              Number(
+                row.disc_percent || 0
+              ),
+
+            Disc_Amt:
+              Number(
+                row.disc_amt || 0
+              ),
+
+            opening_stock:
+              Number(
+                row.opening_stock || 0
+              ),
+
+            purchase:
+              Number(
+                row.purchase || 0
+              ),
+
+            sale:
+              Number(
+                row.sale || 0
+              ),
+
+            retrun:
+              Number(
+                row.retrun || 0
+              ),
+
+            closing:
+              Number(
+                row.closing || 0
+              ),
+
+            min_stock:
+              Number(
+                row.min_stock || 0
+              ),
+
+            // =========================
+            // SAFE BOOLEAN FIELDS
+            // =========================
+
+            batch_required:
+              Boolean(
+                row.batch_required
+              ),
+
+            expiry_required:
+              Boolean(
+                row.expiry_required
+              ),
+
+            serial_required:
+              Boolean(
+                row.serial_required
+              ),
+
+            is_active:
+              Boolean(
+                row.is_active
+              ),
+
+          };
+
+        });
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
 app.listen(
   process.env.PORT,
   () => {
