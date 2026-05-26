@@ -3035,6 +3035,1104 @@ app.post(
   }
 );
 
+app.post(
+  "/updateClient",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      console.log(
+        "UPDATE CLIENT API HIT"
+      );
+
+      console.log(
+        "REQ BODY:",
+        body
+      );
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const client_code =
+
+        String(
+          body.client_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!client_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "client_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH ALL CLIENTS
+      // =========================
+
+      const {
+        data: allClients,
+        error: fetchError
+      } = await supabase
+
+        .from("client")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        console.log(
+          "FETCH CLIENT ERROR:",
+          fetchError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE GST CHECK
+      // =========================
+
+      const duplicateGST =
+
+        (allClients || []).find((row) => {
+
+          return (
+
+            String(
+              row.gstin || ""
+            )
+              .trim()
+              .toUpperCase()
+
+            ===
+
+            String(
+              body.gstin || ""
+            )
+              .trim()
+              .toUpperCase()
+
+            &&
+
+            String(
+              row.client_code || ""
+            ).trim()
+
+            !==
+
+            client_code
+
+          );
+
+        });
+
+      if (duplicateGST) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Client with same GSTIN already exists"
+
+        });
+
+      }
+
+      // =========================
+      // CHECK CLIENT EXISTS
+      // =========================
+
+      const existingClient =
+
+        (allClients || []).find((row) => {
+
+          return (
+
+            String(
+              row.client_code || ""
+            ).trim()
+
+            ===
+
+            client_code
+
+          );
+
+        });
+
+      if (!existingClient) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Client not found"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE OBJECT
+      // =========================
+
+      const updateObj = {
+
+        client_name:
+          body.client_name || "",
+
+        gstin:
+          body.gstin || "",
+
+        billing_address:
+          body.billing_address || "",
+
+        bill_state:
+          body.bill_state || "",
+
+        bill_statecode:
+          body.bill_stateCode || "",
+
+        bill_pincode:
+          body.bill_pincode || "",
+
+        mobile:
+          body.mobile || "",
+
+        email:
+          body.email || "",
+
+        same_address:
+          body.same_address || "",
+
+        shipping_address:
+          body.shipping_address || "",
+
+        shipping_state:
+          body.shipping_state || "",
+
+        shipping_statecode:
+          body.shipping_stateCode || "",
+
+        shipping_pincode:
+          body.shipping_pincode || "",
+
+        updated_at:
+          new Date(),
+
+        is_active:
+
+          body.is_active !== false,
+
+        contact_person:
+          body.contact_person || "",
+
+        credit_limit:
+          Number(
+            body.credit_limit || 0
+          ),
+
+        opening_balance:
+          Number(
+            body.opening_balance || 0
+          ),
+
+        remarks:
+          body.remarks || "",
+
+        credit_period:
+          Number(
+            body.credit_period || 0
+          )
+
+      };
+
+      console.log(
+        "FINAL UPDATE OBJECT:",
+        updateObj
+      );
+
+      // =========================
+      // UPDATE CLIENT
+      // =========================
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("client")
+
+        .update(updateObj)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "client_code",
+          client_code
+        );
+
+      if (updateError) {
+
+        console.log(
+          "UPDATE ERROR:",
+          updateError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      console.log(
+        "CLIENT UPDATED SUCCESS"
+      );
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Client updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "UPDATE CLIENT ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+console.log("SIGNUP ROUTE LOADED");
+
+// =========================
+// SIGNUP USER
+// =========================
+
+app.post(
+  "/signupUser",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      const name =
+        String(body.name || "").trim();
+
+      const mobile =
+        String(body.mobile || "").trim();
+
+      const email =
+        String(body.email || "")
+          .trim()
+          .toLowerCase();
+
+      const password =
+        String(body.password || "").trim();
+
+      if (
+        !name ||
+        !mobile ||
+        !email ||
+        !password
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "All fields required"
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const {
+        data: existingUsers,
+        error: duplicateError
+      } = await supabase
+
+        .from("usersheet")
+
+        .select("*")
+
+        .or(
+          `email.eq.${email},mobile.eq.${mobile}`
+        );
+
+      if (duplicateError) {
+
+        console.log(
+          "DUPLICATE CHECK ERROR:",
+          duplicateError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            duplicateError.message
+
+        });
+
+      }
+
+      if (
+        existingUsers &&
+        existingUsers.length > 0
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "User already exists"
+
+        });
+
+      }
+
+      // =========================
+      // GET LAST COMPANY
+      // =========================
+
+      const {
+        data: companies,
+        error: companyError
+      } = await supabase
+
+        .from("company")
+
+        .select("company_code")
+
+        .order(
+          "id",
+          {
+            ascending: false
+          }
+        )
+
+        .limit(1);
+
+      if (companyError) {
+
+        console.log(
+          "COMPANY FETCH ERROR:",
+          companyError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            companyError.message
+
+        });
+
+      }
+
+      let nextCompanyCode =
+        "C0001";
+
+      if (
+        companies &&
+        companies.length > 0
+      ) {
+
+        const lastCode =
+
+          String(
+            companies[0]
+              ?.company_code || ""
+          );
+
+        const lastNumber =
+
+          parseInt(
+            lastCode.replace("C", "")
+          ) || 0;
+
+        nextCompanyCode =
+
+          "C" +
+
+          String(
+            lastNumber + 1
+          ).padStart(4, "0");
+
+      }
+
+      console.log(
+        "NEXT COMPANY CODE:",
+        nextCompanyCode
+      );
+
+      // =========================
+      // INSERT USER
+      // =========================
+
+      const {
+        error: userInsertError
+      } = await supabase
+
+        .from("usersheet")
+
+        .insert([{
+
+          user_id:
+            mobile,
+
+          password,
+
+          email,
+
+          mobile,
+
+          company_code:
+            nextCompanyCode,
+
+          is_active:
+            true,
+
+          created_at:
+            new Date(),
+
+          name
+
+        }]);
+
+      if (userInsertError) {
+
+        console.log(
+          "USER INSERT ERROR:",
+          userInsertError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            userInsertError.message
+
+        });
+
+      }
+
+      // =========================
+      // INSERT COMPANY
+      // =========================
+
+      const {
+        error: companyInsertError
+      } = await supabase
+
+        .from("company")
+
+        .insert([{
+
+          businessname:
+            "",
+
+          gstin:
+            "",
+
+          mobile,
+
+          email,
+
+          address:
+            "",
+
+          state:
+            "",
+
+          statecode:
+            "",
+
+          pincode:
+            "",
+
+          country:
+            "",
+
+          currency:
+            "",
+
+          currency_symbol:
+            "",
+
+          invoiceprefix:
+            "INV",
+
+          invoicestartnumber:
+            1,
+
+          company_code:
+            nextCompanyCode,
+
+          is_active:
+            true,
+
+          company_start:
+            new Date(),
+
+         license_type:
+  "Royal"
+
+        }]);
+
+      if (companyInsertError) {
+
+        console.log(
+          "COMPANY INSERT ERROR:",
+          companyInsertError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            companyInsertError.message
+
+        });
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Signup successful",
+
+        data: {
+
+          company_code:
+            nextCompanyCode,
+
+          email,
+
+          mobile,
+
+          name
+
+        }
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "SIGNUP ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// GET STATES
+// =========================
+
+app.get(
+  "/getStates",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("state_master")
+
+        .select("*")
+
+        .order(
+          "state_name",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data: data || []
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// GET COMPANY
+// =========================
+
+app.get(
+  "/getCompany",
+
+  async (req, res) => {
+
+    try {
+
+      const companyCode =
+
+        String(
+          req.query.companyCode || ""
+        ).trim();
+
+      if (!companyCode) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("company")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          companyCode
+        )
+
+        .single();
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/completeCompanySetup",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+        error
+      } = await supabase
+
+        .from("company")
+
+        .update(body)
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Company updated"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+app.post(
+  "/saveCompany",
+
+  async (req, res) => {
+
+    try {
+
+      const companyCode =
+
+        String(
+          req.query.companyCode || ""
+        ).trim();
+
+      const body =
+        req.body || {};
+
+      if (!companyCode) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const updateObj = {
+
+        businessname:
+          body.businessName || "",
+
+        gstin:
+          body.gstin || "",
+
+        address:
+          body.address || "",
+
+        state:
+          body.state || "",
+
+        statecode:
+          body.stateCode || "",
+
+        country:
+          body.country || "",
+
+        currency:
+          body.currency || "",
+
+        currency_symbol:
+          body.currency_symbol || "",
+
+        mobile:
+          body.mobile || "",
+
+        email:
+          body.email || "",
+
+        bankname:
+          body.bankName || "",
+
+        accountnumber:
+          body.accountNumber || "",
+
+        ifsc:
+          body.ifsc || "",
+
+        upiid:
+          body.upiId || "",
+
+        logo:
+          body.logo || "",
+
+        defaultnotes:
+          body.defaultNotes || "",
+
+        defaultterms:
+          body.defaultTerms || "",
+
+        invoiceprefix:
+          body.invoicePrefix || "INV",
+
+        invoicestartnumber:
+          Number(
+            body.invoiceStartNumber || 1
+          ),
+
+        pincode:
+          body.pincode || "",
+
+        company_start:
+          body.company_start || null,
+
+        ca:
+          body.CA || "",
+
+        license_type:
+          body.license_type || "",
+
+        updatedat:
+          new Date()
+
+      };
+
+      console.log(
+        "FINAL UPDATE OBJECT:",
+        updateObj
+      );
+
+      const {
+        error
+      } = await supabase
+
+        .from("company")
+
+        .update(updateObj)
+
+        .eq(
+          "company_code",
+          companyCode
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Company saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
 app.listen(
   process.env.PORT,
   () => {
