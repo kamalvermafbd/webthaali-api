@@ -4927,6 +4927,724 @@ app.post(
   }
 );
 
+
+// =========================
+// GET HSN
+// =========================
+
+app.get(
+  "/getHSN",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH HSN
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("hsn")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "active",
+          true
+        )
+
+        .order(
+          "hsn_code",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESULT
+      // =========================
+
+      const result =
+
+        (data || []).map((row) => ({
+
+          ...row,
+
+          HSN_code:
+            row.hsn_code || "",
+
+          GST:
+            row.gst || 0
+
+        }));
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// SAVE HSN
+// =========================
+
+app.post(
+  "/saveHSN",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const HSN_code =
+
+        String(
+          body.HSN_code || ""
+        ).trim();
+
+      const GST =
+
+        String(
+          body.GST || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || ""
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!HSN_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "HSN code required"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH EXISTING HSN
+      // =========================
+
+      const {
+        data: existingData,
+        error: fetchError
+      } = await supabase
+
+        .from("hsn")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const duplicateHSN =
+
+        (existingData || []).find((row) => {
+
+          return (
+
+            String(
+              row.hsn_code || ""
+            ).trim()
+
+            ===
+
+            HSN_code
+
+          );
+
+        });
+
+      if (duplicateHSN) {
+
+        const isActive =
+
+          duplicateHSN.active === true;
+
+        // already active
+
+        if (isActive) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              "HSN already exists"
+
+          });
+
+        }
+
+        // inactive found
+
+        return res.json({
+
+          success: false,
+
+          restore_available: true,
+
+          message:
+            "This HSN code already exists but is currently inactive. Would you like to restore it?"
+
+        });
+
+      }
+
+      // =========================
+      // INSERT HSN
+      // =========================
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("hsn")
+
+        .insert([{
+
+          company_code:
+            company_code,
+
+          hsn_code:
+            HSN_code,
+
+          active:
+            active,
+
+          gst:
+            Number(GST || 0),
+
+          created_at:
+            new Date(),
+
+          updated_at:
+            new Date()
+
+        }]);
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "HSN saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+
+// =========================
+// UPDATE HSN
+// =========================
+
+app.post(
+  "/updateHSN",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const old_HSN_code =
+
+        String(
+          body.old_HSN_code || ""
+        ).trim();
+
+      const HSN_code =
+
+        String(
+          body.HSN_code || ""
+        ).trim();
+
+      const GST =
+
+        String(
+          body.GST || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || ""
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!old_HSN_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "old_HSN_code missing"
+
+        });
+
+      }
+
+      if (!HSN_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "HSN code required"
+
+        });
+
+      }
+
+      // =========================
+      // CHECK HSN EXISTS
+      // =========================
+
+      const {
+        data: existingHSN,
+        error: fetchError
+      } = await supabase
+
+        .from("hsn")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "hsn_code",
+          old_HSN_code
+        )
+
+        .single();
+
+      if (fetchError || !existingHSN) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "HSN not found"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE HSN
+      // =========================
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("hsn")
+
+        .update({
+
+          hsn_code:
+            HSN_code,
+
+          active:
+            active,
+
+          gst:
+            Number(GST || 0),
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "hsn_code",
+          old_HSN_code
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "HSN updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// RESTORE HSN
+// =========================
+
+app.post(
+  "/restoreHSN",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const HSN_code =
+
+        String(
+          body.HSN_code || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!HSN_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "HSN_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // CHECK HSN EXISTS
+      // =========================
+
+      const {
+        data: existingHSN,
+        error: fetchError
+      } = await supabase
+
+        .from("hsn")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "hsn_code",
+          HSN_code
+        )
+
+        .single();
+
+      if (fetchError || !existingHSN) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "HSN not found"
+
+        });
+
+      }
+
+      // =========================
+      // RESTORE HSN
+      // =========================
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("hsn")
+
+        .update({
+
+          active:
+            true,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "hsn_code",
+          HSN_code
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "HSN restored successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
 app.get(
 
   "/getCategories",
