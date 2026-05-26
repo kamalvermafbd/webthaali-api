@@ -4133,6 +4133,924 @@ app.post(
   }
 );
 
+
+// =========================
+// GET CATEGORY MASTER
+// =========================
+
+app.get(
+  "/getCategoryMaster",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH CAT MASTER
+      // =========================
+
+      const {
+        data: catData,
+        error: catError
+      } = await supabase
+
+        .from("cat")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "active",
+          true
+        );
+
+      if (catError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            catError.message
+
+        });
+
+      }
+
+      // =========================
+      // FETCH CATEGORY MAPPING
+      // =========================
+
+      const {
+        data: categoryData,
+        error: categoryError
+      } = await supabase
+
+        .from("category")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "active",
+          true
+        );
+
+      if (categoryError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            categoryError.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESULT
+      // =========================
+
+      const result =
+
+        (catData || []).map((row) => {
+
+          const catName =
+
+            String(
+              row.cat || ""
+            )
+              .trim()
+              .toLowerCase();
+
+          const is_used =
+
+            (categoryData || []).some((mapRow) => {
+
+              return (
+
+                String(
+                  mapRow.cat || ""
+                )
+                  .trim()
+                  .toLowerCase()
+
+                ===
+
+                catName
+
+              );
+
+            });
+
+          return {
+
+            ...row,
+
+            is_used
+
+          };
+
+        });
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET SUB CATEGORY MASTER
+// =========================
+
+app.get(
+  "/getSubCategoryMaster",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      const cat_id =
+
+        String(
+          req.query.cat_id || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH SUB CATEGORY MASTER
+      // =========================
+
+      let query =
+
+        supabase
+
+          .from("sub_category_master")
+
+          .select("*")
+
+          .eq(
+            "company_code",
+            company_code
+          )
+
+          .eq(
+            "active",
+            true
+          );
+
+      // =========================
+      // OPTIONAL CAT FILTER
+      // =========================
+
+      if (cat_id) {
+
+        query =
+
+          query.eq(
+            "cat_id",
+            Number(cat_id)
+          );
+
+      }
+
+      const {
+        data,
+        error
+      } = await query;
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FETCH CATEGORY TABLE
+      // =========================
+
+      const {
+        data: categoryData,
+        error: categoryError
+      } = await supabase
+
+        .from("category")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "active",
+          true
+        );
+
+      if (categoryError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            categoryError.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESULT
+      // =========================
+
+      const result =
+
+        (data || []).map((row) => {
+
+          const subCatName =
+
+            String(
+              row.sub_cat || ""
+            )
+              .trim()
+              .toLowerCase();
+
+          const is_used =
+
+            (categoryData || []).some((catRow) => {
+
+              return (
+
+                String(
+                  catRow.sub_cat || ""
+                )
+                  .trim()
+                  .toLowerCase()
+
+                ===
+
+                subCatName
+
+              );
+
+            });
+
+          return {
+
+  ...row,
+
+  HSN:
+    row.hsn || "",
+
+  is_used
+
+};
+        });
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// SAVE CATEGORY
+// =========================
+
+app.post(
+  "/saveCategory",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const cat =
+
+        String(
+          body.cat || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || ""
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!cat) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Category required"
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const {
+        data: existingData,
+        error: fetchError
+      } = await supabase
+
+        .from("cat")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      const exists =
+
+        (existingData || []).some((row) => {
+
+          return (
+
+            String(
+              row.cat || ""
+            )
+              .trim()
+              .toLowerCase()
+
+            ===
+
+            cat.toLowerCase()
+
+          );
+
+        });
+
+      if (exists) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Category already exists"
+
+        });
+
+      }
+
+      // =========================
+      // GENERATE NEXT CAT ID
+      // =========================
+
+      let nextId = 1;
+
+      (existingData || []).forEach((row) => {
+
+        const currentId =
+
+          Number(
+            row.cat_id || 0
+          );
+
+        nextId =
+
+          Math.max(
+            nextId,
+            currentId + 1
+          );
+
+      });
+
+      // =========================
+      // INSERT CATEGORY
+      // =========================
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("cat")
+
+        .insert([{
+
+          company_code:
+            company_code,
+
+          cat_id:
+            nextId,
+
+          cat:
+            cat,
+
+          active:
+            active,
+
+          created_at:
+            new Date(),
+
+          updated_at:
+            null
+
+        }]);
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Category saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// UPDATE CATEGORY
+// =========================
+
+app.post(
+  "/updateCategory",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const cat_id =
+
+        Number(
+          body.cat_id || 0
+        );
+
+      const cat =
+
+        String(
+          body.cat || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || ""
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!cat_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "cat_id missing"
+
+        });
+
+      }
+
+      if (!cat) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Category required"
+
+        });
+
+      }
+
+      // =========================
+      // CHECK CATEGORY EXISTS
+      // =========================
+
+      const {
+        data: existingCategory,
+        error: fetchError
+      } = await supabase
+
+        .from("cat")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "cat_id",
+          cat_id
+        )
+
+        .single();
+
+      if (fetchError || !existingCategory) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Category not found"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE CATEGORY
+      // =========================
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("cat")
+
+        .update({
+
+          cat:
+            cat,
+
+          active:
+            active,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "cat_id",
+          cat_id
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Category updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+app.get(
+
+  "/getCategories",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+
+        data,
+        error
+
+      } = await supabase
+
+        .from("category")
+
+        .select(`
+  id,
+  company_code,
+  cat,
+  sub_cat,
+  hsn,
+  active
+`)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "active",
+          true
+        )
+
+        .order(
+          "cat",
+          { ascending: true }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const formatted =
+
+  (data || []).map(item => ({
+
+    cat_id:
+      item.id,
+
+    company_code:
+      item.company_code,
+
+    cat:
+      item.cat,
+
+    sub_cat:
+      item.sub_cat,
+
+    hsn:
+      item.hsn,
+
+    active:
+      item.active
+
+  }));
+
+return res.json({
+
+  success: true,
+
+  data:
+    formatted
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
 app.listen(
   process.env.PORT,
   () => {
