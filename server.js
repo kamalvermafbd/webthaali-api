@@ -10017,6 +10017,127 @@ app.post(
 );
 
 
+
+// =========================
+// CANCEL VARIANT
+// =========================
+
+app.post(
+
+  "/cancelVariant",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        material_id,
+        company_code,
+        variant_code,
+        hold,
+        is_active
+
+      } = req.body || {};
+
+      console.log(
+        "========== CANCEL VARIANT API HIT =========="
+      );
+
+      console.log(
+        "REQ BODY =>",
+        req.body
+      );
+
+      const {
+        error
+      } = await supabase
+
+        .from("variant")
+
+        .update({
+
+          hold:
+            hold || null,
+
+          is_active:
+            Boolean(is_active),
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "material_id",
+          Number(material_id)
+        )
+
+        .eq(
+          "variant_code",
+          String(variant_code)
+        )
+
+        .eq(
+          "company_code",
+          String(company_code)
+        );
+
+      if (error) {
+
+        console.log(
+          "SUPABASE ERROR =>",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      console.log(
+        "VARIANT STATUS UPDATED SUCCESSFULLY"
+      );
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Variant status updated"
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "CANCEL VARIANT ERROR =>",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+        });
+
+    }
+
+  }
+);
+
+
 app.listen(
   process.env.PORT,
   () => {
