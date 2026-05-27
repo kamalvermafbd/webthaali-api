@@ -9895,6 +9895,128 @@ app.post(
 
   }
 );
+
+
+
+// =========================
+// HOLD VARIANT
+// =========================
+
+app.post(
+
+  "/holdVariant",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        material_id,
+        company_code,
+        variant_code,
+        hold
+
+      } = req.body || {};
+
+      if (!material_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      if (!variant_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "variant_code missing"
+
+        });
+
+      }
+
+      const {
+        error
+      } = await supabase
+
+        .from("variant")
+
+        .update({
+
+          hold:
+            hold || null,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "material_id",
+          Number(material_id)
+        )
+
+        .eq(
+          "variant_code",
+          String(variant_code)
+        )
+
+        .eq(
+          "company_code",
+          String(company_code)
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Variant hold updated"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
 app.listen(
   process.env.PORT,
   () => {
