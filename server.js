@@ -1844,6 +1844,345 @@ share_token:
 
 
 // =========================
+// GET INVOICE ITEMS
+// =========================
+
+app.get(
+
+  "/getInvoiceItems",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // MM DATA
+      // =========================
+
+      const {
+        data: mmRows,
+        error: mmError
+      } = await supabase
+
+        .from("mm")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (mmError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            mmError.message
+
+        });
+
+      }
+
+      // =========================
+      // VARIANT DATA
+      // =========================
+
+      const {
+        data: variantRows,
+        error: variantError
+      } = await supabase
+
+        .from("variant")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (variantError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            variantError.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESULT
+      // =========================
+
+      const result = [];
+
+      // =========================
+      // SINGLE ITEMS
+      // =========================
+
+      mmRows.forEach((row) => {
+
+        const matType =
+
+          String(
+            row.mat_type || ""
+          )
+            .trim()
+            .toLowerCase();
+
+        if (
+
+          matType === "single"
+
+          &&
+
+          row.is_active === true
+
+          &&
+
+          !row.hold
+
+        ) {
+
+          result.push({
+
+            mode: "single",
+
+            material_id:
+              row.material_id,
+
+            item_code:
+              String(
+                row.item_code || ""
+              ),
+
+            item_name:
+              row.item_name || "",
+
+            display_name:
+              row.item_name || "",
+
+            hsn_code:
+              String(
+                row.hsn_code || ""
+              ),
+
+            gst_percent:
+              Number(
+                row.gst_percent || 0
+              ),
+
+            unit:
+              row.base_unit || "",
+
+            rate:
+              Number(
+                row.sale_rate || 0
+              )
+
+          });
+
+        }
+
+      });
+
+      // =========================
+      // MULTI ITEMS
+      // =========================
+
+      variantRows.forEach((row) => {
+
+       if (
+
+  row.is_active !== true
+
+  ||
+
+  row.hold
+
+) {
+
+  return;
+
+}
+
+        // =========================
+        // FIND MM ROW
+        // =========================
+
+        const mmRow =
+
+          mmRows.find(
+
+            (m) =>
+
+              Number(
+                m.material_id
+              ) ===
+
+              Number(
+                row.material_id
+              )
+
+          );
+
+        if (!mmRow) return;
+
+                if (
+
+          mmRow.is_active !== true
+
+          ||
+
+          mmRow.hold
+
+        ) {
+
+          return;
+
+        }
+
+        const matType =
+
+          String(
+            mmRow.mat_type || ""
+          )
+            .trim()
+            .toLowerCase();
+
+        if (
+          matType !== "multi"
+        ) {
+
+          return;
+
+        }
+
+        result.push({
+
+          mode: "multi",
+
+          material_id:
+            row.material_id,
+
+          variant_code:
+            String(
+              row.variant_code || ""
+            ),
+
+          item_name:
+            row.item_name || "",
+
+          description:
+            row.description || "",
+
+          variant:
+            row.variant || "",
+
+          sub_variant:
+            row.sub_variant || "",
+
+          qty:
+            Number(
+              row.qty || 0
+            ),
+
+          final_multiplier:
+            Number(
+              row.final_multiplier || 0
+            ),
+
+          base_unit:
+            row.base_unit || "",
+
+          display_name:
+            row.description || "",
+
+          hsn_code:
+            String(
+              mmRow.hsn_code || ""
+            ),
+
+          gst_percent:
+            Number(
+              mmRow.gst_percent || 0
+            ),
+
+          unit:
+            row.variant || "",
+
+          rate:
+            Number(
+              row.sale_rate || 0
+            )
+
+        });
+
+      });
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
 // UPDATE TRANSPORT
 // =========================
 
@@ -10135,6 +10474,700 @@ app.post(
     }
 
   }
+);
+
+// =========================
+// GET PACKAGING UNITS
+// =========================
+
+app.get(
+  "/getPackagingUnits",
+
+  async (req, res) => {
+
+    try {
+
+      const GLOBAL_PACKING_UNITS = [
+
+  "Box",
+  "Pc",
+  "Pkt",
+  "Carton",
+  "Tin",
+  "Set"
+
+];
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH PACKAGING UNITS
+      // =========================
+
+      console.log(
+        "GET PACKAGING UNITS COMPANY:",
+        company_code
+      );
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("pkg_unit")
+
+        .select(`
+        id,
+        company_code,
+        Pk_un:pk_un,
+        active
+      `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "pk_un",
+          {
+            ascending: true
+          }
+        );
+
+      // =========================
+      // ERROR
+      // =========================
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const existingUnits =
+
+  (data || []).map(
+
+    (item) =>
+
+      String(item.Pk_un || "")
+        .trim()
+        .toLowerCase()
+
+  );
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      const globalUnits =
+
+  GLOBAL_PACKING_UNITS
+
+    .filter(
+
+      (unit) =>
+
+        !existingUnits.includes(
+
+          String(unit)
+            .trim()
+            .toLowerCase()
+
+        )
+
+    )
+
+    .map((unit) => ({
+
+    id:
+  `global_${unit}`,
+
+      company_code:
+        company_code,
+
+      Pk_un:
+        unit,
+
+      active:
+        true,
+
+      is_default:
+        true
+
+    }));
+
+      return res.json({
+
+        success: true,
+
+        data: [
+
+  ...globalUnits,
+
+  ...(data || []).map(
+    (item) => ({
+
+      ...item,
+
+      is_default:
+        false
+
+    })
+  )
+
+]
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// SAVE PACKAGING UNIT
+// =========================
+
+app.post(
+  "/savePackagingUnit",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const pk_un =
+
+        String(
+          body.pk_un || ""
+        ).trim();
+
+    const active =
+
+  String(
+    body.active || "TRUE"
+  )
+    .trim()
+    .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!pk_un) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Packing unit required"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH EXISTING DATA
+      // =========================
+
+      const {
+        data: existingData,
+        error: fetchError
+      } = await supabase
+
+        .from("pkg_unit")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const exists =
+
+        (existingData || []).some((row) => {
+
+          return (
+
+            String(
+              row.pk_un || ""
+            )
+              .trim()
+              .toLowerCase()
+
+            ===
+
+            pk_un.toLowerCase()
+
+          );
+
+        });
+
+      if (exists) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Packing unit already exists"
+
+        });
+
+      }
+
+      // =========================
+      // INSERT
+      // =========================
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("pkg_unit")
+
+        .insert([{
+
+  company_code:
+    company_code,
+
+  pk_un:
+    pk_un,
+
+  active:
+    active,
+
+  created_at:
+    new Date(),
+
+  updated_at:
+    null
+
+}]);
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Packing unit saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// UPDATE PACKAGING UNIT
+// =========================
+
+app.post(
+
+  "/updatePackagingUnit",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      console.log(
+        "UPDATE PACKAGING UNIT BODY =>",
+        body
+      );
+
+      const id =
+
+        String(
+          body.id || ""
+        ).trim();
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const pk_un =
+
+        String(
+          body.pk_un || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || "TRUE"
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "id missing"
+
+        });
+
+      }
+
+      // BIGINT VALIDATION
+
+      if (
+        isNaN(Number(id))
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Invalid id"
+
+        });
+
+      }
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!pk_un) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Packing unit required"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH EXISTING DATA
+      // =========================
+
+      const {
+        data: existingData,
+        error: fetchError
+      } = await supabase
+
+        .from("pkg_unit")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const exists =
+
+        (existingData || []).some((row) => {
+
+          return (
+
+            String(row.id) !==
+              String(id)
+
+            &&
+
+            String(
+              row.pk_un || ""
+            )
+              .trim()
+              .toLowerCase()
+
+            ===
+
+            pk_un
+              .trim()
+              .toLowerCase()
+
+          );
+
+        });
+
+      if (exists) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Packing unit already exists"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE
+      // =========================
+
+      console.log(
+        "UPDATE WHERE =>",
+        {
+          id,
+          company_code
+        }
+      );
+
+      const {
+        data: updatedData,
+        error: updateError
+      } = await supabase
+
+        .from("pkg_unit")
+
+        .update({
+
+          pk_un:
+            pk_un,
+
+          active:
+            active,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "id",
+          Number(id)
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .select();
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      // =========================
+      // NOT FOUND CHECK
+      // =========================
+
+      if (
+        !updatedData ||
+        updatedData.length === 0
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Record not found"
+
+        });
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Packing unit updated successfully",
+
+        data:
+          updatedData
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "UPDATE PACKAGING UNIT ERROR =>",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
 );
 
 
