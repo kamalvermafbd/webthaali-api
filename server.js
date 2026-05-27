@@ -5731,10 +5731,16 @@ app.get(
     cat:
       item.cat,
 
+    Cat:
+      item.cat,
+
     sub_cat:
       item.sub_cat,
 
     hsn:
+      item.hsn,
+
+    HSN:
       item.hsn,
 
     active:
@@ -7390,9 +7396,15 @@ async function generateVariantRows(
 
     const cleanPackaging =
 
-      String(
-        p.item_packaging || ""
-      ).trim();
+  String(
+
+    p.item_packaging
+
+    || body.variant_label
+
+    || ""
+
+  ).trim();
 
     const parentItemName =
 
@@ -7443,7 +7455,7 @@ async function generateVariantRows(
         body.measurement || "",
 
       item_packaging:
-        p.item_packaging || "",
+  cleanPackaging,
 
       description:
         description,
@@ -9442,6 +9454,447 @@ app.get(
   }
 );
 
+app.post(
+
+  "/holdMaterial",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        material_id,
+        company_code,
+        hold
+
+      } = req.body || {};
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!material_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE HOLD
+      // =========================
+
+      const {
+        error
+      } = await supabase
+
+        .from("mm")
+
+        .update({
+
+          hold:
+            hold === "yes"
+              ? "yes"
+              : null,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "material_id",
+          Number(material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(company_code)
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+
+          hold === "yes"
+
+            ? "Material placed on hold"
+
+            : "Material restored"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+app.post(
+
+  "/deactivateMaterial",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        material_id,
+        company_code,
+        is_active
+
+      } = req.body || {};
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!material_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE STATUS
+      // =========================
+
+      const {
+        error
+      } = await supabase
+
+        .from("mm")
+
+        .update({
+
+          is_active:
+            is_active,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "material_id",
+          Number(material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(company_code)
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+
+          is_active
+
+            ? "Material activated"
+
+            : "Material permanently deactivated"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+// =========================
+// CANCEL MATERIAL
+// =========================
+
+console.log(
+  "cancelMaterial route registered"
+);
+
+app.post(
+
+  "/cancelMaterial",
+
+  async (req, res) => {
+
+    console.log(
+      "========== CANCEL MATERIAL API HIT =========="
+    );
+
+    try {
+
+      console.log(
+        "REQ BODY =>",
+        req.body
+      );
+
+      const {
+
+        material_id,
+        company_code,
+        hold,
+        is_active
+
+      } = req.body || {};
+
+      console.log(
+        "material_id =>",
+        material_id
+      );
+
+      console.log(
+        "company_code =>",
+        company_code
+      );
+
+      console.log(
+        "hold =>",
+        hold
+      );
+
+      console.log(
+        "is_active =>",
+        is_active
+      );
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!material_id) {
+
+        console.log(
+          "VALIDATION FAILED : material_id missing"
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      if (!company_code) {
+
+        console.log(
+          "VALIDATION FAILED : company_code missing"
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE STATUS
+      // =========================
+
+      console.log(
+        "UPDATING MATERIAL STATUS..."
+      );
+
+      const {
+        error
+      } = await supabase
+
+        .from("mm")
+
+        .update({
+
+          hold:
+            hold || null,
+
+          is_active:
+            Boolean(is_active),
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "material_id",
+          Number(material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(company_code)
+        );
+
+      console.log(
+        "SUPABASE UPDATE DONE"
+      );
+
+      if (error) {
+
+        console.log(
+          "SUPABASE ERROR =>",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      console.log(
+        "MATERIAL STATUS UPDATED SUCCESSFULLY"
+      );
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Material status updated"
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "CANCEL MATERIAL API ERROR =>",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
 app.listen(
   process.env.PORT,
   () => {
