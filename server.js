@@ -11170,6 +11170,663 @@ app.post(
 
 );
 
+// =========================
+// GET MEASUREMENT UNITS
+// =========================
+
+app.get(
+  "/getMeasurementUnits",
+
+  async (req, res) => {
+
+    try {
+
+      const GLOBAL_MEASUREMENT_UNITS = [
+
+        "Gm",
+        "Kg",
+        "ML",
+        "Ltr",
+        "Qtl",
+        "Ton",
+        "Lb"
+
+      ];
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH MEASUREMENT UNITS
+      // =========================
+
+      console.log(
+        "GET MEASUREMENT UNITS COMPANY:",
+        company_code
+      );
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("measurement_unit")
+
+        .select(`
+          id,
+          company_code,
+          weight_unit,
+          active
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "weight_unit",
+          {
+            ascending: true
+          }
+        );
+
+      // =========================
+      // ERROR
+      // =========================
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const existingUnits =
+
+        (data || []).map(
+
+          (item) =>
+
+            String(
+              item.weight_unit || ""
+            )
+              .trim()
+              .toLowerCase()
+
+        );
+
+      // =========================
+      // GLOBAL DEFAULT UNITS
+      // =========================
+
+      const globalUnits =
+
+        GLOBAL_MEASUREMENT_UNITS
+
+          .filter(
+
+            (unit) =>
+
+              !existingUnits.includes(
+
+                String(unit)
+                  .trim()
+                  .toLowerCase()
+
+              )
+
+          )
+
+          .map((unit) => ({
+
+            id:
+              `global_${unit}`,
+
+            company_code:
+              company_code,
+
+            weight_unit:
+              unit,
+
+            active:
+              true,
+
+            is_default:
+              true
+
+          }));
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        data: [
+
+          ...globalUnits,
+
+          ...(data || []).map(
+            (item) => ({
+
+              ...item,
+
+              is_default:
+                false
+
+            })
+          )
+
+        ]
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// SAVE MEASUREMENT UNIT
+// =========================
+
+app.post(
+  "/saveMeasurementUnit",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const weight_unit =
+
+        String(
+          body.weight_unit || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || ""
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!weight_unit) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Measurement unit required"
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const {
+        data: existingData,
+        error: fetchError
+      } = await supabase
+
+        .from("measurement_unit")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      const exists =
+
+        (existingData || []).some((row) => {
+
+          return (
+
+            String(
+              row.weight_unit || ""
+            )
+              .trim()
+              .toLowerCase()
+
+            ===
+
+            weight_unit.toLowerCase()
+
+          );
+
+        });
+
+      if (exists) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Measurement unit already exists"
+
+        });
+
+      }
+
+      // =========================
+      // INSERT
+      // =========================
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("measurement_unit")
+
+        .insert([{
+
+          company_code:
+            company_code,
+
+          weight_unit:
+            weight_unit,
+
+          active:
+            active,
+
+          created_at:
+            new Date(),
+
+          updated_at:
+            new Date()
+
+        }]);
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Measurement unit saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// UPDATE MEASUREMENT UNIT
+// =========================
+
+app.post(
+  "/updateMeasurementUnit",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const id =
+
+        Number(
+          body.id || 0
+        );
+
+      const weight_unit =
+
+        String(
+          body.weight_unit || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || ""
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "id missing"
+
+        });
+
+      }
+
+      if (!weight_unit) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Measurement unit required"
+
+        });
+
+      }
+
+      // =========================
+      // CHECK EXISTS
+      // =========================
+
+      const {
+        data: existingRow,
+        error: fetchError
+      } = await supabase
+
+        .from("measurement_unit")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "id",
+          id
+        )
+
+        .single();
+
+      if (fetchError || !existingRow) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Measurement unit not found"
+
+        });
+
+      }
+
+
+      // =========================
+// DUPLICATE CHECK
+// =========================
+
+const {
+  data: allRows,
+  error: duplicateError
+} = await supabase
+
+  .from("measurement_unit")
+
+  .select("*")
+
+  .eq(
+    "company_code",
+    company_code
+  );
+
+if (duplicateError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      duplicateError.message
+
+  });
+
+}
+
+const duplicateExists =
+
+  (allRows || []).some((row) => {
+
+    return (
+
+      Number(row.id) !== id
+
+      &&
+
+      String(
+        row.weight_unit || ""
+      )
+        .trim()
+        .toLowerCase()
+
+      ===
+
+      weight_unit.toLowerCase()
+
+    );
+
+  });
+
+if (duplicateExists) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Measurement unit already exists"
+
+  });
+
+}
+
+      // =========================
+      // UPDATE
+      // =========================
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("measurement_unit")
+
+        .update({
+
+          weight_unit:
+            weight_unit,
+
+          active:
+            active,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "id",
+          id
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Measurement unit updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
 
 app.listen(
   process.env.PORT,
