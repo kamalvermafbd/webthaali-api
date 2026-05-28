@@ -659,9 +659,7 @@ app.get(
         });
 
       }
-
-
-      // =========================
+ // =========================
 // GET COMPANY
 // =========================
 
@@ -954,7 +952,16 @@ name:
     company?.statecode || "",
 
   pincode:
-  company?.pincode || ""  
+  company?.pincode || ""  ,
+  
+  country:
+  company?.country || "",
+
+currency:
+  company?.currency || "",
+
+currency_symbol:
+  company?.currency_symbol || "",
 
 },
          items:
@@ -4444,6 +4451,29 @@ app.get(
 
         businessName:
           data.businessname,
+
+  // =====================
+  // COUNTRY
+  // =====================
+
+  country:
+    String(
+      data.country || ""
+    ).trim(),
+
+  // =====================
+  // CURRENCY
+  // =====================
+
+  currency:
+    String(
+      data.currency || ""
+    ).trim(),
+
+  currency_symbol:
+    String(
+      data.currency_symbol || ""
+    ).trim(),
 
       };
 
