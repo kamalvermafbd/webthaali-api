@@ -953,7 +953,7 @@ name:
 
   pincode:
   company?.pincode || ""  ,
-  
+
   country:
   company?.country || "",
 
@@ -962,6 +962,12 @@ currency:
 
 currency_symbol:
   company?.currency_symbol || "",
+
+defaultNotes:
+  company?.defaultnotes || "",
+
+defaultTerms:
+  company?.defaultterms || "",
 
 },
          items:
@@ -4474,6 +4480,17 @@ app.get(
     String(
       data.currency_symbol || ""
     ).trim(),
+
+     // =====================
+  // DEFAULT NOTES
+  // =====================
+
+  defaultNotes:
+    data.defaultnotes || "",
+
+  defaultTerms:
+    data.defaultterms || "",
+
 
       };
 
