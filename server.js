@@ -1974,43 +1974,136 @@ app.get(
 
         ) {
 
+ // =========================
+  // DEBUG SINGLE ITEM
+  // =========================
+
+  console.log(
+    "FINAL SINGLE ITEM:",
+    {
+
+      material_id:
+        row.material_id,
+
+      item_name:
+        row.item_name,
+
+      mrp:
+        row.mrp,
+
+      disc_percent:
+        row.disc_percent,
+
+      disc_amt:
+        row.disc_amt,
+
+      sale_rate:
+        row.sale_rate,
+
+      base_unit:
+        row.base_unit,
+
+      finalResponse: {
+
+        rate:
+          Number(
+            row.mrp || 0
+          ),
+
+        discountPct:
+          Number(
+            row.disc_percent || 0
+          ),
+
+        discountAmt:
+          Number(
+            row.disc_amt || 0
+          ),
+
+        sale_rate:
+          Number(
+            row.sale_rate || 0
+          )
+
+      }
+
+    }
+  );
+
+          
           result.push({
 
-            mode: "single",
+  mode: "single",
 
-            material_id:
-              row.material_id,
+  material_id:
+    row.material_id,
 
-            item_code:
-              String(
-                row.item_code || ""
-              ),
+  item_code:
+    String(
+      row.item_code || ""
+    ),
 
-            item_name:
-              row.item_name || "",
+  item_name:
+    row.item_name || "",
 
-            display_name:
-              row.item_name || "",
+  display_name:
+    row.item_name || "",
 
-            hsn_code:
-              String(
-                row.hsn_code || ""
-              ),
+  hsn_code:
+    String(
+      row.hsn_code || ""
+    ),
 
-            gst_percent:
-              Number(
-                row.gst_percent || 0
-              ),
+  gst_percent:
+    Number(
+      row.gst_percent || 0
+    ),
 
-            unit:
-              row.base_unit || "",
+  unit:
+    row.base_unit || "",
 
-            rate:
-              Number(
-                row.sale_rate || 0
-              )
+  // =========================
+  // PRICING
+  // =========================
 
-          });
+  mrp:
+    Number(
+      row.mrp || 0
+    ),
+
+  discountPct:
+    Number(
+      row.disc_percent || 0
+    ),
+
+  discountAmt:
+    Number(
+      row.disc_amt || 0
+    ),
+
+  disc_percent:
+    Number(
+      row.disc_percent || 0
+    ),
+
+  disc_amt:
+    Number(
+      row.disc_amt || 0
+    ),
+
+  sale_rate:
+    Number(
+      row.sale_rate || 0
+    ),
+
+  // IMPORTANT
+  // frontend expects MRP here
+  rate:
+    Number(
+      row.mrp || 0
+    )
+
+});
 
         }
 
@@ -2021,6 +2114,11 @@ app.get(
       // =========================
 
       variantRows.forEach((row) => {
+
+        console.log(
+              "RAW VARIANT ROW:",
+              row
+            );
 
        if (
 
@@ -2088,67 +2186,206 @@ app.get(
 
         }
 
-        result.push({
+        console.log(
+  "FINAL MULTI ITEM:",
+  {
 
-          mode: "multi",
+    description:
+      row.description,
 
-          material_id:
-            row.material_id,
+    variant:
+      row.variant,
 
-          variant_code:
-            String(
-              row.variant_code || ""
-            ),
+    selling_rate:
+      row.selling_rate,
 
-          item_name:
-            row.item_name || "",
+    sale_rate:
+      row.sale_rate,
 
-          description:
-            row.description || "",
+    mrp:
+      row.mrp,
 
-          variant:
-            row.variant || "",
+    disc_percent:
+      row.disc_percent,
 
-          sub_variant:
-            row.sub_variant || "",
+    disc_amt:
+      row.disc_amt,
 
-          qty:
-            Number(
-              row.qty || 0
-            ),
+    final_multiplier:
+      row.final_multiplier
 
-          final_multiplier:
-            Number(
-              row.final_multiplier || 0
-            ),
+  }
+);
 
-          base_unit:
-            row.base_unit || "",
+      // =========================
+// CALCULATE VALUES
+// =========================
 
-          display_name:
-            row.description || "",
+const mrp =
+  Number(row.mrp || 0);
 
-          hsn_code:
-            String(
-              mmRow.hsn_code || ""
-            ),
+const discountPct =
+  Number(
+    row.disc_percent || 0
+  );
 
-          gst_percent:
-            Number(
-              mmRow.gst_percent || 0
-            ),
+const discountAmt =
+  Number(
+    row.disc_amt || 0
+  );
 
-          unit:
-            row.variant || "",
+const finalRate =
 
-          rate:
-            Number(
-              row.sale_rate || 0
-            )
+  Number(
+    row.selling_rate ||
+    row.sale_rate ||
+    0
+  );
 
-        });
+// =========================
+// DEBUG
+// =========================
+
+console.log(
+  "RATE DEBUG:",
+  {
+
+    material_id:
+      row.material_id,
+
+    description:
+      row.description,
+
+    variant:
+      row.variant,
+
+    mrp,
+
+    discountPct,
+
+    discountAmt,
+
+    finalRate,
+
+    expectedFrontend: {
+
+      rate: mrp,
+
+      discountPct,
+
+      netRate:
+        finalRate
+
+    }
+
+  }
+);
+
+// =========================
+// PUSH FINAL RESULT
+// =========================
+
+result.push({
+
+  mode: "multi",
+
+  material_id:
+    row.material_id,
+
+  variant_code:
+    String(
+      row.variant_code || ""
+    ),
+
+  item_name:
+    row.item_name || "",
+
+  description:
+    row.description || "",
+
+  variant:
+    row.variant || "",
+
+  sub_variant:
+    row.sub_variant || "",
+
+  qty:
+    Number(
+      row.qty || 0
+    ),
+
+  final_multiplier:
+    Number(
+      row.final_multiplier || 0
+    ),
+
+  base_unit:
+    row.base_unit || "",
+
+  display_name:
+    row.description || "",
+
+  hsn_code:
+    String(
+      mmRow.hsn_code || ""
+    ),
+
+  gst_percent:
+    Number(
+      mmRow.gst_percent || 0
+    ),
+
+  unit:
+    row.variant || "",
+
+  // =========================
+  // PRICING
+  // =========================
+
+  mrp,
+
+  discountPct,
+
+  discountAmt,
+
+  disc_percent:
+    discountPct,
+
+  disc_amt:
+    discountAmt,
+
+  discount:
+    discountPct,
+
+  discount_amount:
+    discountAmt,
+
+  sale_rate:
+    finalRate,
+
+  // IMPORTANT
+  // frontend expects ORIGINAL MRP
+  // not discounted rate
+  rate:
+    mrp ||
+
+    finalRate ||
+
+    0
+
+});
 
       });
+
+      console.log(
+  "FINAL RESULT COUNT:",
+  result.length
+);
+
+console.log(
+  "FIRST RESULT:",
+  result[0]
+);
 
       // =========================
       // SUCCESS
@@ -4198,11 +4435,23 @@ app.get(
 
       }
 
+   const formattedData = {
+
+        ...data,
+
+        business_name:
+          data.businessname,
+
+        businessName:
+          data.businessname,
+
+      };
+
       return res.json({
 
         success: true,
 
-        data
+         data: formattedData
 
       });
 
@@ -4210,6 +4459,7 @@ app.get(
 
     catch (err) {
 
+      
       return res.json({
 
         success: false,
