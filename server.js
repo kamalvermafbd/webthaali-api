@@ -7843,29 +7843,7 @@ app.post(
 
       }
 
-      // =========================
-      // GENERATE NEXT ID
-      // =========================
-
-      let nextId = 1;
-
-      (existingData || []).forEach((row) => {
-
-        const currentId =
-
-          Number(
-            row.id || 0
-          );
-
-        nextId =
-
-          Math.max(
-            nextId,
-            currentId + 1
-          );
-
-      });
-
+      
       // =========================
       // INSERT SUB CATEGORY
       // =========================
@@ -7878,8 +7856,7 @@ app.post(
 
         .insert([{
 
-          id:
-            nextId,
+         
 
           company_code:
             company_code,
@@ -12110,6 +12087,401 @@ if (duplicateExists) {
     }
 
     catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// LOGIN USER
+// =========================
+
+app.post(
+  "/loginUser",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      // =========================
+      // INPUTS
+      // =========================
+
+      const email =
+
+        String(
+          body.email || ""
+        )
+          .trim()
+          .toLowerCase();
+
+      const password =
+
+        String(
+          body.password || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!email) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Email or mobile required"
+
+        });
+
+      }
+
+      if (!password) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Password required"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH USERS
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("usersheet")
+
+        .select("*");
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FIND USER
+      // =========================
+
+      const user =
+
+        (data || []).find((row) => {
+
+          const rowEmail =
+
+            String(
+              row.email || ""
+            )
+              .trim()
+              .toLowerCase();
+
+          const rowMobile =
+
+            String(
+              row.mobile || ""
+            ).trim();
+
+          const rowPassword =
+
+            String(
+              row.password || ""
+            ).trim();
+
+          const active =
+
+            row.is_active === true;
+
+          const loginMatch =
+
+            rowEmail === email
+
+            ||
+
+            rowMobile === email;
+
+          return (
+
+            loginMatch
+
+            &&
+
+            rowPassword === password
+
+            &&
+
+            active
+
+          );
+
+        });
+
+      // =========================
+      // INVALID LOGIN
+      // =========================
+
+      if (!user) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Invalid login"
+
+        });
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          user_id:
+            user.user_id || "",
+
+          email:
+            user.email || "",
+
+          mobile:
+            user.mobile || "",
+
+          company_code:
+            user.company_code || "",
+
+          name:
+            user.name || "",
+               role:
+      user.role || "USER"
+
+        }
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "LOGIN ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// FORGOT PASSWORD
+// =========================
+
+app.post(
+  "/forgotPassword",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      // =========================
+      // INPUT
+      // =========================
+
+      const email =
+
+        String(
+          body.email || ""
+        )
+          .trim()
+          .toLowerCase();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!email) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Email required"
+
+        });
+
+      }
+
+      // =========================
+      // FIND USER
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("usersheet")
+
+        .select("*")
+
+        .eq(
+          "email",
+          email
+        )
+
+        .single();
+
+      if (error || !data) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Email not found"
+
+        });
+
+      }
+
+      // =========================
+      // GET PASSWORD
+      // =========================
+
+      const password =
+
+        String(
+          data.password || ""
+        );
+
+      // =========================
+      // SEND EMAIL
+      // =========================
+
+      const nodemailer =
+        require("nodemailer");
+
+      const transporter =
+
+        nodemailer.createTransport({
+
+          service: "gmail",
+
+          auth: {
+
+            user:
+              process.env.EMAIL_USER,
+
+            pass:
+              process.env.EMAIL_PASS
+
+          }
+
+        });
+
+      await transporter.sendMail({
+
+        from:
+          process.env.EMAIL_USER,
+
+        to:
+          email,
+
+        subject:
+          "BillKaro Password Recovery",
+
+        html: `
+
+          <div style="font-family:Arial;padding:20px">
+
+            <h2>
+              BillKaro Password Recovery
+            </h2>
+
+            <p>
+              Your password is:
+            </p>
+
+            <h1>
+              ${password}
+            </h1>
+
+          </div>
+
+        `
+
+      });
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Password sent to email"
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "FORGOT PASSWORD ERROR:",
+        err
+      );
 
       return res.json({
 
