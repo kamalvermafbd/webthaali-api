@@ -13186,6 +13186,341 @@ app.post(
   }
 );
 
+
+app.post(
+  "/searchAgentUser",
+  async (req, res) => {
+
+    try {
+
+      const { mobile } =
+        req.body;
+
+      if (!mobile) {
+
+        return res.json({
+          success: false,
+          error: "Mobile number required",
+        });
+
+      }
+
+      const {
+        data,
+        error,
+      } = await supabase
+        .from("usersheet")
+        .select("*")
+        .eq(
+          "mobile",
+          mobile
+        )
+        .single();
+
+      if (error || !data) {
+
+        return res.json({
+          success: false,
+          error: "User not found",
+        });
+
+      }
+
+      return res.json({
+        success: true,
+        data,
+      });
+
+    } catch (error) {
+
+      console.error(error);
+
+      return res.json({
+        success: false,
+        error:
+          "Something went wrong",
+      });
+
+    }
+
+  }
+);
+
+app.post(
+"/createPartner",
+async (req, res) => {
+
+
+try {
+
+  const {
+
+    mobile,
+
+    creatorRole,
+
+    creatorMobile
+
+  } = req.body;
+
+  if (!mobile) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "Mobile number required"
+
+    });
+
+  }
+
+  // =========================
+  // FIND USER
+  // =========================
+
+  const {
+
+    data: user,
+
+    error: userError
+
+  } = await supabase
+
+    .from("usersheet")
+
+    .select("*")
+
+    .eq(
+      "mobile",
+      mobile
+    )
+
+    .maybeSingle();
+
+  if (
+    userError ||
+    !user
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "User not found"
+
+    });
+
+  }
+
+  // =========================
+  // ROLE VALIDATION
+  // =========================
+
+  if (
+    user.role ===
+    "AGENT"
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "This mobile number is already registered as an Agent."
+
+    });
+
+  }
+
+  if (
+    user.role ===
+    "PARTNER"
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "This mobile number is already registered as a Partner."
+
+    });
+
+  }
+
+  if (
+    user.role ===
+    "OWNER"
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "Owner account cannot be registered as Partner."
+
+    });
+
+  }
+
+  // =========================
+  // DUPLICATE MAPPING CHECK
+  // =========================
+
+  const {
+
+    data: existingMapping
+
+  } = await supabase
+
+    .from("user_mapping")
+
+    .select("id")
+
+    .eq(
+      "user_mobile",
+      mobile
+    )
+
+    .eq(
+      "user_role",
+      "PARTNER"
+    )
+
+    .maybeSingle();
+
+  if (
+    existingMapping
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "Partner mapping already exists"
+
+    });
+
+  }
+
+  // =========================
+  // UPDATE USER ROLE
+  // =========================
+
+  const {
+
+    error: updateError
+
+  } = await supabase
+
+    .from("usersheet")
+
+    .update({
+
+      role:
+        "PARTNER"
+
+    })
+
+    .eq(
+      "mobile",
+      mobile
+    );
+
+  if (
+    updateError
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        updateError.message
+
+    });
+
+  }
+
+  // =========================
+  // USER MAPPING ENTRY
+  // =========================
+
+  const {
+
+    error: mappingError
+
+  } = await supabase
+
+    .from("user_mapping")
+
+    .insert({
+
+      user_mobile:
+        mobile,
+
+      user_role:
+        "PARTNER",
+
+      creator_role:
+        creatorRole,
+
+      creator_mobile:
+        creatorMobile
+
+    });
+
+  if (
+    mappingError
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        mappingError.message
+
+    });
+
+  }
+
+  return res.json({
+
+    success: true,
+
+    message:
+      "Partner created successfully"
+
+  });
+
+} catch (error) {
+
+  console.error(
+    error
+  );
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Something went wrong"
+
+  });
+
+}
+
+
+}
+);
+
+
 app.listen(
   process.env.PORT,
   () => {
