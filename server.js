@@ -163,11 +163,21 @@ console.log(
 
     .update({
 
-     invoice_number:
-  invoice.invoiceNumber || "",
+    invoice_number:
+
+  invoice.doc_type === "quotation"
+
+    ? null
+
+    : invoice.invoiceNumber || "",
 
 invoice_date:
-  invoice.invoiceDate || "",
+
+  invoice.doc_type === "quotation"
+
+    ? null
+
+    : invoice.invoiceDate || "",
 
 customer_name:
   invoice.customer?.name || "",
@@ -248,11 +258,21 @@ grand_total:
       doc_type:
         invoice.doc_type || "invoice",
 
-      quote_no:
-  invoice.Quote_No || "",
+   quote_no:
+
+  invoice.doc_type === "quotation"
+
+    ? invoice.Quote_No || ""
+
+    : "",
 
 quote_dt:
-  invoice.Quote_Dt || null,
+
+  invoice.doc_type === "quotation"
+
+    ? invoice.Quote_Dt || null
+
+    : null,
 
   
 
@@ -279,6 +299,53 @@ quote_dt:
   }
 );
 
+console.log(
+  "FINAL INSERT DATA:",
+  {
+    invoice_id: invoiceId,
+    doc_type: invoice.doc_type,
+    quote_no: invoice.Quote_No,
+    quote_dt: invoice.Quote_Dt,
+    invoice_number: invoice.invoiceNumber
+  }
+);
+
+console.log(
+  "QQQ-1 DOC TYPE =>",
+  invoice.doc_type
+);
+
+console.log(
+  "QQQ-2 QUOTE NO =>",
+  invoice.Quote_No
+);
+
+console.log(
+  "QQQ-3 QUOTE DT =>",
+  invoice.Quote_Dt
+);
+
+console.log(
+  "QQQ-4 GENERATED ID =>",
+  invoiceId
+);
+
+console.log(
+  "QQQ-5 INSERT PAYLOAD =>",
+  {
+    invoice_number:
+      invoice.invoiceNumber,
+
+    invoice_date:
+      invoice.invoiceDate,
+
+    quote_no:
+      invoice.Quote_No,
+
+    quote_dt:
+      invoice.Quote_Dt
+  }
+);
   const {
   error: invoiceError
 } = await supabase
@@ -294,12 +361,21 @@ invoice_id:
 share_token:
   crypto.randomBytes(16).toString("hex"),
 
-
 invoice_number:
-  invoice.invoiceNumber || "",
+
+  invoice.doc_type === "quotation"
+
+    ? null
+
+    : invoice.invoiceNumber || "",
 
 invoice_date:
-  invoice.invoiceDate || "",
+
+  invoice.doc_type === "quotation"
+
+    ? null
+
+    : invoice.invoiceDate || "",
 
 customer_name:
   invoice.customer?.name || "",
@@ -379,28 +455,42 @@ shipping_state_code:
       doc_type:
         invoice.doc_type || "invoice",
 
-      quote_no:
-  invoice.Quote_No || "",
+     quote_no:
+
+  invoice.doc_type === "quotation"
+
+    ? invoice.Quote_No || ""
+
+    : "",
 
 quote_dt:
-  invoice.Quote_Dt || null
+
+  invoice.doc_type === "quotation"
+
+    ? invoice.Quote_Dt || null
+
+    : null,
 
 
     }]);
 
-    if (invoiceError) {
+    console.log(
+  "INVOICE ERROR FULL:",
+  invoiceError
+);
 
-  console.log(
-    "INVOICE ERROR:",
-    invoiceError
-  );
+console.log(
+  "QQQ-6 SUPABASE ERROR =>",
+  invoiceError
+);
+
+if (invoiceError) {
 
   return res.status(400).json({
 
     success: false,
 
-    error:
-      invoiceError.message
+    error: JSON.stringify(invoiceError)
 
   });
 
@@ -609,6 +699,8 @@ app.get(
 
       }
 
+      
+
       if (!company_code) {
 
         return res.status(400).json({
@@ -647,6 +739,10 @@ app.get(
 
         .single();
 
+        console.log("RECEIVED invoiceId:", invoiceId);
+console.log("RECEIVED company_code:", company_code);
+console.log("FOUND INVOICE:", invoice);
+console.log("INVOICE ERROR:", invoiceError);
       if (invoiceError || !invoice) {
 
         return res.status(404).json({
@@ -12783,6 +12879,304 @@ if (companyError) {
         success: false,
 
         message:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/createAgent",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const agentName =
+
+        String(
+          body.agentName || ""
+        ).trim();
+
+      const mobile =
+
+  String(
+    body.mobile || ""
+  )
+
+    .replace(/\r/g, "")
+    .replace(/\n/g, "")
+    .trim();
+
+      const email =
+
+        String(
+          body.email || ""
+        )
+          .trim()
+          .toLowerCase();
+
+      const creatorRole =
+
+        String(
+          body.creatorRole || ""
+        )
+          .trim()
+          .toUpperCase();
+
+      const creatorMobile =
+
+        String(
+          body.creatorMobile || ""
+        ).trim();
+
+      console.log(
+        "CREATE AGENT BODY:",
+        body
+      );
+
+      // =========================
+      // CHECK USER EXISTS
+      // =========================
+
+      const {
+        data: existingUser,
+        error: userError
+      } = await supabase
+
+        .from("usersheet")
+
+        .select("*")
+
+        .eq(
+          "mobile",
+          mobile
+        )
+
+        .limit(1);
+
+      if (userError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            userError.message
+
+        });
+
+      }
+
+      if (
+        !existingUser ||
+        existingUser.length === 0
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "User not found"
+
+        });
+
+      }
+
+      // =========================
+      // ROLE MUST BE BLANK
+      // =========================
+
+      if (
+        String(
+          existingUser[0]?.role || ""
+        ).trim() !== ""
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "User already assigned role"
+
+        });
+
+      }
+
+      console.log(
+  "MOBILE CHECK:",
+  JSON.stringify(mobile)
+);
+
+      // =========================
+      // CHECK ALREADY MAPPED
+      // =========================
+
+      const {
+        data: existingMapping,
+        error: mappingError
+      } = await supabase
+
+        .from("user_mapping")
+
+        .select("*")
+        
+        .eq(
+          "user_mobile",
+          mobile
+        )
+
+        .limit(1);
+
+        console.log(
+  "EXISTING MAPPING:",
+  existingMapping
+);
+
+
+      if (mappingError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            mappingError.message
+
+        });
+
+      }
+
+      if (
+        existingMapping &&
+        existingMapping.length > 0
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Mobile already mapped"
+
+        });
+
+      }
+
+      // =========================
+      // INSERT MAPPING
+      // =========================
+
+      const {
+        data: insertData,
+        error: insertError
+      } = await supabase
+
+        .from("user_mapping")
+
+        .insert([
+
+          {
+
+            user_mobile:
+              mobile,
+
+            user_role:
+              "AGENT",
+
+            creator_role:
+              creatorRole,
+
+            creator_mobile:
+              creatorMobile
+
+          }
+
+        ])
+
+        .select();
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      console.log(
+        "AGENT INSERTED:",
+        insertData
+      );
+
+      // =========================
+      // UPDATE USER ROLE
+      // =========================
+
+      const {
+        error: roleUpdateError
+      } = await supabase
+
+        .from("usersheet")
+
+        .update({
+
+          role: "AGENT"
+
+        })
+
+        .eq(
+          "mobile",
+          mobile
+        );
+
+      if (
+        roleUpdateError
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            roleUpdateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Agent created"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
           err.message
 
       });
