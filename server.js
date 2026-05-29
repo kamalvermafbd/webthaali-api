@@ -12288,7 +12288,7 @@ app.post(
           name:
             user.name || "",
                role:
-      user.role || "USER"
+      user.role || ""
 
         }
 
@@ -12488,6 +12488,301 @@ app.post(
         success: false,
 
         error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/searchLicenseUser",
+  async (req, res) => {
+
+    try {
+
+      const { mobile } = req.body;
+
+      if (!mobile) {
+
+        return res.json({
+          success: false,
+          message: "Mobile number required",
+        });
+
+      }
+
+      // STEP 1
+      // SEARCH USER
+
+      const { data: userRow, error: userError } =
+        await supabase
+          .from("usersheet")
+          .select("*")
+          .eq("mobile", mobile)
+          .single();
+
+      if (userError || !userRow) {
+
+        return res.json({
+          success: false,
+          message: "User not found",
+        });
+
+      }
+
+// =========================
+// GET COMPANY DETAILS
+// =========================
+
+const { data: companyRow } =
+  await supabase
+    .from("company")
+    .select(`
+  company_code,
+  businessname,
+  address,
+  state,
+  partner_id,
+  agent_id
+`)
+    .eq(
+      "company_code",
+      userRow.company_code
+    )
+    .single();
+
+
+// =========================
+// GET LAST LICENSE
+// =========================
+
+const { data: lastLicense } =
+  await supabase
+    .from("license_master")
+    .select("*")
+    .eq(
+      "company_code",
+      userRow.company_code
+    )
+    .order(
+      "valid_to",
+      {
+        ascending: false
+      }
+    )
+    .limit(1)
+    .maybeSingle();
+
+console.log(
+  "LICENSE SEARCH RESULT",
+  {
+    mobile,
+    userRow,
+    companyRow,
+    lastLicense
+  }
+);
+
+     return res.json({
+
+  success: true,
+
+  data: {
+
+    name:
+      userRow?.name || "",
+
+    company_code:
+      userRow?.company_code || "",
+
+    businessname:
+  companyRow?.businessname || "",
+
+    address:
+      companyRow?.address || "",
+
+    state:
+      companyRow?.state || "",
+
+    partner_id:
+      companyRow?.partner_id || null,
+
+    agent_id:
+      companyRow?.agent_id || null,
+
+    license_type:
+      lastLicense
+        ? "Renewal"
+        : "Fresh Activation",
+
+    last_renewal_date:
+      lastLicense?.valid_to || null,
+
+  },
+
+});
+
+    } catch (err) {
+
+      console.error(
+        "searchLicenseUser error",
+        err
+      );
+
+      res.json({
+        success: false,
+        message: err.message,
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/saveLicense",
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company_code,
+        valid_from,
+        valid_to,
+        status,
+        created_by,
+        collection_status
+
+      } = req.body;
+
+      if (
+        !company_code ||
+        !valid_from ||
+        !valid_to
+      ) {
+
+        return res.json({
+
+          success: false,
+          message:
+            "Missing required fields"
+
+        });
+
+      }
+
+      const { data, error } =
+        await supabase
+          .from(
+            "license_master"
+          )
+          .insert([{
+
+            company_code,
+
+            valid_from,
+
+            valid_to,
+
+            status:
+              status ||
+              "Active",
+
+            created_by:
+              created_by ||
+              "OWNER",
+
+            collection_status:
+              collection_status ||
+              "Pending"
+
+          }])
+          .select();
+
+      if (error) {
+
+        console.error(
+          "SAVE LICENSE ERROR",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+          message:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+// UPDATE COMPANY LICENSE
+// =========================
+
+const {
+  error: companyError
+} = await supabase
+  .from("company")
+  .update({
+
+    license_from: valid_from,
+
+    license_till: valid_to
+
+  })
+  .eq(
+    "company_code",
+    company_code
+  );
+
+if (companyError) {
+
+  console.error(
+    "COMPANY UPDATE ERROR",
+    companyError
+  );
+
+  return res.json({
+
+    success: false,
+
+    message:
+      companyError.message
+
+  });
+
+}
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "License activated successfully",
+
+        data
+
+      });
+
+    } catch (err) {
+
+      console.error(
+        "saveLicense error",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        message:
           err.message
 
       });
