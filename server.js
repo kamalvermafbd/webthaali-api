@@ -12753,9 +12753,16 @@ app.post(
         valid_to,
         status,
         created_by,
-        collection_status
+        collection_status,
+         login_mobile,
+  role
 
       } = req.body;
+
+      console.log(
+  "SAVE LICENSE BODY",
+  req.body
+);
 
       if (
         !company_code ||
@@ -12772,6 +12779,105 @@ app.post(
         });
 
       }
+
+// =========================
+// ROLE SECURITY CHECK
+// =========================
+
+const roleUpper =
+  String(role || "")
+    .toUpperCase();
+
+if (
+  roleUpper === "AGENT" ||
+  roleUpper === "PARTNER"
+) {
+
+  const {
+    data: companyRow,
+    error: companyFetchError
+  } = await supabase
+    .from("company")
+    .select(`
+      agent_id,
+      partner_id
+    `)
+    .eq(
+      "company_code",
+      company_code
+    )
+    .single();
+
+  if (
+    companyFetchError ||
+    !companyRow
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      message:
+        "Company not found"
+
+    });
+
+  }
+
+  if (
+    roleUpper === "AGENT" &&
+    String(
+      companyRow.agent_id || ""
+    ).trim() !==
+    String(
+      login_mobile || ""
+    ).trim()
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      message:
+        "This company is not assigned to you"
+
+    });
+
+  }
+
+  if (
+    roleUpper === "PARTNER" &&
+    String(
+      companyRow.partner_id || ""
+    ).trim() !==
+    String(
+      login_mobile || ""
+    ).trim()
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      message:
+        "This company is not assigned to you"
+
+    });
+
+  }
+
+}
+
+const { data: existingLicense } =
+  await supabase
+    .from("license_master")
+    .select("id")
+    .eq(
+      "company_code",
+      company_code
+    )
+    .limit(1)
+    .maybeSingle();
 
       const { data, error } =
         await supabase
@@ -12818,21 +12924,31 @@ app.post(
 
       }
 
-      // =========================
+
+// =========================
 // UPDATE COMPANY LICENSE
 // =========================
+
+const updateData = {
+
+  license_from: valid_from,
+
+  license_till: valid_to
+
+};
+
+if (!existingLicense) {
+
+  updateData.license_start =
+    valid_from;
+
+}
 
 const {
   error: companyError
 } = await supabase
   .from("company")
-  .update({
-
-    license_from: valid_from,
-
-    license_till: valid_to
-
-  })
+  .update(updateData)
   .eq(
     "company_code",
     company_code
