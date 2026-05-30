@@ -13898,6 +13898,234 @@ app.post(
 
 );
 
+
+app.post(
+  "/searchCustomerUser",
+  async (req, res) => {
+
+    try {
+
+      const { mobile } =
+        req.body;
+
+      if (!mobile) {
+
+        return res.json({
+          success: false,
+          error: "Mobile number required",
+        });
+
+      }
+
+      // STEP 1
+      // FIND USER
+
+      const {
+        data: userData,
+        error: userError,
+      } = await supabase
+        .from("usersheet")
+        .select("*")
+        .eq(
+          "mobile",
+          mobile
+        )
+        .single();
+
+      if (
+        userError ||
+        !userData
+      ) {
+
+        return res.json({
+          success: false,
+          error: "User not found",
+        });
+
+      }
+
+      // STEP 2
+      // FIND COMPANY
+
+      let companyData = null;
+
+      if (
+        userData.company_code
+      ) {
+
+        const {
+          data,
+          error,
+        } = await supabase
+          .from("company")
+          .select("*")
+          .eq(
+            "company_code",
+            userData.company_code
+          )
+          .single();
+
+        if (!error) {
+
+          companyData = data;
+
+        }
+
+      }
+
+      // STEP 3
+      // RETURN COMBINED DATA
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          mobile:
+            userData.mobile || "",
+
+          name:
+            userData.name || "",
+
+          email:
+            userData.email || "",
+
+          role:
+           userData.role || "",
+
+          companyCode:
+            userData.company_code || "",
+
+          companyName:
+            companyData?.businessname || "",
+
+          address:
+            companyData?.address || "",
+
+        },
+
+      });
+
+    } catch (error) {
+
+      console.error(error);
+
+      return res.json({
+
+        success: false,
+
+        error:
+          "Something went wrong",
+
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/getMyCompanies",
+  async (req, res) => {
+
+    try {
+
+      const {
+        mobile,
+        role,
+      } = req.body;
+
+      let query =
+        supabase
+          .from("company")
+          .select("*");
+
+      if (
+        role === "OWNER"
+      ) {
+
+        // all companies
+
+      }
+
+      else if (
+        role === "PARTNER"
+      ) {
+
+        query =
+          query.eq(
+            "partner_id",
+            mobile
+          );
+
+      }
+
+      else if (
+        role === "AGENT"
+      ) {
+
+        query =
+          query.eq(
+            "agent_id",
+            mobile
+          );
+
+      }
+
+      else {
+
+        return res.json({
+          success: false,
+          error:
+            "Invalid role",
+        });
+
+      }
+
+      const {
+        data,
+        error,
+      } = await query;
+
+      if (error) {
+
+        return res.json({
+          success: false,
+          error:
+            error.message,
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data:
+          data || [],
+
+      });
+
+    } catch (error) {
+
+      console.error(error);
+
+      return res.json({
+
+        success: false,
+
+        error:
+          "Something went wrong",
+
+      });
+
+    }
+
+  }
+);
+
 app.listen(
   process.env.PORT,
   () => {
