@@ -14037,18 +14037,58 @@ app.post(
         role,
       } = req.body;
 
+console.log(
+  "ROLE RECEIVED:",
+  role
+);
+
       let query =
         supabase
           .from("company")
           .select("*");
+if (role === "OWNER") {
 
-      if (
-        role === "OWNER"
-      ) {
+  const {
+    data: users,
+    error: userError,
+  } = await supabase
+    .from("usersheet")
+    .select("mobile, role")
+    .eq("role", "USER");
 
-        // all companies
+  if (userError) {
+    return res.json({
+      success: false,
+      error: userError.message,
+    });
+  }
 
-      }
+  const userMobiles =
+    (users || []).map(
+      (u) => String(u.mobile)
+    );
+
+  console.log(
+    "USER MOBILES:",
+    userMobiles
+  );
+
+  if (userMobiles.length === 0) {
+
+    return res.json({
+      success: true,
+      data: []
+    });
+
+  }
+
+  query =
+    query.in(
+      "mobile",
+      userMobiles
+    );
+
+}
 
       else if (
         role === "PARTNER"
@@ -14093,18 +14133,103 @@ app.post(
 
         return res.json({
           success: false,
-          error:
-            error.message,
+          error: error.message,
         });
 
       }
+
+      console.log(
+  "GET MY COMPANIES RESULT:",
+  data
+);
+
+
+const {
+  data: allUsers,
+  error: usersError
+} = await supabase
+
+  .from("usersheet")
+
+  .select(
+    "mobile,name,role"
+  );
+
+if (usersError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      usersError.message,
+
+  });
+
+}
+
+const userMap =
+
+  new Map(
+
+    (allUsers || []).map(
+
+      (u) => [
+
+        String(
+          u.mobile
+        ),
+
+        u
+
+      ]
+
+    )
+
+  );
+
+const finalData =
+
+  (data || []).map(
+
+    (company) => ({
+
+      ...company,
+
+      customer_name:
+
+        userMap.get(
+          String(
+            company.mobile
+          )
+        )?.name || "",
+
+      partner_name:
+
+        userMap.get(
+          String(
+            company.partner_id || ""
+          )
+        )?.name || "",
+
+      agent_name:
+
+        userMap.get(
+          String(
+            company.agent_id || ""
+          )
+        )?.name || ""
+
+    })
+
+  );
 
       return res.json({
 
         success: true,
 
         data:
-          data || [],
+  finalData,
 
       });
 
