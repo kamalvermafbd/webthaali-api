@@ -14188,41 +14188,69 @@ const userMap =
 
   );
 
+const today =
+  new Date();
+
 const finalData =
 
   (data || []).map(
 
-    (company) => ({
+    (company) => {
 
-      ...company,
+      let subscription_status =
+        "NOT_SUBSCRIBED";
 
-      customer_name:
+      if (
+        company.license_from
+      ) {
 
-        userMap.get(
-          String(
-            company.mobile
-          )
-        )?.name || "",
+        subscription_status =
+          "ACTIVE";
 
-      partner_name:
+        if (
+          company.license_till &&
+          new Date(
+            company.license_till
+          ) < today
+        ) {
 
-        userMap.get(
-          String(
-            company.partner_id || ""
-          )
-        )?.name || "",
+          subscription_status =
+            "EXPIRED";
 
-      agent_name:
+        }
 
-        userMap.get(
-          String(
-            company.agent_id || ""
-          )
-        )?.name || ""
+      }
 
-    })
+     return {
 
-  );
+  ...company,
+
+  customer_name:
+    userMap.get(
+      String(company.mobile)
+    )?.name || "",
+
+  partner_name:
+    userMap.get(
+      String(
+        company.partner_id || ""
+      )
+    )?.name || "",
+
+  agent_name:
+    userMap.get(
+      String(
+        company.agent_id || ""
+      )
+    )?.name || "",
+
+  subscription_status
+
+};
+
+}
+
+);
 
       return res.json({
 
