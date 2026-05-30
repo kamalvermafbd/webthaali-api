@@ -13521,6 +13521,383 @@ try {
 );
 
 
+app.post(
+  "/createCustomer",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        customerName,
+        mobile,
+        email,
+        creatorRole,
+        creatorMobile
+
+      } = req.body;
+
+      if (!mobile) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Mobile number required"
+
+        });
+
+      }
+
+      // =========================
+      // FIND USER
+      // =========================
+
+      const {
+
+        data: user,
+
+        error: userError
+
+      } = await supabase
+
+        .from("usersheet")
+
+        .select("*")
+
+        .eq(
+          "mobile",
+          mobile
+        )
+
+        .maybeSingle();
+
+      if (
+        userError ||
+        !user
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "User not found"
+
+        });
+
+      }
+
+      // =========================
+      // ROLE MUST BE BLANK
+      // MAIN CONTROL
+      // =========================
+
+      if (
+        String(
+          user.role || ""
+        ).trim() !== ""
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "User already assigned role"
+
+        });
+
+      }
+
+      // =========================
+      // FIND COMPANY
+      // =========================
+
+      const {
+
+        data: company,
+
+        error: companyError
+
+      } = await supabase
+
+        .from("company")
+
+        .select("*")
+
+        .eq(
+          "mobile",
+          mobile
+        )
+
+        .maybeSingle();
+
+      if (
+        companyError ||
+        !company
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Company not found"
+
+        });
+
+      }
+
+      // =========================
+      // ALREADY ASSIGNED ?
+      // SAFETY CHECK
+      // =========================
+
+      if (
+
+        String(
+          company.partner_id || ""
+        ).trim() !== ""
+
+        ||
+
+        String(
+          company.agent_id || ""
+        ).trim() !== ""
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Customer already assigned"
+
+        });
+
+      }
+
+      let partnerId = null;
+
+      let agentId = null;
+
+      // =========================
+      // OWNER
+      // =========================
+
+      if (
+        creatorRole ===
+        "OWNER"
+      ) {
+
+        partnerId = null;
+
+        agentId = null;
+
+      }
+
+      // =========================
+      // PARTNER
+      // =========================
+
+      else if (
+        creatorRole ===
+        "PARTNER"
+      ) {
+
+        partnerId =
+          creatorMobile;
+
+        agentId = null;
+
+      }
+
+      // =========================
+      // AGENT
+      // =========================
+
+      else if (
+        creatorRole ===
+        "AGENT"
+      ) {
+
+        agentId =
+          creatorMobile;
+
+        const {
+
+          data: agentMapping,
+
+          error: mappingError
+
+        } = await supabase
+
+          .from(
+            "user_mapping"
+          )
+
+          .select("*")
+
+          .eq(
+            "user_mobile",
+            creatorMobile
+          )
+
+          .eq(
+            "user_role",
+            "AGENT"
+          )
+
+          .maybeSingle();
+
+        if (
+          mappingError
+        ) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              mappingError.message
+
+          });
+
+        }
+
+        // AGENT UNDER PARTNER
+
+        if (
+          agentMapping &&
+          String(
+            agentMapping.creator_role || ""
+          ).toUpperCase() ===
+            "PARTNER"
+        ) {
+
+          partnerId =
+            agentMapping.creator_mobile;
+
+        }
+
+      }
+
+      // =========================
+      // UPDATE COMPANY
+      // =========================
+
+      const {
+
+        error: updateError
+
+      } = await supabase
+
+        .from("company")
+
+        .update({
+
+          partner_id:
+            partnerId,
+
+          agent_id:
+            agentId
+
+        })
+
+        .eq(
+          "mobile",
+          mobile
+        );
+
+      if (
+        updateError
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE USER ROLE
+      // =========================
+
+      const {
+
+        error: roleError
+
+      } = await supabase
+
+        .from("usersheet")
+
+        .update({
+
+          role: "USER"
+
+        })
+
+        .eq(
+          "mobile",
+          mobile
+        );
+
+      if (
+        roleError
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            roleError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Customer added successfully"
+
+      });
+
+    }
+
+    catch (error) {
+
+      console.error(
+        error
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          error.message
+
+      });
+
+    }
+
+  }
+
+);
+
 app.listen(
   process.env.PORT,
   () => {
