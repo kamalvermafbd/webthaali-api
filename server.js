@@ -14666,8 +14666,10 @@ if (
     row.creator_mobile
   ] || "",  
 
-            created_at:
-              row.created_at
+           created_at:
+  new Date(
+    row.created_at
+  ).toISOString()
 
           })
 
@@ -14730,8 +14732,10 @@ partner_name:
     row.partner_id
   ] || "",
 
-            created_at:
-              row.created_on
+           created_at:
+  new Date(
+    row.created_on
+  ).toISOString()
 
           })
 
@@ -14799,6 +14803,300 @@ partner_name:
   }
 );
 
+
+app.post(
+  "/getAgentActivationReport",
+  async (req, res) => {
+
+    try {
+
+     const {
+  mobile,
+  role,
+  dateFilter,
+  fromDate,
+  toDate
+} = req.body || {};
+
+      if (!mobile) {
+
+        return res.json({
+          success: false,
+          message: "Mobile required"
+        });
+
+      }
+
+      let query = supabase
+        .from("license_master")
+        .select("*");
+
+
+        const today =
+  new Date();
+
+if (
+  dateFilter ===
+  "TODAY"
+) {
+
+  const start =
+    new Date();
+
+  start.setHours(
+    0, 0, 0, 0
+  );
+
+  query =
+    query.gte(
+      "created_on",
+      start.toISOString()
+    );
+
+}
+else if (
+  dateFilter ===
+  "THIS_WEEK"
+) {
+
+  const start =
+    new Date();
+
+  const day =
+    start.getDay();
+
+  const diff =
+    day === 0
+      ? 6
+      : day - 1;
+
+  start.setDate(
+    start.getDate() -
+    diff
+  );
+
+  start.setHours(
+    0, 0, 0, 0
+  );
+
+  query =
+    query.gte(
+      "created_on",
+      start.toISOString()
+    );
+
+}
+
+else if (
+  dateFilter ===
+  "THIS_MONTH"
+) {
+
+  const start =
+    new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      1
+    );
+
+  query =
+    query.gte(
+      "created_on",
+      start.toISOString()
+    );
+
+}
+
+else if (
+  dateFilter ===
+  "DATE_RANGE" &&
+  fromDate &&
+  toDate
+) {
+
+  query =
+    query
+      .gte(
+        "created_on",
+        fromDate
+      )
+      .lte(
+        "created_on",
+        toDate +
+        "T23:59:59"
+      );
+
+}
+
+      const userRole =
+        String(role || "")
+          .toUpperCase();
+
+      if (
+        userRole === "PARTNER"
+      ) {
+
+        query =
+          query.eq(
+            "partner_id",
+            mobile
+          );
+
+      }
+
+      else if (
+        userRole === "AGENT"
+      ) {
+
+        query =
+          query.eq(
+            "agent_id",
+            mobile
+          );
+
+      }
+
+      const {
+        data: licenses,
+        error: licenseError
+      } = await query;
+
+      if (licenseError) {
+        throw licenseError;
+      }
+
+      const {
+        data: users,
+        error: usersError
+      } = await supabase
+        .from("usersheet")
+        .select(
+          "mobile,name"
+        );
+
+      if (usersError) {
+        throw usersError;
+      }
+
+      const userMap = {};
+
+      (users || []).forEach(
+        (u) => {
+
+          userMap[
+            String(u.mobile)
+          ] = u.name;
+
+        }
+      );
+
+      const grouped = {};
+
+      (licenses || []).forEach(
+        (row) => {
+
+          const agentMobile =
+            String(
+              row.agent_id || ""
+            );
+
+          if (!agentMobile) {
+            return;
+          }
+
+          if (
+            !grouped[
+              agentMobile
+            ]
+          ) {
+
+            grouped[
+              agentMobile
+            ] = {
+
+              agent_mobile:
+                agentMobile,
+
+              agent_name:
+
+                userMap[
+                  agentMobile
+                ] || "",
+
+              activations: 0,
+
+              collection: 0,
+
+              details: []
+
+            };
+
+          }
+
+          grouped[
+            agentMobile
+          ].activations += 1;
+
+          grouped[
+            agentMobile
+          ].collection +=
+            Number(
+              row.subscription_amt || 0
+            );
+
+          grouped[
+            agentMobile
+          ].details.push({
+
+            date:
+              row.created_on,
+
+            company:
+              row.company_code,
+
+            plan:
+              row.selected_plan,
+
+            amount:
+              Number(
+                row.subscription_amt || 0
+              )
+
+          });
+
+        }
+      );
+
+      return res.json({
+
+        success: true,
+
+        data:
+
+          Object.values(
+            grouped
+          )
+
+      });
+
+    } catch (error) {
+
+      console.error(error);
+
+      return res.json({
+
+        success: false,
+
+        message:
+          error.message ||
+          "Server Error"
+
+      });
+
+    }
+
+  }
+);
 
 
 app.get(
