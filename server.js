@@ -12755,7 +12755,9 @@ app.post(
         created_by,
         collection_status,
          login_mobile,
-  role
+        role,
+        selected_plan,
+        subscription_amt
 
       } = req.body;
 
@@ -12879,6 +12881,67 @@ const { data: existingLicense } =
     .limit(1)
     .maybeSingle();
 
+    let partner_id = null;
+let agent_id = null;
+
+if (
+  roleUpper === "PARTNER"
+) {
+
+  partner_id =
+    login_mobile;
+
+}
+
+else if (
+  roleUpper === "AGENT"
+) {
+
+  agent_id =
+    login_mobile;
+
+  const {
+  data: mappingRow,
+  error: mappingError
+} = await supabase
+  .from(
+    "user_mapping"
+  )
+    .select(`
+      creator_role,
+      creator_mobile
+    `)
+    .eq(
+      "user_mobile",
+      login_mobile
+    )
+    .eq(
+      "user_role",
+      "AGENT"
+    )
+    .maybeSingle();
+
+    if (
+  mappingError
+) {
+
+  throw mappingError;
+
+}
+
+  if (
+    mappingRow &&
+    mappingRow.creator_role ===
+      "PARTNER"
+  ) {
+
+    partner_id =
+      mappingRow.creator_mobile;
+
+  }
+
+}
+
       const { data, error } =
         await supabase
           .from(
@@ -12902,7 +12965,15 @@ const { data: existingLicense } =
 
             collection_status:
               collection_status ||
-              "Pending"
+              "Pending",
+
+              partner_id,
+
+              agent_id,
+
+              selected_plan,
+
+              subscription_amt,
 
           }])
           .select();
@@ -14389,6 +14460,393 @@ const finalData =
           "Something went wrong",
 
       });
+
+    }
+
+  }
+);
+
+
+
+app.post(
+  "/getRecentActivities",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        mobile,
+        role
+      } = req.body || {};
+
+      if (!mobile) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Mobile required"
+
+        });
+
+      }
+
+      let userMappingQuery =
+
+        supabase
+
+          .from(
+            "user_mapping"
+          )
+
+          .select("*");
+
+      let licenseQuery =
+
+        supabase
+
+          .from(
+            "license_master"
+          )
+
+          .select("*");
+
+      const userRole =
+
+        String(
+          role || ""
+        ).toUpperCase();
+
+      if (
+        userRole ===
+        "PARTNER"
+      ) {
+
+        userMappingQuery =
+
+          userMappingQuery.eq(
+            "creator_mobile",
+            mobile
+          );
+
+        licenseQuery =
+
+          licenseQuery.eq(
+            "partner_id",
+            mobile
+          );
+
+      }
+
+      else if (
+        userRole ===
+        "AGENT"
+      ) {
+
+        userMappingQuery =
+
+          userMappingQuery.eq(
+            "user_mobile",
+            mobile
+          );
+
+        licenseQuery =
+
+          licenseQuery.eq(
+            "agent_id",
+            mobile
+          );
+
+      }
+
+
+      const usersResult =
+
+  await supabase
+    .from("usersheet")
+    .select(
+      "mobile,name"
+    );
+
+if (
+  usersResult.error
+) {
+  throw usersResult.error;
+}
+
+    const userMap = {};
+
+(usersResult.data || [])
+  .forEach((u) => {
+
+    userMap[
+      u.mobile
+    ] = u.name;
+
+  });
+
+      const [
+
+        userResult,
+
+        licenseResult
+
+      ] = await Promise.all([
+
+        userMappingQuery
+          .order(
+            "created_at",
+            {
+              ascending:
+                false
+            }
+          )
+          .limit(100),
+
+        licenseQuery
+          .order(
+            "created_on",
+            {
+              ascending:
+                false
+            }
+          )
+          .limit(100)
+
+      ]);
+
+      if (
+        userResult.error
+      ) {
+
+        throw userResult.error;
+
+      }
+
+      if (
+        licenseResult.error
+      ) {
+
+        throw licenseResult.error;
+
+      }
+
+      const userActivities =
+
+        (
+          userResult.data || []
+        ).map(
+
+          (row) => ({
+
+            activity_type:
+              "USER_CREATED",
+
+            activity:
+
+              `Created ${row.user_role}`,
+
+            user_mobile:
+              row.user_mobile,
+
+            user_role:
+              row.user_role,
+
+            creator_mobile:
+              row.creator_mobile,
+
+            creator_role:
+              row.creator_role,
+
+            creator_name:
+
+  userMap[
+    row.creator_mobile
+  ] || "",  
+
+            created_at:
+              row.created_at
+
+          })
+
+        );
+
+      const licenseActivities =
+
+        (
+          licenseResult.data || []
+        ).map(
+
+          (row) => ({
+
+            activity_type:
+              "LICENSE",
+
+            activity:
+
+              `${row.selected_plan} Plan Activated`,
+
+            company_code:
+              row.company_code,
+
+            selected_plan:
+              row.selected_plan,
+
+            amount:
+              row.subscription_amt,
+
+            created_by:
+              row.created_by,
+
+            partner_id:
+              row.partner_id,
+
+            agent_id:
+              row.agent_id,
+
+          creator_name:
+
+  userMap[
+    row.agent_id
+  ] ||
+
+  userMap[
+    row.partner_id
+  ] ||
+
+  "",
+
+agent_name:
+
+  userMap[
+    row.agent_id
+  ] || "",
+
+partner_name:
+
+  userMap[
+    row.partner_id
+  ] || "",
+
+            created_at:
+              row.created_on
+
+          })
+
+        );
+
+      const activities =
+
+        [
+
+          ...userActivities,
+
+          ...licenseActivities
+
+        ]
+
+          .sort(
+
+            (a, b) =>
+
+              new Date(
+                b.created_at
+              ) -
+
+              new Date(
+                a.created_at
+              )
+
+          )
+
+          .slice(
+            0,
+            100
+          );
+
+      return res.json({
+
+        success: true,
+
+        count:
+          activities.length,
+
+        data:
+          activities
+
+      });
+
+    } catch (error) {
+
+      console.error(
+        error
+      );
+
+      return res.json({
+
+        success: false,
+
+        message:
+          error.message ||
+          "Server Error"
+
+      });
+
+    }
+
+  }
+);
+
+
+
+app.get(
+  "/getActivePlans",
+  async (req, res) => {
+
+    try {
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("license")
+
+        .select("*")
+
+        .eq(
+          "launched",
+          true
+        )
+
+        .order(
+          "sort_order",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+        throw error;
+      }
+
+      return res.json({
+        success: true,
+        data
+      });
+
+    } catch (err) {
+
+      console.error(err);
+
+      return res.status(500)
+        .json({
+          success: false,
+          message:
+            err.message
+        });
 
     }
 
