@@ -14884,6 +14884,7 @@ app.post(
         .from("license_master")
         .select("*");
 
+              let partnerAgentMap = {};
 
         const today =
   new Date();
@@ -15009,6 +15010,195 @@ else if (
 
       }
 
+else if (
+  userRole === "OWNER"
+) {
+
+  const {
+    data: mappings,
+    error: mappingError
+  } = await supabase
+
+    .from("user_mapping")
+
+   .select(`
+  user_mobile,
+  user_role,
+  creator_mobile,
+  creator_role
+`)
+    .eq(
+      "creator_mobile",
+      mobile
+    )
+
+    .eq(
+      "creator_role",
+      "OWNER"
+    )
+
+  //  .eq(
+ //     "user_role",
+ //     "AGENT"
+ //   );
+
+  if (mappingError) {
+
+    throw mappingError;
+
+  }
+
+  console.log(
+  "OWNER MAPPINGS",
+  mappings
+);
+
+const ownerPartners =
+
+  (mappings || [])
+    .filter(
+      row =>
+        row.user_role ===
+        "PARTNER"
+    );
+
+console.log(
+  "OWNER PARTNERS",
+  ownerPartners
+);
+
+
+const partnerMobiles =
+
+  ownerPartners.map(
+    row => row.user_mobile
+  );
+
+console.log(
+  "PARTNER MOBILES",
+  partnerMobiles
+);
+
+
+const {
+  data: partnerAgentMappings,
+  error: partnerAgentError
+} = await supabase
+
+  .from("user_mapping")
+
+  .select(`
+    user_mobile,
+    creator_mobile
+  `)
+
+  .in(
+    "creator_mobile",
+    partnerMobiles
+  )
+
+  .eq(
+    "creator_role",
+    "PARTNER"
+  )
+
+  .eq(
+    "user_role",
+    "AGENT"
+  );
+
+if (partnerAgentError) {
+
+  throw partnerAgentError;
+
+}
+
+console.log(
+  "PARTNER AGENTS",
+  partnerAgentMappings
+);
+
+
+
+(partnerAgentMappings || [])
+  .forEach(row => {
+
+    partnerAgentMap[
+      row.user_mobile
+    ] = row.creator_mobile;
+
+  });
+
+const ownerDirectAgents =
+
+  (mappings || [])
+
+    .filter(
+      row =>
+        row.user_role ===
+        "AGENT"
+    )
+
+    .map(
+      row =>
+        row.user_mobile
+    );
+
+const partnerAgents =
+
+  (partnerAgentMappings || [])
+
+    .map(
+      row =>
+        row.user_mobile
+    );
+
+const ownerAgents = [
+
+  ...ownerDirectAgents,
+
+  ...partnerAgents
+
+];
+
+console.log(
+  "ALL OWNER AGENTS",
+  ownerAgents
+);
+
+const {
+  data: allMappings,
+  error: allMappingsError
+} = await supabase
+
+  .from("user_mapping")
+
+  .select(`
+    user_mobile,
+    user_role,
+    creator_mobile,
+    creator_role
+  `);
+
+if (allMappingsError) {
+
+  throw allMappingsError;
+
+}
+
+console.log(
+  "ALL MAPPINGS",
+  allMappings
+);
+
+  query =
+    query.in(
+      "agent_id",
+      ownerAgents
+    );
+
+}
+      
       const {
         data: licenses,
         error: licenseError
@@ -15023,9 +15213,9 @@ else if (
         error: usersError
       } = await supabase
         .from("usersheet")
-        .select(
-          "mobile,name"
-        );
+       .select(
+  "mobile,name,role"
+);
 
       if (usersError) {
         throw usersError;
@@ -15033,16 +15223,23 @@ else if (
 
       const userMap = {};
 
-      (users || []).forEach(
-        (u) => {
+      const roleMap = {};
 
-          userMap[
-            String(u.mobile)
-          ] = u.name;
 
-        }
-      );
 
+     (users || []).forEach(
+  (u) => {
+
+    userMap[
+      String(u.mobile)
+    ] = u.name;
+
+    roleMap[
+      String(u.mobile)
+    ] = u.role;
+
+  }
+);
       const grouped = {};
 
       (licenses || []).forEach(
@@ -15075,6 +15272,28 @@ else if (
                 userMap[
                   agentMobile
                 ] || "",
+
+             parent_mobile:
+
+              partnerAgentMap[
+                agentMobile
+              ] || mobile,
+
+            parent_name:
+
+              userMap[
+                partnerAgentMap[
+                  agentMobile
+                ] || mobile
+              ] || "",
+
+            parent_role:
+
+              partnerAgentMap[
+                agentMobile
+              ]
+                ? "PARTNER"
+                : "OWNER",
 
               activations: 0,
 
