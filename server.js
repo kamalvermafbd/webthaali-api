@@ -88,13 +88,33 @@ const parts =
   const sequence =
     parts[2] || "";
 
-  const invoiceId =
-
+  const generatedInvoiceId =
   invoice.doc_type === "quotation"
-
     ? `QT-${companyCode}-${clientCode}-${fy}-${sequence}`
-
     : `${companyCode}-${clientCode}-${fy}-${sequence}`;
+
+const invoiceId =
+
+  isEdit
+
+    ? invoice.invoiceId
+
+    : generatedInvoiceId;
+
+console.log(
+  "IS EDIT:",
+  isEdit
+);
+
+console.log(
+  "REQ BODY invoiceId:",
+  invoice.invoiceId
+);
+
+console.log(
+  "GENERATED invoiceId:",
+  invoiceId
+);
 
 const creditPeriod =
   Number(invoice.creditPeriod || 0);
