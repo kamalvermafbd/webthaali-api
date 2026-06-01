@@ -165,6 +165,28 @@ if (creditPeriod > 0) {
 
 if (isEdit) {
 
+  let oldInvoice = null;
+
+const {
+  data: existingInvoice
+} = await supabase
+
+  .from("invoices")
+
+  .select(
+    "invoice_id,invoice_number,status"
+  )
+
+  .eq(
+    "invoice_id",
+    invoiceId
+  )
+
+  .single();
+
+oldInvoice =
+  existingInvoice;
+
 console.log(
   "FINAL UPDATE OBJECT:",
   {
@@ -302,6 +324,87 @@ quote_dt:
   "invoice_id",
   invoiceId
 );
+
+
+console.log(
+  "AUDIT INSERT",
+  {
+    invoiceId,
+    oldStatus:
+      oldInvoice?.status,
+    newStatus:
+      invoice.status
+  }
+);
+
+// =========================
+// AUDIT LOG
+// =========================
+
+if (
+  oldInvoice?.status === "Posted"
+) {
+
+  const {
+  error: auditError
+} = await supabase
+
+    .from(
+      "invoice_audit_log"
+    )
+
+    .insert([{
+
+      company_code:
+        companyCode,
+
+      invoice_id:
+        invoiceId,
+
+      invoice_number:
+        oldInvoice
+          .invoice_number ||
+
+        invoice.invoiceNumber ||
+
+        "",
+
+      action:
+        "POSTED_INVOICE_EDITED",
+
+      old_status:
+        "Posted",
+
+      new_status:
+        invoice.status || "",
+
+      changed_by_name:
+        invoice.company
+          ?.businessName ||
+
+        "Company User",
+
+      reason:
+  invoice.editReason || ""
+
+    }]);
+
+    if (auditError) {
+
+  console.error(
+    "AUDIT ERROR:",
+    auditError
+  );
+
+}
+
+}
+
+
+
+
+
+
 
 } else {
 
@@ -4821,6 +4924,9 @@ app.post(
 
         license_type:
           body.license_type || "",
+
+          allow_posted_invoice_edit:
+  body.allow_posted_invoice_edit ?? false,
 
         updatedat:
           new Date()
