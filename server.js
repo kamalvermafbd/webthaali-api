@@ -15150,6 +15150,358 @@ app.get(
 
   }
 );
+// =========================
+// GET AGENTS
+// =========================
+
+app.post(
+  "/getAgents",
+
+  async (req, res) => {
+
+    try {
+
+      const mobile =
+
+        String(
+          req.body.mobile || ""
+        ).trim();
+
+      if (!mobile) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "mobile missing"
+
+        });
+
+      }
+
+      // =========================
+      // GET PARTNER AGENTS
+      // =========================
+
+      const {
+
+        data: mappings,
+
+        error: mappingError
+
+      } = await supabase
+
+        .from("user_mapping")
+
+        .select(`
+          user_mobile
+        `)
+
+        .eq(
+          "creator_mobile",
+          mobile
+        )
+
+        .eq(
+          "creator_role",
+          "PARTNER"
+        )
+
+        .eq(
+          "user_role",
+          "AGENT"
+        );
+
+      if (mappingError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            mappingError.message
+
+        });
+
+      }
+
+      const agentMobiles =
+
+        (mappings || []).map(
+          row =>
+            String(
+              row.user_mobile || ""
+            )
+        );
+
+      if (
+        agentMobiles.length === 0
+      ) {
+
+        return res.json({
+
+          success: true,
+
+          data: []
+
+        });
+
+      }
+
+      // =========================
+      // GET AGENT DETAILS
+      // =========================
+
+      const {
+
+        data,
+
+        error
+
+      } = await supabase
+
+        .from("usersheet")
+
+        .select(`
+          id,
+          name,
+          mobile,
+          is_active
+        `)
+
+        .in(
+          "mobile",
+          agentMobiles
+        )
+
+        .eq(
+          "role",
+          "AGENT"
+        )
+
+        .order(
+          "name",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data:
+          data || []
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// UPDATE AGENT STATUS
+// =========================
+
+app.post(
+  "/updateAgentStatus",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        partner_mobile,
+        agent_mobile,
+        is_active
+
+      } = req.body;
+
+      if (
+        !partner_mobile ||
+        !agent_mobile
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Missing required fields"
+
+        });
+
+      }
+
+      // =========================
+      // SECURITY CHECK
+      // =========================
+
+      const {
+
+        data: mapping,
+
+        error: mappingError
+
+      } = await supabase
+
+        .from("user_mapping")
+
+        .select("id")
+
+        .eq(
+          "creator_mobile",
+          partner_mobile
+        )
+
+        .eq(
+          "creator_role",
+          "PARTNER"
+        )
+
+        .eq(
+          "user_mobile",
+          agent_mobile
+        )
+
+        .eq(
+          "user_role",
+          "AGENT"
+        )
+
+        .maybeSingle();
+
+      if (
+        mappingError
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            mappingError.message
+
+        });
+
+      }
+
+      if (
+        !mapping
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Unauthorized agent"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE STATUS
+      // =========================
+
+      const {
+
+        error
+
+      } = await supabase
+
+        .from("usersheet")
+
+        .update({
+
+          is_active
+
+        })
+
+        .eq(
+          "mobile",
+          agent_mobile
+        )
+
+        .eq(
+          "role",
+          "AGENT"
+        );
+
+      if (
+        error
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          is_active
+            ? "Agent activated successfully"
+            : "Agent deactivated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        message:
+          err.message
+
+      });
+
+    }
+
+  }
+);
 
 app.listen(
   process.env.PORT,
