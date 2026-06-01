@@ -15203,6 +15203,8 @@ app.get(
 
   }
 );
+
+
 // =========================
 // GET AGENTS
 // =========================
@@ -15219,6 +15221,15 @@ app.post(
         String(
           req.body.mobile || ""
         ).trim();
+
+        const role =
+
+          String(
+            req.body.role || ""
+          )
+            .toUpperCase();
+
+            
 
       if (!mobile) {
 
@@ -15258,7 +15269,7 @@ app.post(
 
         .eq(
           "creator_role",
-          "PARTNER"
+          role
         )
 
         .eq(
@@ -15392,13 +15403,21 @@ app.post(
 
     try {
 
-      const {
+     const {
 
-        partner_mobile,
-        agent_mobile,
-        is_active
+  partner_mobile,
+  agent_mobile,
+  is_active,
+  role
 
-      } = req.body;
+} = req.body;
+
+const roleUpper =
+
+  String(
+    role || ""
+  )
+    .toUpperCase();
 
       if (
         !partner_mobile ||
@@ -15437,10 +15456,10 @@ app.post(
           partner_mobile
         )
 
-        .eq(
-          "creator_role",
-          "PARTNER"
-        )
+       .eq(
+  "creator_role",
+  roleUpper
+)
 
         .eq(
           "user_mobile",
