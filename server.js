@@ -12383,8 +12383,14 @@ app.post(
 
           name:
             user.name || "",
-               role:
-      user.role || ""
+
+              role:
+  user.role || "",
+
+status:
+  user.is_active === true
+    ? "ACTIVE"
+    : "INACTIVE"
 
         }
 
@@ -12766,6 +12772,55 @@ app.post(
   req.body
 );
 
+const roleUpper =
+  String(role || "")
+    .toUpperCase();
+
+// =========================
+// AGENT ACTIVE CHECK
+// =========================
+
+if (
+  roleUpper === "AGENT"
+) {
+
+  const {
+    data: userRow,
+    error: userError
+  } = await supabase
+
+    .from("usersheet")
+
+    .select("is_active")
+
+    .eq(
+      "mobile",
+      login_mobile
+    )
+
+    .single();
+
+  if (
+    userError ||
+    !userRow ||
+    userRow.is_active !== true
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      forceLogout: true,
+
+      message:
+        "Agent account inactive"
+
+    });
+
+  }
+
+}
+
       if (
         !company_code ||
         !valid_from ||
@@ -12786,9 +12841,7 @@ app.post(
 // ROLE SECURITY CHECK
 // =========================
 
-const roleUpper =
-  String(role || "")
-    .toUpperCase();
+
 
 if (
   roleUpper === "AGENT" ||
