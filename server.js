@@ -16429,6 +16429,146 @@ app.post(
   }
 );
 
+
+// =========================
+// PARTNER COLLECTION STATS
+// =========================
+
+app.post(
+  "/getPartnerCollectionStats",
+
+  async (req, res) => {
+
+    try {
+
+      const { mobile } =
+        req.body;
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("license_master")
+
+        .select(
+          "subscription_amt, created_on"
+        )
+
+        .eq(
+          "partner_id",
+          mobile
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const today =
+        new Date();
+
+      const todayStr =
+        today
+          .toISOString()
+          .split("T")[0];
+
+      const currentMonth =
+        today.getMonth();
+
+      const currentYear =
+        today.getFullYear();
+
+      let todayCollection = 0;
+
+      let monthCollection = 0;
+
+      (data || []).forEach(
+        (row) => {
+
+          const amount =
+            Number(
+              row.subscription_amt || 0
+            );
+
+          const createdDate =
+            new Date(
+              row.created_on
+            );
+
+          const rowDate =
+            createdDate
+              .toISOString()
+              .split("T")[0];
+
+          if (
+            rowDate ===
+            todayStr
+          ) {
+
+            todayCollection +=
+              amount;
+
+          }
+
+          if (
+
+            createdDate.getMonth()
+              === currentMonth
+
+            &&
+
+            createdDate.getFullYear()
+              === currentYear
+
+          ) {
+
+            monthCollection +=
+              amount;
+
+          }
+
+        }
+      );
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          todayCollection,
+
+          monthCollection
+
+        }
+
+      });
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
 app.listen(
   process.env.PORT,
   () => {
