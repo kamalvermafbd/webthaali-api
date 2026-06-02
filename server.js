@@ -16289,6 +16289,146 @@ app.get(
 );
 
 
+// =========================
+// PARTNER LICENSE STATS
+// =========================
+
+app.post(
+  "/getPartnerLicenseStats",
+
+  async (req, res) => {
+
+    try {
+
+      const { mobile } =
+        req.body;
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("company")
+
+        .select(
+          "license_till"
+        )
+
+        .eq(
+          "partner_id",
+          mobile
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const today =
+        new Date();
+
+      today.setHours(
+        0, 0, 0, 0
+      );
+
+      const next7Days =
+        new Date(today);
+
+      next7Days.setDate(
+        next7Days.getDate() + 7
+      );
+
+      let activeLicenses = 0;
+
+      let pendingRenewals = 0;
+
+      let expiredLicenses = 0;
+
+      (data || []).forEach(
+        (row) => {
+
+          if (
+            !row.license_till
+          ) return;
+
+          const validTill =
+            new Date(
+              row.license_till
+            );
+
+          validTill.setHours(
+            0, 0, 0, 0
+          );
+
+          if (
+            validTill < today
+          ) {
+
+            expiredLicenses++;
+
+            return;
+
+          }
+
+          activeLicenses++;
+
+          if (
+
+            validTill >= today
+
+            &&
+
+            validTill <= next7Days
+
+          ) {
+
+            pendingRenewals++;
+
+          }
+
+        }
+      );
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          activeLicenses,
+
+          pendingRenewals,
+
+          expiredLicenses
+
+        }
+
+      });
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
 app.listen(
   process.env.PORT,
   () => {
