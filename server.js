@@ -16569,6 +16569,106 @@ app.post(
   }
 );
 
+
+// =========================
+// GET LICENSE PLANS
+// =========================
+
+app.get(
+  "/getLicensePlans",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("license")
+
+        .select("*")
+
+        .eq(
+          "launched",
+          true
+        )
+
+        .order(
+          "sort_order",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const result =
+
+        (data || []).map((row) => ({
+
+          id:
+            row.id,
+
+          plan_name:
+            row.plan_name || "",
+
+          plan_code:
+            row.plan_code || "",
+
+          plan_amount:
+            Number(
+              row.plan_amount || 0
+            ),
+
+          validity_days:
+            Number(
+              row.validity_days || 0
+            ),
+
+          features:
+            row.features || ""
+
+        }));
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
 app.listen(
   process.env.PORT,
   () => {
