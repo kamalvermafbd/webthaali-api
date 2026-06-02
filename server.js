@@ -1030,6 +1030,9 @@ packingUnit:
           invoiceNumber:
             invoice.invoice_number,
 
+          share_token:
+  invoice.share_token,
+
           invoiceDate:
             invoice.invoice_date,
 
