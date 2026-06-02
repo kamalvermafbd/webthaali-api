@@ -13911,6 +13911,75 @@ try {
 );
 
 
+
+// =========================
+// GET TOTAL PARTNERS
+// =========================
+
+app.get(
+  "/getTotalPartners",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("usersheet")
+
+        .select("mobile")
+
+        .eq(
+          "role",
+          "PARTNER"
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          totalPartners:
+
+            data?.length || 0
+
+        }
+
+      });
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
 app.post(
   "/createCustomer",
 
@@ -15943,6 +16012,282 @@ const roleUpper =
 
   }
 );
+
+// =========================
+// LICENSE DASHBOARD STATS
+// =========================
+
+app.get(
+  "/getLicenseDashboardStats",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("company")
+
+        .select(
+          "license_till"
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const today =
+        new Date();
+
+      today.setHours(
+        0, 0, 0, 0
+      );
+
+      const next7Days =
+        new Date(today);
+
+      next7Days.setDate(
+        next7Days.getDate() + 7
+      );
+
+      let activeLicenses = 0;
+
+      let pendingRenewals = 0;
+
+      let expiredLicenses = 0;
+
+      (data || []).forEach(
+        (row) => {
+
+          if (
+            !row.license_till
+          ) return;
+
+          const validTill =
+            new Date(
+              row.license_till
+            );
+
+          validTill.setHours(
+            0, 0, 0, 0
+          );
+
+          // Expired
+
+          if (
+            validTill < today
+          ) {
+
+            expiredLicenses++;
+
+            return;
+
+          }
+
+          // Active
+
+          activeLicenses++;
+
+          // Pending Renewal
+          // (next 7 days)
+
+          if (
+
+            validTill >= today
+
+            &&
+
+            validTill <= next7Days
+
+          ) {
+
+            pendingRenewals++;
+
+          }
+
+        }
+      );
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          activeLicenses,
+
+          pendingRenewals,
+
+          expiredLicenses
+
+        }
+
+      });
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// COLLECTION STATS
+// =========================
+
+app.get(
+  "/getCollectionStats",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("license_master")
+
+        .select(
+          "subscription_amt, created_on"
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const today =
+        new Date();
+
+      const todayStr =
+        today
+          .toISOString()
+          .split("T")[0];
+
+      const currentMonth =
+        today.getMonth();
+
+      const currentYear =
+        today.getFullYear();
+
+      let todayCollection = 0;
+
+      let monthCollection = 0;
+
+      (data || []).forEach(
+        (row) => {
+
+          const amount =
+            Number(
+              row.subscription_amt || 0
+            );
+
+          const createdDate =
+            new Date(
+              row.created_on
+            );
+
+          const rowDate =
+            createdDate
+              .toISOString()
+              .split("T")[0];
+
+          // Today
+
+          if (
+            rowDate ===
+            todayStr
+          ) {
+
+            todayCollection +=
+              amount;
+
+          }
+
+          // Month
+
+          if (
+
+            createdDate.getMonth()
+              === currentMonth
+
+            &&
+
+            createdDate.getFullYear()
+              === currentYear
+
+          ) {
+
+            monthCollection +=
+              amount;
+
+          }
+
+        }
+      );
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          todayCollection,
+
+          monthCollection
+
+        }
+
+      });
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
 
 app.listen(
   process.env.PORT,
