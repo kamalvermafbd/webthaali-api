@@ -12416,78 +12416,99 @@ app.post(
       }
 
       // =========================
-      // FIND USER
-      // =========================
+// FIND USER BY LOGIN ID
+// =========================
 
-      const user =
+const user =
 
-        (data || []).find((row) => {
+  (data || []).find((row) => {
 
-          const rowEmail =
+    const rowEmail =
 
-            String(
-              row.email || ""
-            )
-              .trim()
-              .toLowerCase();
+      String(
+        row.email || ""
+      )
+        .trim()
+        .toLowerCase();
 
-          const rowMobile =
+    const rowMobile =
 
-            String(
-              row.mobile || ""
-            ).trim();
+      String(
+        row.mobile || ""
+      ).trim();
 
-          const rowPassword =
+    return (
 
-            String(
-              row.password || ""
-            ).trim();
+      rowEmail === email
 
-          const active =
+      ||
 
-            row.is_active === true;
+      rowMobile === email
 
-          const loginMatch =
+    );
 
-            rowEmail === email
+  });
 
-            ||
+// =========================
+// LOGIN ID NOT FOUND
+// =========================
 
-            rowMobile === email;
+if (!user) {
 
-          return (
+  return res.json({
 
-            loginMatch
+    success: false,
 
-            &&
+    error:
+      "Invalid Login ID"
 
-            rowPassword === password
+  });
 
-            &&
+}
 
-            active
+// =========================
+// PASSWORD CHECK
+// =========================
 
-          );
+const rowPassword =
 
-        });
+  String(
+    user.password || ""
+  ).trim();
 
-      // =========================
-      // INVALID LOGIN
-      // =========================
+if (
+  rowPassword !== password
+) {
 
-      if (!user) {
+  return res.json({
 
-        return res.json({
+    success: false,
 
-          success: false,
+    error:
+      "Incorrect Password"
 
-          error:
-            "Invalid login"
+  });
 
-        });
+}
 
-      }
+// =========================
+// ACTIVE CHECK
+// =========================
 
+if (
+  user.is_active !== true
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Account Inactive"
+
+  });
+
+}
       // =========================
       // SUCCESS
       // =========================
