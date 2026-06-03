@@ -49,6 +49,28 @@ app.get("/", (req, res) => {
 
 });
 
+
+function formatDateByCountry(
+  date,
+  country
+) {
+
+  const timezone =
+    String(country || "")
+      .trim()
+      .toUpperCase() === "INDIA"
+      ? "Asia/Kolkata"
+      : "UTC";
+
+  return new Intl.DateTimeFormat(
+    "sv-SE",
+    {
+      timeZone: timezone
+    }
+  ).format(date);
+
+}
+
 app.post(
   "/saveInvoice",
   async (req, res) => {
@@ -16720,7 +16742,8 @@ app.post(
           company_code,
           license_till,
           partner_id,
-          agent_id
+          agent_id,
+          country
         `)
 
         .eq(
@@ -16792,6 +16815,21 @@ app.post(
 
       }
 
+      // 👇 YAHAN LAGA
+
+console.log(
+  "BEFORE CALCULATION"
+);
+
+console.log(
+  "COMPANY DATA =",
+  company
+);
+
+console.log(
+  "PLAN DATA =",
+  plan
+);
       const details =
 
         calculateSubscriptionDetails(
@@ -16862,8 +16900,10 @@ app.post(
         .select(`
           company_code,
           license_till,
+          license_start,
           partner_id,
-          agent_id
+          agent_id,
+          country
         `)
 
         .eq(
@@ -17019,24 +17059,35 @@ app.post(
 
       }
 
-      await supabase
+      const updateData = {
 
-        .from("company")
+  license_from:
+    details.valid_from,
 
-        .update({
+  license_till:
+    details.valid_to
 
-          license_from:
-            details.valid_from,
+};
 
-          license_till:
-            details.valid_to
+if (
+  !company.license_start
+) {
 
-        })
+  updateData.license_start =
+    details.valid_from;
 
-        .eq(
-          "company_code",
-          company.company_code
-        );
+}
+
+await supabase
+
+  .from("company")
+
+  .update(updateData)
+
+  .eq(
+    "company_code",
+    company.company_code
+  );
 
       return res.json({
 
@@ -17075,6 +17126,11 @@ function calculateSubscriptionDetails(
 
 ) {
 
+  console.log(
+    "CALCULATION FUNCTION HIT"
+  );
+
+
   // ===================================
   // TEST MODE
   // Change date here for testing
@@ -17100,7 +17156,10 @@ function calculateSubscriptionDetails(
 
   console.log(
   "TEST TODAY =",
-  today.toISOString().split("T")[0]
+  formatDateByCountry(
+    today,
+    company.country
+  )
 );
 
   let validFrom;
@@ -17162,9 +17221,10 @@ console.log(
 
 console.log(
   "VALID FROM =",
-  validFrom
-    .toISOString()
-    .split("T")[0]
+  formatDateByCountry(
+    validFrom,
+    company.country
+  )
 );
 
     const diffMs =
@@ -17306,13 +17366,14 @@ console.log(
 
     amount,
 
-    valid_from:
+valid_from:
 
-      validFrom
+  formatDateByCountry(
+    validFrom,
+    company.country
+  ),
 
-        .toISOString()
-
-        .split("T")[0],
+    
 
     valid_to:
 
