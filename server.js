@@ -14286,7 +14286,6 @@ app.post(
         }
 
       }
-
       // =========================
       // UPDATE COMPANY
       // =========================
@@ -14326,6 +14325,48 @@ app.post(
             updateError.message
 
         });
+
+      }
+
+      // =========================
+      // BACKFILL LICENSE MASTER
+      // =========================
+
+      const {
+
+        error: backfillError
+
+      } = await supabase
+
+        .from("license_master")
+
+        .update({
+
+          partner_id:
+            partnerId,
+
+          agent_id:
+            agentId
+
+        })
+
+        .eq(
+          "company_code",
+          company.company_code
+        )
+
+        .or(
+          "partner_id.is.null,agent_id.is.null"
+        );
+
+      if (
+        backfillError
+      ) {
+
+        console.log(
+          "LICENSE MASTER BACKFILL ERROR:",
+          backfillError
+        );
 
       }
 
@@ -15015,6 +15056,9 @@ if (
 
             created_by:
               row.created_by,
+
+                payment_verified:
+        row.payment_verified,
 
             partner_id:
               row.partner_id,
@@ -17154,12 +17198,21 @@ function calculateSubscriptionDetails(
     0
   );
 
+  const country =
+
+  String(
+    company.country || ""
+  ).trim() ||
+
+  "India";
+
   console.log(
   "TEST TODAY =",
-  formatDateByCountry(
-    today,
-    company.country
-  )
+
+ formatDateByCountry(
+  today,
+  country
+)
 );
 
   let validFrom;
@@ -17223,7 +17276,7 @@ console.log(
   "VALID FROM =",
   formatDateByCountry(
     validFrom,
-    company.country
+    country
   )
 );
 
@@ -17370,7 +17423,7 @@ valid_from:
 
   formatDateByCountry(
     validFrom,
-    company.country
+    country
   ),
 
     
@@ -17386,6 +17439,195 @@ valid_from:
   };
 
 }
+
+app.post(
+
+  "/getSubscriptionVerifyDetails",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        data,
+
+        error
+
+      } = await supabase
+
+        .from(
+          "license_master"
+        )
+
+        .select(`
+          company_code,
+          selected_plan,
+          valid_from,
+          valid_to,
+          subscription_amt,
+          payment_verified,
+          partner_id,
+          agent_id,
+          payment_screenshot,
+          created_on
+        `)
+
+        .is(
+          "payment_verified",
+          null
+        )
+
+        .eq(
+  "created_by",
+  "USER"
+)
+
+        .order(
+          "created_on",
+          {
+            ascending: false
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        message:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+app.post(
+
+  "/verifySubscriptionPayment",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+
+        data,
+
+        error
+
+      } = await supabase
+
+        .from(
+          "license_master"
+        )
+
+        .update({
+
+          payment_verified:
+            "TRUE"
+
+        })
+
+        .eq(
+
+          "company_code",
+
+          company_code
+
+        )
+
+        .select();
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Payment verified successfully",
+
+        data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
 
 app.listen(
   process.env.PORT,
