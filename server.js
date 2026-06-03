@@ -12,7 +12,27 @@ const app = express();
 
 app.use(cors());
 
-app.use(express.json());
+app.use(
+
+  express.json({
+
+    limit: "10mb"
+
+  })
+
+);
+
+app.use(
+
+  express.urlencoded({
+
+    extended: true,
+
+    limit: "10mb"
+
+  })
+
+);
 
 const supabase =
   createClient(
@@ -16669,6 +16689,642 @@ app.get(
   }
 );
 
+
+app.post(
+
+  "/getSubscriptionPaymentDetails",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        mobile,
+
+        plan_code
+
+      } = req.body;
+
+      const {
+
+        data: company,
+
+        error: companyError
+
+      } = await supabase
+
+        .from("company")
+
+        .select(`
+          company_code,
+          license_till,
+          partner_id,
+          agent_id
+        `)
+
+        .eq(
+          "mobile",
+          mobile
+        )
+
+        .single();
+
+      if (
+
+        companyError ||
+
+        !company
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Company not found"
+
+        });
+
+      }
+
+      const {
+
+        data: plan,
+
+        error: planError
+
+      } = await supabase
+
+        .from("license")
+
+        .select(`
+          plan_name,
+          plan_code,
+          plan_amount,
+          validity_days
+        `)
+
+        .eq(
+          "plan_code",
+          plan_code
+        )
+
+        .single();
+
+      if (
+
+        planError ||
+
+        !plan
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Plan not found"
+
+        });
+
+      }
+
+      const details =
+
+        calculateSubscriptionDetails(
+
+          company,
+
+          plan
+
+        );
+
+      return res.json({
+
+        success: true,
+
+        ...details
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(err);
+
+      return res.json({
+
+        success: false,
+
+        message:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+app.post(
+
+  "/submitLicensePayment",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        mobile,
+
+        plan_code,
+
+        payment_screenshot
+
+      } = req.body;
+
+      const {
+
+        data: company,
+
+        error: companyError
+
+      } = await supabase
+
+        .from("company")
+
+        .select(`
+          company_code,
+          license_till,
+          partner_id,
+          agent_id
+        `)
+
+        .eq(
+          "mobile",
+          mobile
+        )
+
+        .single();
+
+      if (
+
+        companyError ||
+
+        !company
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Company not found"
+
+        });
+
+      }
+
+      const {
+
+        data: plan,
+
+        error: planError
+
+      } = await supabase
+
+        .from("license")
+
+        .select(`
+          plan_name,
+          plan_code,
+          plan_amount,
+          validity_days
+        `)
+
+        .eq(
+          "plan_code",
+          plan_code
+        )
+
+        .single();
+
+      if (
+
+        planError ||
+
+        !plan
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Plan not found"
+
+        });
+
+      }
+
+      const details =
+
+        calculateSubscriptionDetails(
+
+          company,
+
+          plan
+
+        );
+
+      const {
+
+        error: insertError
+
+      } = await supabase
+
+        .from(
+          "license_master"
+        )
+
+        .insert({
+
+          company_code:
+            company.company_code,
+
+          valid_from:
+            details.valid_from,
+
+          valid_to:
+            details.valid_to,
+
+          status:
+            "Active",
+
+          created_by:
+            "USER",
+
+          collection_status:
+            "UPI",
+
+          created_on:
+            new Date()
+              .toISOString(),
+
+          updated_on:
+            new Date()
+              .toISOString(),
+
+          selected_plan:
+            plan.plan_name,
+
+          subscription_amt:
+            details.amount,
+
+          partner_id:
+            company.partner_id,
+
+          agent_id:
+            company.agent_id,
+
+          payment_verified:
+            null,
+
+          payment_screenshot
+
+        });
+
+      if (
+
+        insertError
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            insertError.message
+
+        });
+
+      }
+
+      await supabase
+
+        .from("company")
+
+        .update({
+
+          license_from:
+            details.valid_from,
+
+          license_till:
+            details.valid_to
+
+        })
+
+        .eq(
+          "company_code",
+          company.company_code
+        );
+
+      return res.json({
+
+        success: true,
+
+        ...details
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(err);
+
+      return res.json({
+
+        success: false,
+
+        message:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+function calculateSubscriptionDetails(
+
+  company,
+
+  plan
+
+) {
+
+  // ===================================
+  // TEST MODE
+  // Change date here for testing
+  // ===================================
+
+  //const today =
+    //new Date("2026-07-30");
+
+  // ===================================
+  // PRODUCTION MODE
+  // Uncomment after testing
+  // ===================================
+
+   const today =
+     new Date();
+
+  today.setHours(
+    0,
+    0,
+    0,
+    0
+  );
+
+  console.log(
+  "TEST TODAY =",
+  today.toISOString().split("T")[0]
+);
+
+  let validFrom;
+
+  let cycles = 1;
+
+  let isRenewal =
+    false;
+
+    console.log(
+  "COMPANY =",
+  company
+);
+
+console.log(
+  "PLAN =",
+  plan
+);
+
+  // =====================
+  // FRESH SUBSCRIPTION
+  // =====================
+
+  if (
+
+    !company.license_till
+
+  ) {
+
+    validFrom =
+      new Date(
+        today
+      );
+
+  }
+
+  // =====================
+  // RENEWAL
+  // =====================
+
+  else {
+
+    isRenewal =
+      true;
+
+    validFrom =
+      new Date(
+        company.license_till
+      );
+
+    validFrom.setDate(
+      validFrom.getDate() + 1
+    );
+
+    console.log(
+  "LICENSE TILL =",
+  company.license_till
+);
+
+console.log(
+  "VALID FROM =",
+  validFrom
+    .toISOString()
+    .split("T")[0]
+);
+
+    const diffMs =
+      today -
+      validFrom;
+
+    const expiredDays =
+      Math.max(
+
+        0,
+
+        Math.ceil(
+
+          diffMs /
+
+          (
+            1000 *
+            60 *
+            60 *
+            24
+          )
+
+        )
+
+      );
+
+    cycles =
+      Math.max(
+
+        1,
+
+        Math.ceil(
+
+          expiredDays /
+
+          plan.validity_days
+
+        )
+
+      );
+
+      console.log(
+  "EXPIRED DAYS =",
+  expiredDays
+);
+
+console.log(
+  "CYCLES AFTER CALC =",
+  cycles
+);
+
+  }
+
+
+  let totalDays =
+    cycles *
+    plan.validity_days;
+
+  let validTo =
+    new Date(
+      validFrom
+    );
+
+  validTo.setDate(
+
+    validTo.getDate() +
+
+    totalDays -
+
+    1
+
+  );
+
+  while (
+
+    validTo < today
+
+  ) {
+
+    cycles++;
+
+    totalDays =
+      cycles *
+      plan.validity_days;
+
+    validTo =
+      new Date(
+        validFrom
+      );
+
+    validTo.setDate(
+
+      validTo.getDate() +
+
+      totalDays -
+
+      1
+
+    );
+
+  }
+
+  const amount =
+
+    cycles *
+
+    Number(
+      plan.plan_amount
+    );
+
+
+    console.log(
+  "FINAL CYCLES =",
+  cycles
+);
+
+console.log(
+  "FINAL AMOUNT =",
+  amount
+);
+
+console.log(
+  "VALID TO =",
+  validTo
+    .toISOString()
+    .split("T")[0]
+);
+
+  return {
+
+    company_code:
+      company.company_code,
+
+    isRenewal,
+
+    cycles,
+
+    totalDays,
+
+    amount,
+
+    valid_from:
+
+      validFrom
+
+        .toISOString()
+
+        .split("T")[0],
+
+    valid_to:
+
+      validTo
+
+        .toISOString()
+
+        .split("T")[0]
+
+  };
+
+}
 
 app.listen(
   process.env.PORT,
