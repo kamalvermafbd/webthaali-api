@@ -17883,6 +17883,212 @@ app.get(
   }
 );
 
+
+app.get(
+  "/getConsolidatedInvoices/:token",
+
+  async (req, res) => {
+
+    try {
+
+      const { token } =
+        req.params;
+
+      // =====================
+      // GET SHARE ROW
+      // =====================
+
+      const {
+        data: shareRow,
+        error: shareError
+      } = await supabase
+
+        .from(
+          "consolidated_share"
+        )
+
+        .select("*")
+
+        .eq(
+          "token",
+          token
+        )
+
+        .single();
+
+      if (
+        shareError ||
+        !shareRow
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Invalid token"
+
+        });
+
+      }
+
+      const invoiceIds =
+        shareRow.invoice_ids || [];
+
+      // =====================
+      // GET INVOICES
+      // =====================
+
+      const {
+        data: invoices,
+        error: invoiceError
+      } = await supabase
+
+        .from("invoices")
+
+        .select("*")
+
+        .in(
+          "invoice_id",
+          invoiceIds
+        );
+
+      if (invoiceError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            invoiceError.message
+
+        });
+
+      }
+
+const {
+  data: company,
+  error: companyError
+} = await supabase
+
+  .from("company")
+
+  .select("*")
+
+  .eq(
+    "company_code",
+    shareRow.company_code
+  )
+
+  .single();
+
+  if (companyError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      companyError.message
+
+  });
+
+}
+
+  
+      
+
+// =====================
+// GET INVOICE ITEMS
+// =====================
+
+const {
+
+  data: invoiceItems,
+
+  error: itemsError
+
+} = await supabase
+
+  .from("invoice_items")
+
+  .select("*")
+
+  .in(
+
+    "invoice_id",
+
+    invoiceIds
+
+  );
+
+if (itemsError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      itemsError.message
+
+  });
+
+}
+
+const invoicesWithItems =
+
+  (invoices || []).map(
+
+    (invoice) => ({
+
+      ...invoice,
+
+      items:
+
+        (invoiceItems || []).filter(
+
+          item =>
+
+            item.invoice_id ===
+
+            invoice.invoice_id
+
+        )
+
+    })
+
+  );
+
+    return res.json({
+
+  success: true,
+
+  company,
+
+  company_code:
+    shareRow.company_code,
+
+  invoices:
+    invoicesWithItems
+
+});
+    }
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
 app.listen(
   process.env.PORT,
   () => {
