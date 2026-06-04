@@ -12738,8 +12738,8 @@ app.post(
     from:
       "onboarding@resend.dev",
 
-    to:
-      "kamalvermafbd@gmail.com",
+   to:
+  email,
 
     subject:
       "BillKaro Password Recovery",
