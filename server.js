@@ -7,6 +7,12 @@ const crypto = require("crypto");
 const nodemailer =
   require("nodemailer");
 
+ const { Resend } = require("resend");
+
+const resend = new Resend(
+  process.env.RESEND_API_KEY
+); 
+
 const {
   createClient
 } = require("@supabase/supabase-js");
@@ -17728,17 +17734,114 @@ app.post(
   }
 );
 
+
 app.post(
   "/sendConsolidatedShareEmail",
+
   async (req, res) => {
 
-    console.log("EMAIL ROUTE HIT");
-    console.log(req.body);
+    try {
 
-    return res.json({
-      success: true,
-      test: "ok"
-    });
+      const {
+        token,
+        email
+      } = req.body;
+
+      const shareUrl =
+        `https://gstinvoiceweb.vercel.app/share-consolidated/${token}`;
+
+      await transporter.sendMail({
+
+        from:
+          process.env.EMAIL_USER,
+
+        to: email,
+
+        subject:
+          "Invoice Link",
+
+        html: `
+          <h3>Invoice Link</h3>
+
+          <p>
+            Open your invoices using the link below:
+          </p>
+
+          <a href="${shareUrl}">
+            ${shareUrl}
+          </a>
+        `
+
+      });
+
+      return res.json({
+
+        success: true
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+app.get(
+  "/test-email",
+
+  async (req, res) => {
+
+    try {
+
+      const result =
+        await resend.emails.send({
+
+          from:
+            "onboarding@resend.dev",
+
+          to:
+            "kamaleasy176@gmail.com",
+
+          subject:
+            "Resend Test",
+
+          html:
+            "<h1>WebThaali Resend Test Success</h1>"
+
+        });
+
+      console.log(result);
+
+      return res.json({
+        success: true,
+        result
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(err);
+
+      return res.json({
+        success: false,
+        error:
+          err.message
+      });
+
+    }
 
   }
 );
