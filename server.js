@@ -17629,6 +17629,80 @@ app.post(
 
 );
 
+app.post(
+  "/createConsolidatedShare",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        company_code,
+        invoice_ids
+      } = req.body;
+
+      const token =
+        crypto
+          .randomBytes(16)
+          .toString("hex");
+
+      const {
+        error
+      } = await supabase
+
+        .from(
+          "consolidated_share"
+        )
+
+        .insert([{
+
+          token,
+
+          company_code,
+
+          invoice_ids
+
+        }]);
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        token
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
 app.listen(
   process.env.PORT,
   () => {
