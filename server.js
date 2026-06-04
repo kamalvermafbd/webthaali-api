@@ -12732,59 +12732,57 @@ app.post(
       // SEND EMAIL
       // =========================
 
-      const nodemailer =
-        require("nodemailer");
+    const result =
+  await resend.emails.send({
 
-      const transporter =
+    from:
+      "onboarding@resend.dev",
 
-        nodemailer.createTransport({
+    to:
+      "kamalvermafbd@gmail.com",
 
-          service: "gmail",
+    subject:
+      "BillKaro Password Recovery",
 
-          auth: {
+    html: `
 
-            user:
-              process.env.EMAIL_USER,
+      <div style="font-family:Arial;padding:20px">
 
-            pass:
-              process.env.EMAIL_PASS
+        <h2>
+          BillKaro Password Recovery
+        </h2>
 
-          }
+        <p>
+          Your password is:
+        </p>
 
-        });
+        <h1>
+          ${password}
+        </h1>
 
-      await transporter.sendMail({
+      </div>
 
-        from:
-          process.env.EMAIL_USER,
+    `
 
-        to:
-          email,
+  });
 
-        subject:
-          "BillKaro Password Recovery",
+console.log(
+  "RESEND RESULT =",
+  result
+);
 
-        html: `
+if (result.error) {
 
-          <div style="font-family:Arial;padding:20px">
+  return res.json({
 
-            <h2>
-              BillKaro Password Recovery
-            </h2>
+    success: false,
 
-            <p>
-              Your password is:
-            </p>
+    error:
+      result.error
 
-            <h1>
-              ${password}
-            </h1>
+  });
 
-          </div>
-
-        `
-
-      });
+}
 
       // =========================
       // SUCCESS
