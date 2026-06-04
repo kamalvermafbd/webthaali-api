@@ -17798,6 +17798,7 @@ app.post(
   }
 );
 
+
 app.get(
   "/test-email",
 
@@ -17812,7 +17813,7 @@ app.get(
             "onboarding@resend.dev",
 
           to:
-            "kamaleasy176@gmail.com",
+            "kamalvermafbd@gmail.com",
 
           subject:
             "Resend Test",
@@ -17822,11 +17823,30 @@ app.get(
 
         });
 
-      console.log(result);
+      console.log(
+        "RESEND RESULT =",
+        result
+      );
+
+      if (result.error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            result.error
+
+        });
+
+      }
 
       return res.json({
+
         success: true,
+
         result
+
       });
 
     }
@@ -17836,9 +17856,12 @@ app.get(
       console.log(err);
 
       return res.json({
+
         success: false,
+
         error:
           err.message
+
       });
 
     }
@@ -17846,15 +17869,6 @@ app.get(
   }
 );
 
-app.get("/test", (req, res) => {
-
-  console.log("TEST HIT");
-
-  res.json({
-    success: true
-  });
-
-});
 
 app.listen(
   process.env.PORT,
