@@ -17747,29 +17747,49 @@ app.post(
       const shareUrl =
         `https://gstinvoiceweb.vercel.app/share-consolidated/${token}`;
 
-      await transporter.sendMail({
+     const result =
+  await resend.emails.send({
 
-        from:
-          process.env.EMAIL_USER,
+    from:
+      "noreply@webthaali.in",
 
-        to: email,
+    to:
+      email,
 
-        subject:
-          "Invoice Link",
+    subject:
+      "Invoice Link",
 
-        html: `
-          <h3>Invoice Link</h3>
+    html: `
+      <h3>Invoice Link</h3>
 
-          <p>
-            Open your invoices using the link below:
-          </p>
+      <p>
+        Open your invoices using the link below:
+      </p>
 
-          <a href="${shareUrl}">
-            ${shareUrl}
-          </a>
-        `
+      <a href="${shareUrl}">
+        ${shareUrl}
+      </a>
+    `
 
-      });
+  });
+
+if (result.error) {
+
+   console.log(
+    "RESEND ERROR:",
+    result.error
+  );
+
+  return res.json({
+
+    success: false,
+
+    error:
+      result.error
+
+  });
+
+}
 
       return res.json({
 
@@ -17795,76 +17815,6 @@ app.post(
   }
 );
 
-
-app.get(
-  "/test-email",
-
-  async (req, res) => {
-
-    try {
-
-      const result =
-        await resend.emails.send({
-
-          from:
-            "onboarding@resend.dev",
-
-          to:
-            "kamalvermafbd@gmail.com",
-
-          subject:
-            "Resend Test",
-
-          html:
-            "<h1>WebThaali Resend Test Success</h1>"
-
-        });
-
-      console.log(
-        "RESEND RESULT =",
-        result
-      );
-
-      if (result.error) {
-
-        return res.json({
-
-          success: false,
-
-          error:
-            result.error
-
-        });
-
-      }
-
-      return res.json({
-
-        success: true,
-
-        result
-
-      });
-
-    }
-
-    catch (err) {
-
-      console.log(err);
-
-      return res.json({
-
-        success: false,
-
-        error:
-          err.message
-
-      });
-
-    }
-
-  }
-);
 
 
 app.listen(
