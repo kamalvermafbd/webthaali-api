@@ -17792,6 +17792,15 @@ app.post(
   }
 );
 
+app.get("/test", (req, res) => {
+
+  console.log("TEST HIT");
+
+  res.json({
+    success: true
+  });
+
+});
 
 app.listen(
   process.env.PORT,
