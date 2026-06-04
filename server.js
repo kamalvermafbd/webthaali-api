@@ -17728,66 +17728,17 @@ app.post(
   }
 );
 
-
 app.post(
   "/sendConsolidatedShareEmail",
-
   async (req, res) => {
 
-    try {
+    console.log("EMAIL ROUTE HIT");
+    console.log(req.body);
 
-      const {
-        token,
-        email
-      } = req.body;
-
-      const shareUrl =
-        `https://gstinvoiceweb.vercel.app/share-consolidated/${token}`;
-
-      await transporter.sendMail({
-
-        from:
-          process.env.EMAIL_USER,
-
-        to: email,
-
-        subject:
-          "Invoice Link",
-
-        html: `
-          <h3>Invoice Link</h3>
-
-          <p>
-            Open your invoices using the link below:
-          </p>
-
-          <a href="${shareUrl}">
-            ${shareUrl}
-          </a>
-        `
-
-      });
-
-      return res.json({
-
-        success: true
-
-      });
-
-    }
-
-    catch (err) {
-
-      return res.json({
-
-        success: false,
-
-        error:
-          err.message
-
-      });
-
-    }
+    return res.json({
+      success: true,
+      test: "ok"
+    });
 
   }
 );
