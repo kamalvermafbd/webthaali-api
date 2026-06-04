@@ -4,6 +4,9 @@ const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
 
+const nodemailer =
+  require("nodemailer");
+
 const {
   createClient
 } = require("@supabase/supabase-js");
@@ -39,6 +42,28 @@ const supabase =
     process.env.SUPABASE_URL,
     process.env.SUPABASE_SERVICE_KEY
   );
+
+const transporter =
+  nodemailer.createTransport({
+
+    service: "gmail",
+
+    auth: {
+
+      user:
+        process.env.EMAIL_USER,
+
+      pass:
+        process.env.EMAIL_PASS
+
+    }
+
+});
+
+console.log(
+  "EMAIL USER:",
+  process.env.EMAIL_USER
+);
 
 app.get("/", (req, res) => {
 
@@ -17702,6 +17727,71 @@ app.post(
 
   }
 );
+
+
+app.post(
+  "/sendConsolidatedShareEmail",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        token,
+        email
+      } = req.body;
+
+      const shareUrl =
+        `https://gstinvoiceweb.vercel.app/share-consolidated/${token}`;
+
+      await transporter.sendMail({
+
+        from:
+          process.env.EMAIL_USER,
+
+        to: email,
+
+        subject:
+          "Invoice Link",
+
+        html: `
+          <h3>Invoice Link</h3>
+
+          <p>
+            Open your invoices using the link below:
+          </p>
+
+          <a href="${shareUrl}">
+            ${shareUrl}
+          </a>
+        `
+
+      });
+
+      return res.json({
+
+        success: true
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
 
 app.listen(
   process.env.PORT,
