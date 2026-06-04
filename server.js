@@ -17816,6 +17816,72 @@ if (result.error) {
 );
 
 
+app.get(
+  "/getConsolidatedShare/:token",
+
+  async (req, res) => {
+
+    try {
+
+      const { token } =
+        req.params;
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from(
+          "consolidated_share"
+        )
+
+        .select("*")
+
+        .eq(
+          "token",
+          token
+        )
+
+        .single();
+
+      if (error || !data) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Invalid token"
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
 
 app.listen(
   process.env.PORT,
