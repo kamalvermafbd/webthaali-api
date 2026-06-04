@@ -18089,6 +18089,213 @@ const invoicesWithItems =
   }
 );
 
+// =========================
+// GET TUTORIALS
+// =========================
+
+app.get(
+  "/getTutorials",
+  async (req, res) => {
+
+    try {
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("tutorials")
+
+        .select("*")
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .order(
+          "sort_order",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data: data || []
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/saveTutorial",
+  async (req, res) => {
+
+    try {
+
+      const tutorial =
+        req.body;
+
+      let result;
+
+      if (tutorial.id) {
+
+        // UPDATE
+
+        result =
+          await supabase
+
+            .from("tutorials")
+
+            .update({
+
+              sort_order:
+                tutorial.sort_order,
+
+              title:
+                tutorial.title,
+
+              description:
+                tutorial.description,
+
+              youtube_url:
+                tutorial.youtube_url,
+
+              thumbnail_url:
+                tutorial.thumbnail_url,
+
+              duration_minutes:
+                tutorial.duration_minutes,
+
+              category:
+                tutorial.category,
+
+              is_active:
+                tutorial.is_active
+
+            })
+
+            .eq(
+              "id",
+              tutorial.id
+            )
+
+            .select();
+
+      } else {
+
+        // INSERT
+
+        result =
+          await supabase
+
+            .from("tutorials")
+
+            .insert([{
+
+              sort_order:
+                tutorial.sort_order,
+
+              title:
+                tutorial.title,
+
+              description:
+                tutorial.description,
+
+              youtube_url:
+                tutorial.youtube_url,
+
+              thumbnail_url:
+                tutorial.thumbnail_url,
+
+              duration_minutes:
+                tutorial.duration_minutes,
+
+              category:
+                tutorial.category,
+
+              is_active:
+                tutorial.is_active ?? true
+
+            }])
+
+            .select();
+
+      }
+
+      if (result.error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            result.error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data:
+          result.data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
 app.listen(
   process.env.PORT,
   () => {
