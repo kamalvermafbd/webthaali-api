@@ -12735,8 +12735,7 @@ app.post(
     const result =
   await resend.emails.send({
 
-    from:
-      "onboarding@resend.dev",
+   from: "noreply@webthaali.in",
 
    to:
   email,
