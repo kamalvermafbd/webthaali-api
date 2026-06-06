@@ -3513,7 +3513,11 @@ app.get(
             row.remarks || "",
 
           credit_period:
-            row.credit_period || 0
+            row.credit_period || 0,
+
+            gst_registered:
+
+  row.gst_registered !== false
 
         }));
 
@@ -3644,43 +3648,54 @@ app.post(
       // DUPLICATE GST CHECK
       // =========================
 
-      const duplicateGST =
+     const gstin =
 
-        (allClients || []).find((row) => {
+  String(
+    body.gstin || ""
+  )
+    .trim()
+    .toUpperCase();
 
-          return (
+const duplicateGST =
 
-            String(
-              row.gstin || ""
-            )
-              .trim()
-              .toUpperCase()
+  body.gst_registered !== false
 
-            ===
+  &&
 
-            String(
-              body.gstin || ""
-            )
-              .trim()
-              .toUpperCase()
+  gstin
 
-          );
+    ? (allClients || []).find((row) => {
 
-        });
+        return (
 
-      if (duplicateGST) {
+          String(
+            row.gstin || ""
+          )
+            .trim()
+            .toUpperCase()
 
-        return res.json({
+          ===
 
-          success: false,
+          gstin
 
-          error:
-            "Client with same GSTIN already exists"
+        );
 
-        });
+      })
 
-      }
+    : null;
 
+if (duplicateGST) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Client with same GSTIN already exists"
+
+  });
+
+}
       // =========================
       // GENERATE CLIENT CODE
       // =========================
@@ -3841,7 +3856,11 @@ app.post(
         credit_period:
           Number(
             body.credit_period || 0
-          )
+          ),
+
+          gst_registered:
+
+  body.gst_registered !== false
 
       };
 
@@ -4018,54 +4037,64 @@ app.post(
       // =========================
       // DUPLICATE GST CHECK
       // =========================
+const gstin =
 
-      const duplicateGST =
+  String(
+    body.gstin || ""
+  )
+    .trim()
+    .toUpperCase();
 
-        (allClients || []).find((row) => {
+const duplicateGST =
 
-          return (
+  body.gst_registered !== false
 
-            String(
-              row.gstin || ""
-            )
-              .trim()
-              .toUpperCase()
+  &&
 
-            ===
+  gstin
 
-            String(
-              body.gstin || ""
-            )
-              .trim()
-              .toUpperCase()
+    ? (allClients || []).find((row) => {
 
-            &&
+        return (
 
-            String(
-              row.client_code || ""
-            ).trim()
+          String(
+            row.gstin || ""
+          )
+            .trim()
+            .toUpperCase()
 
-            !==
+          ===
 
-            client_code
+          gstin
 
-          );
+          &&
 
-        });
+          String(
+            row.client_code || ""
+          ).trim()
 
-      if (duplicateGST) {
+          !==
 
-        return res.json({
+          client_code
 
-          success: false,
+        );
 
-          error:
-            "Client with same GSTIN already exists"
+      })
 
-        });
+    : null;
 
-      }
+if (duplicateGST) {
 
+  return res.json({
+
+    success: false,
+
+    error:
+      "Client with same GSTIN already exists"
+
+  });
+
+}
       // =========================
       // CHECK CLIENT EXISTS
       // =========================
@@ -4172,7 +4201,11 @@ app.post(
         credit_period:
           Number(
             body.credit_period || 0
-          )
+          ),
+
+          gst_registered:
+
+  body.gst_registered !== false
 
       };
 
