@@ -17764,65 +17764,156 @@ app.post(
   }
 );
 
-
 app.post(
   "/sendConsolidatedShareEmail",
-
   async (req, res) => {
 
     try {
 
       const {
         token,
-        email
+        email,
+        companyName,
+        companyEmail,
+        periodText
       } = req.body;
 
       const shareUrl =
-        `https://gstinvoiceweb.vercel.app/share-consolidated/${token}`;
+        `https://www.billey.in/share-consolidated/${token}`;
 
-     const result =
-  await resend.emails.send({
+      const result =
+        await resend.emails.send({
 
-    from:
-      "noreply@webthaali.in",
+          from:
+            "Billey <noreply@webthaali.in>",
 
-    to:
-      email,
+          replyTo:
+            companyEmail || undefined,
 
-    subject:
-      "Invoice Link",
+          to:
+            email,
 
-    html: `
-      <h3>Invoice Link</h3>
+          subject:
+            `${companyName || "Company"} - Consolidated Invoice Statement`,
 
-      <p>
-        Open your invoices using the link below:
-      </p>
+          html: `
+            <div style="
+              font-family: Arial, sans-serif;
+              max-width: 600px;
+              margin: auto;
+              line-height: 1.6;
+              color: #333;
+            ">
 
-      <a href="${shareUrl}">
-        ${shareUrl}
-      </a>
-    `
+              <h2 style="
+                margin-bottom: 10px;
+              ">
+                Consolidated Invoice Statement
+              </h2>
 
-  });
+              <p>
+                Please find the consolidated invoice statement shared by
+                <strong>
+                  ${companyName || "Company"}
+                </strong>.
+              </p>
 
-if (result.error) {
+              ${
+                periodText
+                  ? `
+                    <p>
+                      Period:
+                      <strong>
+                        ${periodText}
+                      </strong>
+                    </p>
+                  `
+                  : ""
+              }
 
-   console.log(
-    "RESEND ERROR:",
-    result.error
-  );
+              <p>
+                This link contains all invoices included in the selected period.
+              </p>
 
-  return res.json({
+              <p style="
+                margin: 25px 0;
+              ">
+                <a
+                  href="${shareUrl}"
+                  style="
+                    background:#2563eb;
+                    color:#ffffff;
+                    padding:12px 20px;
+                    text-decoration:none;
+                    border-radius:6px;
+                    display:inline-block;
+                  "
+                >
+                  View Invoice Statement
+                </a>
+              </p>
 
-    success: false,
+              <p>
+                If the button above does not work,
+                copy and paste the following link into your browser:
+              </p>
 
-    error:
-      result.error
+              <p>
+                <a href="${shareUrl}">
+                  ${shareUrl}
+                </a>
+              </p>
 
-  });
+              <hr />
 
-}
+              <p>
+                Regards,
+                <br />
+                <strong>
+                  ${companyName || "Company"}
+                </strong>
+              </p>
+
+              ${
+                companyEmail
+                  ? `
+                    <p>
+                      Contact:
+                      ${companyEmail}
+                    </p>
+                  `
+                  : ""
+              }
+
+              <p style="
+                color:#666;
+                font-size:12px;
+              ">
+                Sent securely via Billey.
+              </p>
+
+            </div>
+          `
+
+        });
+
+      if (result.error) {
+
+        console.log(
+          "RESEND ERROR:",
+          result.error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            result.error
+
+        });
+
+      }
 
       return res.json({
 
@@ -17847,7 +17938,6 @@ if (result.error) {
 
   }
 );
-
 
 app.get(
   "/getConsolidatedShare/:token",
