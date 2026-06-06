@@ -18296,6 +18296,245 @@ app.post(
   }
 );
 
+
+// =========================
+// GET CLIENT
+// =========================
+
+app.get(
+  "/getClientMobile",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      const client_code =
+
+        String(
+          req.query.client_code || ""
+        ).trim();
+
+      console.log(
+        "GET CLIENT API HIT"
+      );
+
+      console.log(
+        "COMPANY CODE:",
+        company_code
+      );
+
+      console.log(
+        "CLIENT CODE:",
+        client_code
+      );
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!client_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "client_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH CLIENT
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("client")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "client_code",
+          client_code
+        )
+
+        .single();
+
+      console.log(
+        "RAW CLIENT DATA:",
+        data
+      );
+
+      if (error) {
+
+        console.log(
+          "GET CLIENT ERROR:",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESPONSE
+      // =========================
+
+      const result = {
+
+        company_code:
+          String(
+            data.company_code || ""
+          ),
+
+        client_code:
+          String(
+            data.client_code || ""
+          ),
+
+        client_name:
+          data.client_name || "",
+
+        gstin:
+          data.gstin || "",
+
+        billing_address:
+          data.billing_address || "",
+
+        bill_state:
+          data.bill_state || "",
+
+        bill_stateCode:
+          String(
+            data.bill_statecode || ""
+          ),
+
+        bill_pincode:
+          String(
+            data.bill_pincode || ""
+          ),
+
+        mobile:
+          String(
+            data.mobile || ""
+          ),
+
+        email:
+          data.email || "",
+
+        same_address:
+          data.same_address || "",
+
+        shipping_address:
+          data.shipping_address || "",
+
+        shipping_state:
+          data.shipping_state || "",
+
+        shipping_stateCode:
+          String(
+            data.shipping_statecode || ""
+          ),
+
+        shipping_pincode:
+          String(
+            data.shipping_pincode || ""
+          ),
+
+        createdAt:
+          data.created_at || "",
+
+        updatedAt:
+          data.updated_at || "",
+
+        is_active:
+          data.is_active,
+
+        contact_person:
+          data.contact_person || "",
+
+        credit_limit:
+          data.credit_limit || 0,
+
+        opening_balance:
+          data.opening_balance || 0,
+
+        remarks:
+          data.remarks || "",
+
+        credit_period:
+          data.credit_period || 0
+
+      };
+
+      console.log(
+        "FINAL CLIENT RESPONSE:",
+        result
+      );
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "GET CLIENT CATCH ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
 app.listen(
   process.env.PORT,
   () => {
