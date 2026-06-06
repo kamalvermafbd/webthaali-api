@@ -1935,220 +1935,385 @@ return res.json({
 );
 
 
-// =========================
-// GET INVOICES
-// =========================
+  // =========================
+  // GET INVOICES
+  // =========================
 
-app.get(
-  "/getInvoices",
-  async (req, res) => {
+  app.get(
+    "/getInvoices",
+    async (req, res) => {
 
-    try {
+      try {
 
-      const company_code =
+        const company_code =
 
-        String(
-          req.query.company_code || ""
-        ).trim();
+          String(
+            req.query.company_code || ""
+          ).trim();
 
-      if (!company_code) {
+        if (!company_code) {
 
-        return res.json({
+          return res.json({
 
-          success: false,
+            success: false,
 
-          error: "company_code missing"
+            error: "company_code missing"
 
-        });
+          });
 
-      }
+        }
 
-      const {
-        data,
-        error
-      } = await supabase
-
-        .from("invoices")
-
-        .select("*")
-
-        .eq(
-          "company_code",
-          company_code
-        )
-
-        .order(
-          "created_at",
-          {
-            ascending: false
-          }
+        const page = Number(
+          req.query.page || 1
         );
 
-      if (error) {
+        const limit = Number(
+          req.query.limit || 10
+        );
+
+        const period =
+  String(req.query.period || "all");
+
+const statusFilter =
+  String(req.query.statusFilter || "all");
+
+const docTypeFilter =
+  String(req.query.docTypeFilter || "invoice");
+
+  console.log({
+  period,
+  statusFilter,
+  docTypeFilter
+});
+
+        const from =
+          (page - 1) * limit;
+
+        const to =
+          from + limit - 1;
+
+          console.log(
+  "PAGE:",
+  page,
+  "LIMIT:",
+  limit,
+  "FROM:",
+  from,
+  "TO:",
+  to
+);
+        const {
+          data,
+          error
+        } = await supabase
+
+          .from("invoices")
+
+          .select("*")
+
+          .eq(
+            "company_code",
+            company_code
+          )
+
+      .order(
+  "created_at",
+  {
+    ascending: false
+  }
+);
+console.log(
+  "ROWS RETURNED:",
+  data?.length
+);
+
+        if (error) {
+
+          return res.json({
+
+            success: false,
+
+            error: error.message
+
+          });
+
+        }
+
+        const result =
+
+          (data || []).map((row) => ({
+
+            invoiceId:
+              row.invoice_id,
+
+            invoiceNumber:
+              row.invoice_number,
+
+            invoiceDate:
+              row.invoice_date,
+
+            customerName:
+              row.customer_name,
+
+            customerMobile:
+              row.customer_mobile,
+
+            customerGST:
+              row.customer_gst,
+
+            billingAddress:
+              row.billing_address,
+
+            shippingAddress:
+              row.shipping_address,
+
+            state:
+              row.state,
+
+            stateCode:
+              row.state_code,
+
+            subtotal:
+              row.subtotal,
+
+            cgst:
+              row.cgst,
+
+            sgst:
+              row.sgst,
+
+            igst:
+              row.igst,
+
+            gstPercent:
+              row.gst_percent,
+
+            grandTotal:
+              row.grand_total,
+
+            paymentMode:
+              row.payment_mode,
+
+            notes:
+              row.notes,
+
+            terms:
+              row.terms,
+
+            createdAt:
+              row.created_at,
+
+            company_code:
+              row.company_code,
+
+            client_code:
+              row.client_code,
+
+            billing_pincode:
+              row.billing_pincode,
+
+            shipping_state:
+              row.shipping_state,
+
+            shipping_stateCode:
+              row.shipping_state_code,
+
+            shipping_pincode:
+              row.shipping_pincode,
+
+            due_date:
+              row.due_date,
+
+            credit_period:
+              row.credit_period,
+
+            status:
+              row.status,
+
+            doc_type:
+
+              String(
+                row.doc_type || ""
+              )
+                .toLowerCase()
+                .trim() === "quotation"
+
+                ? "quotation"
+
+                : "invoice",
+
+            quote_no:
+              row.quote_no,
+
+          quote_dt:
+    row.quote_dt,
+
+  transporter_name:
+    row.transporter_name,
+
+  vehicle_no:
+    row.vehicle_no,
+
+  driver_mobile:
+    row.driver_mobile,
+
+  gr_rr_no:
+    row.gr_rr_no,
+
+  eway_bill_no:
+    row.eway_bill_no,
+
+  share_token:
+    row.share_token
+
+          }));
+
+          let filteredResult = [...result];
+
+// Doc Type Filter
+if (docTypeFilter !== "all") {
+  filteredResult = filteredResult.filter(
+    (i) => i.doc_type === docTypeFilter
+  );
+}
+
+// Status Filter
+if (statusFilter === "posted") {
+  filteredResult = filteredResult.filter(
+    (i) =>
+      String(i.status || "")
+        .trim()
+        .toLowerCase() === "posted"
+  );
+}
+
+if (statusFilter === "not_posted") {
+  filteredResult = filteredResult.filter(
+    (i) =>
+      String(i.status || "")
+        .trim()
+        .toLowerCase() !== "posted"
+  );
+}
+
+  // Period Filter
+if (period !== "all") {
+
+  const now = new Date();
+  let f = new Date(0);
+  let t = new Date();
+
+  if (period === "today") {
+
+    f = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    );
+
+    t = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      23,
+      59,
+      59
+    );
+
+  }
+
+  else if (period === "week") {
+
+    const day = now.getDay();
+
+    f = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - day
+    );
+
+  }
+
+  else if (period === "month") {
+
+    f = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1
+    );
+
+  }
+
+  else if (period === "lastMonth") {
+
+    f = new Date(
+      now.getFullYear(),
+      now.getMonth() - 1,
+      1
+    );
+
+    t = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      0,
+      23,
+      59,
+      59
+    );
+
+  }
+
+  
+
+  filteredResult = filteredResult.filter((i) => {
+
+    const filterDate =
+      i.doc_type === "quotation"
+        ? i.quote_dt
+        : i.invoiceDate;
+
+    const d = new Date(filterDate);
+
+    return d >= f && d <= t;
+
+  });
+
+}
+
+
+// Pagination AFTER filter
+const paginatedData =
+  filteredResult.slice(
+    from,
+    to + 1
+  );
+
+     return res.json({
+
+  success: true,
+
+  data: paginatedData,
+
+  total: filteredResult.length
+
+});
+
+      }
+
+      catch (err) {
 
         return res.json({
 
           success: false,
 
-          error: error.message
+          error: err.message
 
         });
 
       }
 
-      const result =
-
-        (data || []).map((row) => ({
-
-          invoiceId:
-            row.invoice_id,
-
-          invoiceNumber:
-            row.invoice_number,
-
-          invoiceDate:
-            row.invoice_date,
-
-          customerName:
-            row.customer_name,
-
-          customerMobile:
-            row.customer_mobile,
-
-          customerGST:
-            row.customer_gst,
-
-          billingAddress:
-            row.billing_address,
-
-          shippingAddress:
-            row.shipping_address,
-
-          state:
-            row.state,
-
-          stateCode:
-            row.state_code,
-
-          subtotal:
-            row.subtotal,
-
-          cgst:
-            row.cgst,
-
-          sgst:
-            row.sgst,
-
-          igst:
-            row.igst,
-
-          gstPercent:
-            row.gst_percent,
-
-          grandTotal:
-            row.grand_total,
-
-          paymentMode:
-            row.payment_mode,
-
-          notes:
-            row.notes,
-
-          terms:
-            row.terms,
-
-          createdAt:
-            row.created_at,
-
-          company_code:
-            row.company_code,
-
-          client_code:
-            row.client_code,
-
-          billing_pincode:
-            row.billing_pincode,
-
-          shipping_state:
-            row.shipping_state,
-
-          shipping_stateCode:
-            row.shipping_state_code,
-
-          shipping_pincode:
-            row.shipping_pincode,
-
-          due_date:
-            row.due_date,
-
-          credit_period:
-            row.credit_period,
-
-          status:
-            row.status,
-
-          doc_type:
-
-            String(
-              row.doc_type || ""
-            )
-              .toLowerCase()
-              .trim() === "quotation"
-
-              ? "quotation"
-
-              : "invoice",
-
-          quote_no:
-            row.quote_no,
-
-         quote_dt:
-  row.quote_dt,
-
-transporter_name:
-  row.transporter_name,
-
-vehicle_no:
-  row.vehicle_no,
-
-driver_mobile:
-  row.driver_mobile,
-
-gr_rr_no:
-  row.gr_rr_no,
-
-eway_bill_no:
-  row.eway_bill_no,
-
-share_token:
-  row.share_token
-
-        }));
-
-      return res.json({
-
-        success: true,
-
-        data: result
-
-      });
-
     }
-
-    catch (err) {
-
-      return res.json({
-
-        success: false,
-
-        error: err.message
-
-      });
-
-    }
-
-  }
-);
+  );
 
 
 // =========================
