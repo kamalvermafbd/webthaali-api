@@ -75,7 +75,7 @@ app.get("/", (req, res) => {
 
   res.json({
     success: true,
-    message: "WebThaali API Running"
+    message: "billey API Running"
   });
 
 });
@@ -12933,7 +12933,7 @@ app.post(
     const result =
   await resend.emails.send({
 
-   from: "noreply@webthaali.in",
+   from: "noreply@billeyi.in",
 
    to:
   email,
@@ -17950,7 +17950,7 @@ app.post(
         await resend.emails.send({
 
           from:
-            "Billey <noreply@webthaali.in>",
+            "Billey <noreply@billey.in>",
 
           replyTo:
             companyEmail || undefined,
