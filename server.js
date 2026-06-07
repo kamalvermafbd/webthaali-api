@@ -17822,6 +17822,8 @@ app.post(
 
         )
 
+        
+
         .select();
 
       if (error) {
@@ -17836,6 +17838,63 @@ app.post(
         });
 
       }
+
+const { data: company } =
+await supabase
+  .from("company")
+  .select("mobile")
+  .eq("company_code", company_code)
+  .single();
+
+console.log(
+  "COMPANY:",
+  company
+);
+
+  if (!company?.mobile) {
+
+  console.log(
+    "COMPANY MOBILE NOT FOUND:",
+    company_code
+  );
+
+}
+else {
+
+  const { data: matchedUser } =
+await supabase
+  .from("usersheet")
+  .select("*")
+  .eq("user_id", company.mobile);
+
+console.log(
+  "MATCHED USER:",
+  matchedUser
+);
+
+  const {
+    data: userUpdate,
+    error: userError
+  } = await supabase
+    .from("usersheet")
+    .update({
+      role: "USER"
+    })
+    .eq("user_id", company.mobile)
+    .select();
+
+ console.log(
+  "USER ROLE UPDATE:",
+  userUpdate
+);
+
+console.log(
+  "USER ROLE ERROR:",
+  userError
+);
+
+}
+
 
       return res.json({
 
