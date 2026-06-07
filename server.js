@@ -12933,7 +12933,7 @@ app.post(
     const result =
   await resend.emails.send({
 
-   from: "noreply@billeyi.in",
+   from: "noreply@billey.in",
 
    to:
   email,
@@ -18061,6 +18061,15 @@ app.post(
           `
 
         });
+
+        console.log(
+  "RESEND RESULT:",
+  JSON.stringify(
+    result,
+    null,
+    2
+  )
+);
 
       if (result.error) {
 
