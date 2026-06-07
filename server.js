@@ -12929,6 +12929,18 @@ app.post(
       // =========================
       // SEND EMAIL
       // =========================
+console.log("RESEND PAYLOAD:", {
+
+  from: "Billey <noreply@billey.in>",
+
+  to: email,
+
+  replyTo: companyEmail || undefined,
+
+  subject:
+    `${companyName || "Company"} - Consolidated Invoice Statement`
+
+});
 
     const result =
   await resend.emails.send({
