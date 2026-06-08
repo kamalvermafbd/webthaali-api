@@ -18903,6 +18903,776 @@ app.get(
 );
 
 
+
+// =========================
+// GET LICENSE STATUS
+// =========================
+
+app.get(
+  "/getLicenseStatus",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("license_master")
+
+        .select(`
+          payment_verified,
+          payment_status,
+          expected_amount,
+          received_amount
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "created_on",
+          {
+            ascending: false
+          }
+        )
+
+        .limit(1)
+
+        .single();
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// SUBMIT PENDING PAYMENT PROOF
+// =========================
+
+app.post(
+  "/submitPendingPaymentProof",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const mobile =
+
+        String(
+          body.mobile || ""
+        ).trim();
+
+      if (
+        !company_code ||
+        !mobile
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code or mobile missing"
+
+        });
+
+      }
+
+
+      const {
+  data: licenseRow,
+  error: licenseError
+} = await supabase
+
+  .from("license_master")
+
+  .select(`
+    id,
+    plan_name,
+    plan_code,
+    valid_from,
+    valid_to
+  `)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .order(
+    "created_on",
+    {
+      ascending: false
+    }
+  )
+
+  .limit(1)
+
+  .single();
+
+if (licenseError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      licenseError.message
+
+  });
+
+}
+
+
+
+
+const {
+  data: existingProof,
+  error: existingProofError
+} = await supabase
+
+
+
+  .from(
+    "license_payment_proofs"
+  )
+
+  .select("id")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "license_id",
+    licenseRow.id
+  )
+
+  .eq(
+    "valid_from",
+    licenseRow.valid_from
+  )
+
+  .eq(
+    "valid_to",
+    licenseRow.valid_to
+  )
+
+  .eq(
+    "status",
+    "pending_verification"
+  )
+
+  .limit(1)
+
+  .maybeSingle();
+
+if (existingProofError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      existingProofError.message
+
+  });
+
+}
+
+if (existingProof) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Payment proof already submitted and under verification"
+
+  });
+
+}
+      const {
+        error
+      } = await supabase
+
+        .from(
+          "license_payment_proofs"
+        )
+
+   .insert([{
+
+  company_code,
+
+  mobile,
+
+  license_id:
+    licenseRow?.id || null,
+
+  plan_name:
+    licenseRow?.plan_name || null,
+
+  plan_code:
+    licenseRow?.plan_code || null,
+
+  valid_from:
+    licenseRow?.valid_from || null,
+
+  valid_to:
+    licenseRow?.valid_to || null,
+
+  expected_amount:
+    Number(
+      body.expected_amount || 0
+    ),
+
+  received_amount:
+    Number(
+      body.received_amount || 0
+    ),
+
+  pending_amount:
+    Number(
+      body.pending_amount || 0
+    ),
+
+  screenshot:
+    body.screenshot || "",
+
+  status:
+    "pending_verification"
+
+}]);
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Payment proof submitted successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET PENDING PAYMENT PROOF STATUS
+// =========================
+
+app.get(
+
+  "/getPendingPaymentProofStatus",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from(
+          "license_payment_proofs"
+        )
+
+        .select(`
+          id,
+          status,
+          license_id,
+          plan_name,
+          plan_code,
+          valid_from,
+          valid_to,
+          created_on
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "status",
+          "pending_verification"
+        )
+
+        .order(
+          "created_on",
+          {
+            ascending: false
+          }
+        )
+
+        .limit(1)
+
+        .maybeSingle();
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data:
+          data || null
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
+// MARK PARTIAL PAYMENT
+// =========================
+
+app.post(
+
+  "/markPartialSubscriptionPayment",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company_code,
+
+        received_amount
+
+      } = req.body || {};
+
+      if (
+
+        !company_code ||
+
+        received_amount == null
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code or received_amount missing"
+
+        });
+
+      }
+
+      const {
+
+        data: licenseRow,
+
+        error: fetchError
+
+      } = await supabase
+
+        .from("license_master")
+
+        .select(`
+          id,
+          subscription_amt
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "created_on",
+          {
+            ascending: false
+          }
+        )
+
+        .limit(1)
+
+        .single();
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      const {
+
+        error: updateError
+
+      } = await supabase
+
+        .from("license_master")
+
+        .update({
+
+  payment_verified:
+    false,
+
+  payment_status:
+    "pending",
+
+  expected_amount:
+    licenseRow.subscription_amt,
+
+  received_amount:
+    Number(
+      received_amount
+    )
+
+})
+
+        .eq(
+          "id",
+          licenseRow.id
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Partial payment saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+// =========================
+// REJECT SUBSCRIPTION PAYMENT
+// =========================
+
+app.post(
+
+  "/rejectSubscriptionPayment",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company_code
+
+      } = req.body || {};
+
+      if (
+
+        !company_code
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+
+        data: licenseRow,
+
+        error: fetchError
+
+      } = await supabase
+
+        .from("license_master")
+
+        .select(`
+  id,
+  subscription_amt
+`)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "created_on",
+          {
+            ascending: false
+          }
+        )
+
+        .limit(1)
+
+        .single();
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      const {
+
+        error: updateError
+
+      } = await supabase
+
+        .from("license_master")
+
+       .update({
+
+  payment_verified:
+    false,
+
+  payment_status:
+    "rejected",
+
+  received_amount:
+    0,
+
+  expected_amount:
+    licenseRow.subscription_amt
+
+})
+
+        .eq(
+          "id",
+          licenseRow.id
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Payment rejected successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
 app.listen(
   process.env.PORT,
   () => {
