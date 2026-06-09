@@ -17308,6 +17308,12 @@ app.post(
           selected_plan:
             plan.plan_name,
 
+          plan_name:
+  plan.plan_name,
+
+plan_code:
+  plan.plan_code,  
+
           subscription_amt:
             details.amount,
 
@@ -17699,6 +17705,7 @@ app.post(
         )
 
         .select(`
+          id,
           company_code,
           selected_plan,
           valid_from,
@@ -17711,10 +17718,11 @@ app.post(
           created_on
         `)
 
-        .is(
-          "payment_verified",
-          null
-        )
+       .not(
+  "payment_verified",
+  "eq",
+  true
+)
 
         .eq(
   "created_by",
@@ -17727,6 +17735,87 @@ app.post(
             ascending: false
           }
         );
+
+
+        const licenseIds =
+
+  (data || []).map(
+
+    (x) => x.id
+
+  );
+
+console.log(
+
+  "LICENSE IDS:",
+
+  licenseIds
+
+);
+
+const {
+
+  data: proofs
+
+} = await supabase
+
+  .from(
+    "license_payment_proofs"
+  )
+
+  .select(`
+    license_id,
+    validated
+  `)
+
+  .in(
+    "license_id",
+    licenseIds
+  );
+
+
+  const rejectedLicenseIds =
+
+  (proofs || [])
+
+    .filter(
+
+      (x) =>
+
+        x.validated === false
+
+    )
+
+    .map(
+
+      (x) =>
+
+        x.license_id
+
+    );
+
+console.log(
+
+  "REJECTED LICENSE IDS:",
+
+  rejectedLicenseIds
+
+);
+
+const filteredData =
+
+  (data || []).filter(
+
+    (row) =>
+
+      !rejectedLicenseIds.includes(
+
+        row.id
+
+      )
+
+  );
+
 
       if (error) {
 
@@ -17741,13 +17830,13 @@ app.post(
 
       }
 
-      return res.json({
+     return res.json({
 
-        success: true,
+  success: true,
 
-        data
+  data: filteredData
 
-      });
+});
 
     }
 
@@ -19672,6 +19761,327 @@ app.post(
 
 );
 
+
+
+// =========================
+// GET PENDING PAYMENT PROOFS
+// =========================
+
+app.get(
+
+  "/getPendingPaymentProofs",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        data,
+
+        error
+
+      } = await supabase
+
+        .from(
+          "license_payment_proofs"
+        )
+
+        .select(`
+          id,
+          company_code,
+  validation_stage,
+          plan_name,
+          plan_code,
+
+          expected_amount,
+          received_amount,
+          pending_amount,
+
+          screenshot,
+
+          status,
+
+          license_id,
+
+          valid_from,
+          valid_to,
+
+          created_on
+        `)
+
+        .eq(
+          "status",
+          "pending_verification"
+        )
+
+        .order(
+          "created_on",
+          {
+            ascending: false
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data:
+          data || []
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+
+// =========================
+// VERIFY PENDING PAYMENT PROOF
+// =========================
+
+app.post(
+
+  "/verifyPendingPaymentProof",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        proof_id
+
+      } = req.body || {};
+
+      if (
+
+        !proof_id
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "proof_id missing"
+
+        });
+
+      }
+
+      const {
+
+        error: updateError
+
+      } = await supabase
+
+        .from(
+          "license_payment_proofs"
+        )
+
+        .update({
+
+          validated:
+            true,
+
+          validated_on:
+            new Date(),
+
+          status:
+            "verified"
+
+        })
+
+        .eq(
+          "id",
+          proof_id
+        )
+
+        .eq(
+          "validation_stage",
+          2
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Payment proof verified successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+// =========================
+// REJECT PENDING PAYMENT PROOF
+// =========================
+
+app.post(
+
+  "/rejectPendingPaymentProof",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        proof_id
+
+      } = req.body || {};
+
+      if (
+
+        !proof_id
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "proof_id missing"
+
+        });
+
+      }
+
+      const {
+
+        error: updateError
+
+      } = await supabase
+
+        .from(
+          "license_payment_proofs"
+        )
+
+        .update({
+
+          status:
+            "rejected",
+
+          validated:
+            false,
+
+          validated_on:
+            new Date()
+
+        })
+
+        .eq(
+          "id",
+          proof_id
+        )
+
+        .eq(
+          "validation_stage",
+          2
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Payment proof rejected successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
 
 app.listen(
   process.env.PORT,
