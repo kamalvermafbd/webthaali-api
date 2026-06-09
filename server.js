@@ -43,6 +43,28 @@ app.use(
 
 );
 
+
+const SYSTEM_DOWN = false;
+
+app.use((req, res, next) => {
+
+  if (SYSTEM_DOWN) {
+
+    return res.status(503).json({
+
+      success: false,
+
+      error:
+        "System Under Maintenance"
+
+    });
+
+  }
+
+  next();
+
+});
+
 const supabase =
   createClient(
     process.env.SUPABASE_URL,
@@ -13193,6 +13215,8 @@ app.post(
          login_mobile,
         role,
         selected_plan,
+        plan_name,
+        plan_code,
         subscription_amt
 
       } = req.body;
@@ -13455,6 +13479,10 @@ else if (
               agent_id,
 
               selected_plan,
+
+              plan_name,
+
+              plan_code,
 
               subscription_amt,
 
@@ -17718,11 +17746,6 @@ app.post(
           created_on
         `)
 
-       .not(
-  "payment_verified",
-  "eq",
-  true
-)
 
         .eq(
   "created_by",
@@ -17754,67 +17777,43 @@ console.log(
 );
 
 const {
-
   data: proofs
-
 } = await supabase
-
-  .from(
-    "license_payment_proofs"
-  )
-
+  .from("license_payment_proofs")
   .select(`
     license_id,
     validated
   `)
-
-  .in(
-    "license_id",
-    licenseIds
-  );
-
-
-  const rejectedLicenseIds =
-
-  (proofs || [])
-
-    .filter(
-
-      (x) =>
-
-        x.validated === false
-
-    )
-
-    .map(
-
-      (x) =>
-
-        x.license_id
-
-    );
-
-console.log(
-
-  "REJECTED LICENSE IDS:",
-
-  rejectedLicenseIds
-
-);
+  .in("license_id", licenseIds);
 
 const filteredData =
+  (data || []).filter((row) => {
 
-  (data || []).filter(
+    // First Stage
+    if (row.payment_verified == null) {
+      return true;
+    }
 
-    (row) =>
+    // Second Stage
+    if (row.payment_verified === false) {
 
-      !rejectedLicenseIds.includes(
+      const proof = (proofs || []).find(
+        x => x.license_id === row.id
+      );
 
-        row.id
+      return proof && proof.validated == null;
+    }
 
-      )
+    return false;
+  });
 
-  );
+  console.log(
+  "FILTERED DATA",
+  filteredData.map(x => ({
+    company_code: x.company_code,
+    payment_verified: x.payment_verified
+  }))
+);
 
 
       if (error) {
@@ -17866,10 +17865,14 @@ app.post(
     try {
 
       const company_code =
+  String(
+    req.body.company_code || ""
+  ).trim();
 
-        String(
-          req.body.company_code || ""
-        ).trim();
+const license_id =
+  Number(
+    req.body.license_id
+  );
 
       if (!company_code) {
 
@@ -17897,19 +17900,16 @@ app.post(
         )
 
         .update({
-
-          payment_verified:
-            "TRUE"
-
-        })
-
-        .eq(
-
-          "company_code",
-
-          company_code
-
-        )
+  payment_verified: true
+})
+.eq(
+  "company_code",
+  company_code
+)
+.eq(
+  "id",
+  license_id
+)
 
         
 
@@ -19031,11 +19031,12 @@ app.get(
         .from("license_master")
 
         .select(`
-          payment_verified,
-          payment_status,
-          expected_amount,
-          received_amount
-        `)
+  id,
+  payment_verified,
+  payment_status,
+  expected_amount,
+  received_amount
+`)
 
         .eq(
           "company_code",
@@ -19386,6 +19387,7 @@ app.get(
         .select(`
           id,
           status,
+          validated,
           license_id,
           plan_name,
           plan_code,
@@ -19399,11 +19401,6 @@ app.get(
           company_code
         )
 
-        .eq(
-          "status",
-          "pending_verification"
-        )
-
         .order(
           "created_on",
           {
@@ -19413,7 +19410,20 @@ app.get(
 
         .limit(1)
 
+
         .maybeSingle();
+
+        console.log(
+  "CHECK COMPANY:",
+  company_code
+);
+
+
+console.log(
+  "PENDING PROOF STATUS DATA:",
+  data
+);
+
 
       if (error) {
 
@@ -19625,27 +19635,19 @@ app.post(
     try {
 
       const {
+  company_code,
+  license_id
+} = req.body || {};
 
-        company_code
-
-      } = req.body || {};
-
-      if (
-
-        !company_code
-
-      ) {
-
-        return res.json({
-
-          success: false,
-
-          error:
-            "company_code missing"
-
-        });
-
-      }
+     if (
+  !company_code ||
+  !license_id
+) {
+  return res.json({
+    success: false,
+    error: "company_code or license_id missing"
+  });
+}
 
       const {
 
@@ -19662,21 +19664,9 @@ app.post(
   subscription_amt
 `)
 
-        .eq(
-          "company_code",
-          company_code
-        )
-
-        .order(
-          "created_on",
-          {
-            ascending: false
-          }
-        )
-
-        .limit(1)
-
-        .single();
+       .eq("company_code", company_code)
+.eq("id", license_id)
+.single();
 
       if (fetchError) {
 
@@ -19810,11 +19800,10 @@ app.get(
           created_on
         `)
 
-        .eq(
-          "status",
-          "pending_verification"
-        )
-
+       .is(
+  "validated",
+  null
+)
         .order(
           "created_on",
           {
@@ -19992,6 +19981,17 @@ app.post(
 
       } = req.body || {};
 
+
+       console.log(
+        "REJECT PROOF BODY:",
+        req.body
+      );
+
+      console.log(
+        "PROOF ID:",
+        proof_id
+      );
+
       if (
 
         !proof_id
@@ -20009,38 +20009,47 @@ app.post(
 
       }
 
-      const {
+     const {
 
-        error: updateError
+  data: updatedRows,
 
-      } = await supabase
+  error: updateError
 
-        .from(
-          "license_payment_proofs"
-        )
+} = await supabase
 
-        .update({
+  .from(
+    "license_payment_proofs"
+  )
 
-          status:
-            "rejected",
+  .update({
 
-          validated:
-            false,
+    status:
+      "rejected",
 
-          validated_on:
-            new Date()
+    validated:
+      false,
 
-        })
+    validated_on:
+      new Date()
 
-        .eq(
-          "id",
-          proof_id
-        )
+  })
 
-        .eq(
-          "validation_stage",
-          2
-        );
+  .eq(
+    "id",
+    proof_id
+  )
+
+  .eq(
+    "validation_stage",
+    2
+  )
+
+  .select();
+
+console.log(
+  "UPDATED ROWS:",
+  updatedRows
+);
 
       if (updateError) {
 
