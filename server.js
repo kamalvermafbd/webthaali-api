@@ -3,6 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
+const bcrypt = require("bcrypt");
 
 const nodemailer =
   require("nodemailer");
@@ -4656,6 +4657,9 @@ app.post(
         nextCompanyCode
       );
 
+
+      const hashedPassword =
+  await bcrypt.hash(password, 10);
       // =========================
       // INSERT USER
       // =========================
@@ -4671,7 +4675,7 @@ app.post(
           user_id:
             mobile,
 
-          password,
+         password: hashedPassword,
 
           email,
 
@@ -12763,15 +12767,13 @@ if (!user) {
 // PASSWORD CHECK
 // =========================
 
-const rowPassword =
-
-  String(
+const passwordMatch =
+  await bcrypt.compare(
+    password,
     user.password || ""
-  ).trim();
+  );
 
-if (
-  rowPassword !== password
-) {
+if (!passwordMatch) {
 
   return res.json({
 
@@ -12824,16 +12826,19 @@ if (
           company_code:
             user.company_code || "",
 
-          name:
-            user.name || "",
+            name:
+              user.name || "",
 
-              role:
+                role:
   user.role || "",
 
 status:
   user.is_active === true
     ? "ACTIVE"
-    : "INACTIVE"
+    : "INACTIVE",
+
+    force_password_change:
+  user.force_password_change === true,
 
         }
 
@@ -12942,25 +12947,56 @@ app.post(
       // GET PASSWORD
       // =========================
 
-      const password =
+    const tempPassword =
 
-        String(
-          data.password || ""
-        );
+  Math.random()
+    .toString(36)
+    .slice(-8);
 
       // =========================
       // SEND EMAIL
       // =========================
+
+      const hashedPassword =
+  await bcrypt.hash(
+    tempPassword,
+    10
+  );
+
+const {
+  error: updateError
+} = await supabase
+
+  .from("usersheet")
+
+  .update({
+  password: hashedPassword,
+  force_password_change: true
+})
+
+  .eq(
+    "email",
+    email
+  );
+
+if (updateError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      updateError.message
+
+  });
+
+}
+
 console.log("RESEND PAYLOAD:", {
 
   from: "Billey <noreply@billey.in>",
 
   to: email,
-
-  replyTo: companyEmail || undefined,
-
-  subject:
-    `${companyName || "Company"} - Consolidated Invoice Statement`
 
 });
 
@@ -12988,7 +13024,7 @@ console.log("RESEND PAYLOAD:", {
         </p>
 
         <h1>
-          ${password}
+        ${tempPassword}
         </h1>
 
       </div>
@@ -20090,6 +20126,164 @@ console.log(
 
   }
 
+);
+
+app.post(
+  "/changePassword",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const email =
+        String(body.email || "")
+          .trim()
+          .toLowerCase();
+
+      const oldPassword =
+        String(body.oldPassword || "")
+          .trim();
+
+      const newPassword =
+        String(body.newPassword || "")
+          .trim();
+
+      if (
+        !email ||
+        !oldPassword ||
+        !newPassword
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Email, old password and new password required"
+
+        });
+
+      }
+
+      const {
+        data: user,
+        error
+      } = await supabase
+
+        .from("usersheet")
+
+        .select("*")
+
+        .eq(
+          "email",
+          email
+        )
+
+        .single();
+
+      if (
+        error ||
+        !user
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "User not found"
+
+        });
+
+      }
+
+      const passwordMatch =
+        await bcrypt.compare(
+          oldPassword,
+          user.password || ""
+        );
+
+      if (!passwordMatch) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Old password incorrect"
+
+        });
+
+      }
+
+      const hashedPassword =
+        await bcrypt.hash(
+          newPassword,
+          10
+        );
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("usersheet")
+
+       .update({
+  password: hashedPassword,
+  force_password_change: false
+})
+
+        .eq(
+          "email",
+          email
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Password changed successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "CHANGE PASSWORD ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
 );
 
 app.listen(
