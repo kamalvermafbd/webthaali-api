@@ -12746,6 +12746,13 @@ const user =
 
   });
 
+  console.log(
+  "LOGIN USER",
+  user?.email,
+  user?.mobile,
+  user?.force_password_change
+);
+
 // =========================
 // LOGIN ID NOT FOUND
 // =========================
