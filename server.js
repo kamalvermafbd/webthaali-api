@@ -8,6 +8,9 @@ const bcrypt = require("bcrypt");
 const nodemailer =
   require("nodemailer");
 
+  const rateLimit =
+  require("express-rate-limit");
+
  const { Resend } = require("resend");
 
 const resend = new Resend(
@@ -31,6 +34,52 @@ app.use(
   })
 
 );
+
+const loginLimiter =
+  rateLimit({
+
+    windowMs:
+      15 * 60 * 1000,
+
+    max: 10,
+
+    standardHeaders: true,
+
+    legacyHeaders: false,
+
+    message: {
+
+      success: false,
+
+      error:
+        "Too many login attempts. Try again later."
+
+    }
+
+  });
+
+const forgotPasswordLimiter =
+  rateLimit({
+
+    windowMs:
+      15 * 60 * 1000,
+
+    max: 5,
+
+    standardHeaders: true,
+
+    legacyHeaders: false,
+
+    message: {
+
+      success: false,
+
+      error:
+        "Too many password reset attempts."
+
+    }
+
+  });
 
 app.use(
 
@@ -4860,6 +4909,22 @@ app.post(
 
       const password =
         String(body.password || "").trim();
+
+        if (
+  password.length < 6 ||
+  password.length > 128
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Password must be between 6 and 128 characters"
+
+  });
+
+}
 
       if (
         !name ||
@@ -12989,6 +13054,8 @@ if (duplicateExists) {
 app.post(
   "/loginUser",
 
+  loginLimiter,
+
   async (req, res) => {
 
     try {
@@ -13044,18 +13111,41 @@ app.post(
 
       }
 
+
+      if (
+          password.length > 128
+        ) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              "Invalid credentials"
+
+          });
+
+        }
       // =========================
       // FETCH USERS
       // =========================
 
       const {
-        data,
-        error
-      } = await supabase
+  data,
+  error
+} = await supabase
 
-        .from("usersheet")
+  .from("usersheet")
 
-        .select("*");
+ .select(
+  "user_id,email,mobile,password,company_code,name,role,is_active,force_password_change"
+)
+
+  .or(
+    `email.eq.${email},mobile.eq.${email}`
+  )
+
+  .limit(1);
 
       if (error) {
 
@@ -13075,34 +13165,7 @@ app.post(
 // =========================
 
 const user =
-
-  (data || []).find((row) => {
-
-    const rowEmail =
-
-      String(
-        row.email || ""
-      )
-        .trim()
-        .toLowerCase();
-
-    const rowMobile =
-
-      String(
-        row.mobile || ""
-      ).trim();
-
-    return (
-
-      rowEmail === email
-
-      ||
-
-      rowMobile === email
-
-    );
-
-  });
+  data?.[0];
 
   console.log(
   "LOGIN USER",
@@ -13239,6 +13302,8 @@ status:
 app.post(
   "/forgotPassword",
 
+      forgotPasswordLimiter,
+
   async (req, res) => {
 
     try {
@@ -13258,6 +13323,8 @@ app.post(
           .trim()
           .toLowerCase();
 
+   
+
       // =========================
       // VALIDATION
       // =========================
@@ -13275,6 +13342,18 @@ app.post(
 
       }
 
+         if (email.length > 254) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Invalid email"
+
+  });
+
+}
       // =========================
       // FIND USER
       // =========================
