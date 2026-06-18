@@ -20730,6 +20730,923 @@ app.post(
   }
 );
 
+// =========================
+// SAVE RECEIPT
+// =========================
+
+app.post(
+  "/saveReceipt",
+  async (req, res) => {
+
+    try {
+
+      console.log(
+        "SAVE RECEIPT API HIT"
+      );
+
+      console.log(
+        "REQ BODY:",
+        req.body
+      );
+
+      const body =
+        req.body || {};
+
+      const company_code =
+        String(
+          body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const receipt =
+  req.body;
+
+console.log(
+  "RECEIPT DATA:",
+  receipt
+);
+
+if (
+  !receipt.receipt_date ||
+  !receipt.party_id ||
+  !receipt.party_name ||
+  !receipt.amount
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Required fields missing"
+
+  });
+
+}
+
+if (
+  !receipt.payment_mode
+) {
+
+  receipt.payment_mode =
+    "Cash";
+
+}
+
+const {
+  data: lastReceipt,
+  error: lastReceiptError
+} = await supabase
+  .from("receipt_entry")
+  .select("voucher_no")
+  .eq(
+    "company_code",
+    company_code
+  )
+  .not(
+    "voucher_no",
+    "is",
+    null
+  )
+  .order(
+    "voucher_no",
+    {
+      ascending: false
+    }
+  )
+  .limit(1)
+  .maybeSingle();
+
+    if (
+  lastReceiptError
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      lastReceiptError.message
+
+  });
+
+}
+
+const nextVoucherNo =
+  (lastReceipt?.voucher_no || 0) + 1;
+
+  console.log(
+  "LAST VOUCHER:",
+  lastReceipt
+);
+
+console.log(
+  "NEXT VOUCHER:",
+  nextVoucherNo
+);
+
+
+const receipt_no =
+  "RCPT-" +
+  company_code +
+  "-" +
+  receipt.receipt_date
+    .substring(2)
+    .replaceAll("-", "") +
+  "-" +
+  String(
+    nextVoucherNo
+  ).padStart(
+    5,
+    "0"
+  );
+
+  console.log(
+  "RECEIPT NO:",
+  receipt_no
+);
+
+const {
+  data,
+  error
+} = await supabase
+
+  .from("receipt_entry")
+
+  .insert([{
+
+     receipt_no,
+
+    voucher_no:
+      nextVoucherNo,
+
+    company_code,
+
+    receipt_date:
+      receipt.receipt_date,
+
+    party_id:
+      receipt.party_id,
+
+    party_name:
+      receipt.party_name,
+
+    amount:
+      Number(
+        receipt.amount
+      ),
+
+    payment_mode:
+      receipt.payment_mode,
+
+    reference_no:
+      receipt.reference_no || "",
+
+    bank_name:
+      receipt.bank_name || "",
+
+    cheque_date:
+      receipt.cheque_date,
+
+    remarks:
+      receipt.remarks || "",
+
+    status:
+      "RECEIVED"
+
+    }])
+
+  .select()
+
+  .single();
+
+console.log(
+  "RECEIPT INSERT ERROR:",
+  error
+);
+
+console.log(
+  "INSERTED RECEIPT:",
+  data
+);
+
+     if (error) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      error.message
+
+  });
+
+}
+return res.json({
+
+  success: true,
+
+  message:
+    "Receipt Saved",
+
+  receipt_no,
+
+  voucher_no:
+    nextVoucherNo,
+
+    data
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET COMPANY BANKS
+// =========================
+
+app.get(
+  "/getCompanyBanks",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+          success: false,
+          error: "company_code missing"
+        });
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("company_bank")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .order(
+          "bank_name"
+        );
+
+      if (error) {
+
+        return res.json({
+          success: false,
+          error: error.message
+        });
+
+      }
+
+      return res.json({
+        success: true,
+        data
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+        success: false,
+        error: err.message
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// SAVE COMPANY BANK
+// =========================
+
+app.post(
+  "/saveCompanyBank",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+        String(
+          body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const bank_name =
+        String(
+          body.bank_name || ""
+        ).trim();
+
+      if (!bank_name) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Bank name required"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH EXISTING BANKS
+      // =========================
+
+      const {
+        data: banks,
+        error: fetchError
+      } = await supabase
+
+        .from("company_bank")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const duplicate =
+        (banks || []).find(
+          (b) =>
+
+            String(
+              b.bank_name || ""
+            )
+              .trim()
+              .toUpperCase()
+
+            ===
+
+            bank_name
+              .toUpperCase()
+        );
+
+      if (duplicate) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Bank already exists"
+
+        });
+
+      }
+
+      // =========================
+      // GENERATE BANK CODE
+      // =========================
+
+      let maxNumber = 0;
+
+      (banks || []).forEach(
+        (row) => {
+
+          const num =
+            parseInt(
+              String(
+                row.bank_code || ""
+              ).replace(
+                "BK",
+                ""
+              )
+            );
+
+          if (!isNaN(num)) {
+
+            maxNumber =
+              Math.max(
+                maxNumber,
+                num
+              );
+
+          }
+
+        }
+      );
+
+      const bank_code =
+
+        "BK" +
+
+        String(
+          maxNumber + 1
+        ).padStart(4, "0");
+
+      // =========================
+      // INSERT
+      // =========================
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("company_bank")
+
+        .insert([{
+
+          company_code,
+
+          bank_code,
+
+          bank_name,
+
+          account_number:
+            body.account_number || "",
+
+          ifsc:
+            body.ifsc || "",
+
+          branch:
+            body.branch || "",
+
+            is_default:
+             body.is_default || false,
+
+          is_active: true,
+
+          created_at:
+            new Date()
+
+        }]);
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Bank saved successfully",
+
+        bank_code
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+        });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET CLIENT LEDGER
+// =========================
+
+app.post(
+  "/getClientLedger",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+        body.company_code;
+
+      const client_code =
+        body.client_code;
+
+      const from_date =
+        body.from_date;
+
+      const to_date =
+        body.to_date;
+
+      if (
+        !company_code ||
+        !client_code
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code or client_code missing"
+
+        });
+
+      }
+
+      // Client Fetch
+
+      const {
+        data: clientRow
+      } = await supabase
+
+        .from("client")
+
+        .select(
+          "opening_balance"
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "client_code",
+          client_code
+        )
+
+        .single();
+
+      let openingBalance =
+        Number(
+          clientRow
+            ?.opening_balance || 0
+        );
+
+      // Previous Invoices
+
+      const {
+        data: oldInvoices
+      } = await supabase
+
+        .from("invoices")
+
+        .select(
+          "grand_total"
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "client_code",
+          client_code
+        )
+
+        .eq(
+          "doc_type",
+          "invoice"
+        )
+
+        .eq(
+          "status",
+          "Posted"
+        )
+
+        .lt(
+          "invoice_date",
+          from_date
+        );
+
+      // Previous Receipts
+
+      const {
+        data: oldReceipts
+      } = await supabase
+
+        .from("receipt_entry")
+
+        .select(
+          "amount"
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "party_id",
+          client_code
+        )
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .lt(
+          "receipt_date",
+          from_date
+        );
+
+      openingBalance +=
+
+        (oldInvoices || [])
+          .reduce(
+
+            (sum, row) =>
+
+              sum +
+
+              Number(
+                row.grand_total || 0
+              ),
+
+            0
+          );
+
+      openingBalance -=
+
+        (oldReceipts || [])
+          .reduce(
+
+            (sum, row) =>
+
+              sum +
+
+              Number(
+                row.amount || 0
+              ),
+
+            0
+          );
+
+
+
+          // Current Period Invoices
+
+const {
+  data: invoices
+} = await supabase
+
+  .from("invoices")
+
+  .select(`
+    invoice_date,
+    invoice_number,
+    grand_total
+  `)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "client_code",
+    client_code
+  )
+
+  .eq(
+    "doc_type",
+    "invoice"
+  )
+
+  .eq(
+    "status",
+    "Posted"
+  )
+
+  .gte(
+    "invoice_date",
+    from_date
+  )
+
+  .lte(
+    "invoice_date",
+    to_date
+  );
+
+// Current Period Receipts
+
+const {
+  data: receipts
+} = await supabase
+
+  .from("receipt_entry")
+
+  .select(`
+    receipt_date,
+    receipt_no,
+    amount
+  `)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "party_id",
+    client_code
+  )
+
+  .eq(
+    "is_active",
+    true
+  )
+
+  .gte(
+    "receipt_date",
+    from_date
+  )
+
+  .lte(
+    "receipt_date",
+    to_date
+  );
+
+  const transactions = [];
+
+// Invoices
+
+(invoices || []).forEach(
+  (row) => {
+
+    transactions.push({
+
+      date:
+        row.invoice_date,
+
+      type:
+        "Invoice",
+
+      doc_no:
+        row.invoice_number,
+
+      debit:
+        Number(
+          row.grand_total || 0
+        ),
+
+      credit: 0
+
+    });
+
+  }
+);
+
+// Receipts
+
+(receipts || []).forEach(
+  (row) => {
+
+    transactions.push({
+
+      date:
+        row.receipt_date,
+
+      type:
+        "Receipt",
+
+      doc_no:
+        row.receipt_no,
+
+      debit: 0,
+
+      credit:
+        Number(
+          row.amount || 0
+        )
+
+    });
+
+  }
+);
+
+// Sort By Date
+
+transactions.sort(
+  (a, b) =>
+    new Date(a.date) -
+    new Date(b.date)
+);
+
+  return res.json({
+
+  success: true,
+
+  openingBalance,
+
+  transactions
+
+});
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
 app.listen(
   process.env.PORT,
   () => {
