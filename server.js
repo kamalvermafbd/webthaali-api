@@ -23,6 +23,8 @@ const {
 
 const app = express();
 
+app.set("trust proxy", 1);
+
 app.use(cors());
 
 app.use(
@@ -41,7 +43,7 @@ const loginLimiter =
     windowMs:
       15 * 60 * 1000,
 
-    max: 10,
+    max: 100,
 
     standardHeaders: true,
 
@@ -64,7 +66,7 @@ const forgotPasswordLimiter =
     windowMs:
       15 * 60 * 1000,
 
-    max: 5,
+    max: 100,
 
     standardHeaders: true,
 
@@ -13058,6 +13060,8 @@ app.post(
 
   async (req, res) => {
 
+      console.time("login_api");
+
     try {
 
       const body =
@@ -13087,6 +13091,8 @@ app.post(
 
       if (!email) {
 
+         console.timeEnd("login_api");
+
         return res.json({
 
           success: false,
@@ -13099,6 +13105,7 @@ app.post(
       }
 
       if (!password) {
+         console.timeEnd("login_api");
 
         return res.json({
 
@@ -13116,6 +13123,8 @@ app.post(
           password.length > 128
         ) {
 
+           console.timeEnd("login_api");
+
           return res.json({
 
             success: false,
@@ -13129,6 +13138,8 @@ app.post(
       // =========================
       // FETCH USERS
       // =========================
+
+      console.time("supabase_login");
 
       const {
   data,
@@ -13147,7 +13158,11 @@ app.post(
 
   .limit(1);
 
+  console.timeEnd("supabase_login");
+
       if (error) {
+
+         console.timeEnd("login_api");
 
         return res.json({
 
@@ -13180,6 +13195,8 @@ const user =
 
 if (!user) {
 
+   console.timeEnd("login_api");
+
   return res.json({
 
     success: false,
@@ -13194,6 +13211,7 @@ if (!user) {
 // =========================
 // PASSWORD CHECK
 // =========================
+console.time("bcrypt_compare");
 
 const passwordMatch =
   await bcrypt.compare(
@@ -13201,7 +13219,11 @@ const passwordMatch =
     user.password || ""
   );
 
+console.timeEnd("bcrypt_compare");
+
 if (!passwordMatch) {
+
+   console.timeEnd("login_api");
 
   return res.json({
 
@@ -13222,6 +13244,7 @@ if (
   user.is_active !== true
 ) {
 
+  console.timeEnd("login_api");
   return res.json({
 
     success: false,
@@ -13235,7 +13258,7 @@ if (
       // =========================
       // SUCCESS
       // =========================
-
+console.timeEnd("login_api");
       return res.json({
 
         success: true,
@@ -13275,6 +13298,8 @@ status:
     }
 
     catch (err) {
+
+      console.timeEnd("login_api");
 
       console.log(
         "LOGIN ERROR:",
