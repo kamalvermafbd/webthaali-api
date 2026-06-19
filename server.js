@@ -21880,7 +21880,9 @@ app.get(
           mat_type,
           item_name,
           base_unit,
+          hsn_code,
           pur_mrp,
+          gst_percent,
           pur_disc_percent,
           pur_disc_amt,
           pur_rate
@@ -21900,6 +21902,29 @@ app.get(
           "mat_type",
           "single"
         );
+
+        const {
+  data: allMaterials
+} = await supabase
+
+  .from("mm")
+
+  .select(`
+  material_id,
+  item_name,
+  hsn_code,
+  gst_percent
+`)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "is_active",
+    true
+  );
 
       if (materialsError) {
 
@@ -21957,6 +21982,33 @@ app.get(
 
       }
 
+      
+      const hsnMap = {};
+
+(allMaterials || []).forEach(
+  (item) => {
+
+    hsnMap[
+      item.item_name
+    ] =
+      item.hsn_code;
+
+  }
+);
+
+       const gstMap = {};
+
+(allMaterials || []).forEach(
+  (item) => {
+
+    gstMap[
+      item.item_name
+    ] =
+      item.gst_percent;
+
+  }
+);
+
       // =====================
       // ONLY BASE UNIT ROWS
       // =====================
@@ -21993,6 +22045,12 @@ app.get(
 
             base_unit:
               item.base_unit,  
+
+            hsn_code:
+              item.hsn_code,  
+
+            gst_percent:
+             item.gst_percent,
 
             pur_mrp:
               item.pur_mrp,
@@ -22037,7 +22095,16 @@ app.get(
 
             base_unit:
               item.base_unit,  
+            
+           hsn_code:
+  hsnMap[
+    item.item_name
+  ] || "",
 
+gst_percent:
+  gstMap[
+    item.item_name
+  ] || 0,
             pur_mrp:
               item.pur_mrp,
 
