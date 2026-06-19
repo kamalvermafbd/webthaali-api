@@ -21647,6 +21647,663 @@ transactions.sort(
 );
 
 
+// =========================
+// GET VENDORS
+// =========================
+
+app.get(
+  "/getVendors",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("vendor")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "created_at",
+          {
+            ascending: false
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data: data || []
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET MATERIALS
+// =========================
+
+app.get(
+   "/getPurchaseMaterials",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+        req.query.company_code;
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("mm")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .order(
+          "item_name",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data
+
+      });
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET PURCHASE MASTER MATERIALS
+// =========================
+
+app.get(
+  "/getPurchaseMasterMaterials",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+          success: false,
+          error:
+            "company_code missing"
+        });
+
+      }
+
+      // =====================
+      // SINGLE ITEMS
+      // =====================
+
+      const {
+        data: materials,
+        error: materialsError
+      } = await supabase
+
+        .from("mm")
+
+        .select(`
+          material_id,
+          item_code,
+          mat_type,
+          item_name,
+          base_unit,
+          pur_mrp,
+          pur_disc_percent,
+          pur_disc_amt,
+          pur_rate
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .eq(
+          "mat_type",
+          "single"
+        );
+
+      if (materialsError) {
+
+        return res.json({
+          success: false,
+          error:
+            materialsError.message
+        });
+
+      }
+
+      // =====================
+      // VARIANTS
+      // =====================
+
+      const {
+        data: variants,
+        error: variantsError
+      } = await supabase
+
+        .from("variant")
+
+        .select(`
+          id,
+          material_id,
+          variant_code,
+          item_name,
+          description,
+          variant,
+          base_unit,
+          sub_variant,
+          pur_mrp,
+          pur_disc_percent,
+          pur_disc_amt,
+          pur_rate
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "is_active",
+          true
+        );
+
+      if (variantsError) {
+
+        return res.json({
+          success: false,
+          error:
+            variantsError.message
+        });
+
+      }
+
+      // =====================
+      // ONLY BASE UNIT ROWS
+      // =====================
+
+        const baseUnitVariants =
+  (variants || []).filter(
+    (item) =>
+      item.variant ===
+      item.base_unit
+  );
+
+      // =====================
+      // FORMAT SINGLE ITEMS
+      // =====================
+
+      const singleItems =
+        (materials || []).map(
+          (item) => ({
+
+            row_type:
+              "single",
+
+            material_id:
+              item.material_id,
+
+            item_code:
+              item.item_code,
+
+            item_name:
+              item.item_name,
+
+            display_name:
+              item.item_name,
+
+            base_unit:
+              item.base_unit,  
+
+            pur_mrp:
+              item.pur_mrp,
+
+            pur_disc_percent:
+              item.pur_disc_percent,
+
+            pur_disc_amt:
+              item.pur_disc_amt,
+
+            pur_rate:
+              item.pur_rate
+
+          })
+        );
+
+      // =====================
+      // FORMAT VARIANTS
+      // =====================
+
+      const variantItems =
+        baseUnitVariants.map(
+          (item) => ({
+
+            row_type:
+              "variant",
+
+            variant_id:
+              item.id,
+
+            variant_code:
+              item.variant_code,
+
+            material_id:
+              item.material_id,
+
+            item_name:
+              item.item_name,
+
+            display_name:
+              item.description,
+
+            base_unit:
+              item.base_unit,  
+
+            pur_mrp:
+              item.pur_mrp,
+
+            pur_disc_percent:
+              item.pur_disc_percent,
+
+            pur_disc_amt:
+              item.pur_disc_amt,
+
+            pur_rate:
+              item.pur_rate
+
+          })
+        );
+
+      // =====================
+      // FINAL DATA
+      // =====================
+
+      const finalData = [
+
+        ...singleItems,
+
+        ...variantItems
+
+      ].sort(
+        (a, b) =>
+          a.display_name.localeCompare(
+            b.display_name
+          )
+      );
+
+      return res.json({
+
+        success: true,
+
+        data:
+          finalData
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// SAVE PURCHASE MASTER
+// =========================
+
+app.post(
+  "/savePurchaseMaster",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const row_type =
+        String(
+          body.row_type || ""
+        ).trim();
+
+      if (!row_type) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "row_type missing"
+
+        });
+
+      }
+
+      // =========================
+      // SINGLE ITEM
+      // =========================
+
+      if (
+        row_type === "single"
+      ) {
+
+        const material_id =
+          Number(
+            body.material_id || 0
+          );
+
+        if (!material_id) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              "material_id missing"
+
+          });
+
+        }
+
+        const {
+          error
+        } = await supabase
+
+          .from("mm")
+
+          .update({
+
+            pur_mrp:
+              Number(
+                body.pur_mrp || 0
+              ),
+
+            pur_disc_percent:
+              Number(
+                body.pur_disc_percent || 0
+              ),
+
+            pur_disc_amt:
+              Number(
+                body.pur_disc_amt || 0
+              ),
+
+            pur_rate:
+              Number(
+                body.pur_rate || 0
+              ),
+
+            updated_at:
+              new Date()
+
+          })
+
+          .eq(
+            "material_id",
+            material_id
+          );
+
+        if (error) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              error.message
+
+          });
+
+        }
+
+      }
+
+      // =========================
+      // VARIANT ITEM
+      // =========================
+
+      else if (
+        row_type === "variant"
+      ) {
+
+        const variant_id =
+          Number(
+            body.variant_id || 0
+          );
+
+        if (!variant_id) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              "variant_id missing"
+
+          });
+
+        }
+
+        const {
+          error
+        } = await supabase
+
+          .from("variant")
+
+          .update({
+
+            pur_mrp:
+              Number(
+                body.pur_mrp || 0
+              ),
+
+            pur_disc_percent:
+              Number(
+                body.pur_disc_percent || 0
+              ),
+
+            pur_disc_amt:
+              Number(
+                body.pur_disc_amt || 0
+              ),
+
+            pur_rate:
+              Number(
+                body.pur_rate || 0
+              ),
+
+            updated_at:
+              new Date()
+
+          })
+
+          .eq(
+            "id",
+            variant_id
+          );
+
+        if (error) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              error.message
+
+          });
+
+        }
+
+      }
+
+      else {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "invalid row_type"
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Purchase master updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
 app.listen(
   process.env.PORT,
   () => {
