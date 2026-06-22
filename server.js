@@ -23918,43 +23918,253 @@ const fy_code =
   }
 );  
 
+// =========================
+// UPDATE VENDOR PAYMENT
+// =========================
+
+app.post(
+  "/updateVendorPayment",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      if (!body.id) {
+
+        return res.json({
+          success: false,
+          error: "Payment id missing"
+        });
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("vendor_payment")
+
+        .update({
+
+          payment_date:
+            body.payment_date,
+
+          vendor_id:
+            body.vendor_id,
+
+          vendor_name:
+            body.vendor_name,
+
+          amount:
+            Number(body.amount),
+
+          payment_mode:
+            body.payment_mode,
+
+          reference_no:
+            body.reference_no || "",
+
+          bank_code:
+            body.bank_code || "",
+
+          bank_name:
+            body.bank_name || "",
+
+          cheque_date:
+            body.cheque_date,
+
+          remarks:
+            body.remarks || ""
+
+        })
+
+        .eq("id", body.id)
+
+        .select()
+
+        .single();
+
+      if (error) {
+
+        return res.json({
+          success: false,
+          error: error.message
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Payment Updated",
+
+        data
+
+      });
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error: err.message
+
+      });
+
+    }
+
+  }
+);
 
 app.post(
   "/getPurchaseByNo",
   async (req, res) => {
 
-    const purchase_no =
-      req.body.purchase_no;
+    try {
 
-    const {
-      data,
-      error
-    } = await supabase
+      const purchase_no =
+        req.body.purchase_no;
 
-      .from("purchase_header")
+      // =====================
+      // HEADER
+      // =====================
 
-      .select("*")
+      const {
+        data: header,
+        error: headerError
+      } = await supabase
 
-      .eq(
-        "purchase_no",
-        purchase_no
-      )
+        .from("purchase_header")
 
-      .single();
+        .select("*")
 
-    if (error) {
+        .eq(
+          "purchase_no",
+          purchase_no
+        )
+
+        .single();
+
+      if (headerError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            headerError.message
+
+        });
+
+      }
+
+      // =====================
+      // ITEMS
+      // =====================
+
+      const {
+        data: items,
+        error: itemError
+      } = await supabase
+
+        .from("purchase_detail")
+
+        .select("*")
+
+        .eq(
+          "purchase_no",
+          purchase_no
+        )
+
+        .order(
+          "sr_no",
+          {
+            ascending: true
+          }
+        );
+
+      if (itemError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            itemError.message
+
+        });
+
+      }
+
+      // =====================
+      // CHARGES
+      // =====================
+
+      const {
+        data: charges,
+        error: chargeError
+      } = await supabase
+
+        .from("purchase_charge")
+
+        .select("*")
+
+        .eq(
+          "purchase_no",
+          purchase_no
+        );
+
+      if (chargeError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            chargeError.message
+
+        });
+
+      }
 
       return res.json({
-        success: false,
-        error: error.message
+
+        success: true,
+
+        data: {
+
+          ...header,
+
+          items:
+            items || [],
+
+          charges:
+            charges || []
+
+        }
+
       });
 
     }
 
-    return res.json({
-      success: true,
-      data
-    });
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
 
   }
 );
