@@ -20798,6 +20798,20 @@ app.post(
       const receipt =
   req.body;
 
+  
+const date =
+  new Date(
+    receipt.receipt_date
+  );
+
+const fy =
+  date.getMonth() >= 3
+    ? date.getFullYear()
+    : date.getFullYear() - 1;
+
+const fy_code =
+  `${String(fy).slice(-2)}-${String(fy + 1).slice(-2)}`;
+
 console.log(
   "RECEIPT DATA:",
   receipt
@@ -20837,10 +20851,14 @@ const {
   .from("receipt_entry")
   .select("voucher_no")
   .eq(
-    "company_code",
-    company_code
-  )
-  .not(
+  "company_code",
+  company_code
+)
+.eq(
+  "fy_code",
+  fy_code
+)
+.not(
     "voucher_no",
     "is",
     null
@@ -20870,8 +20888,9 @@ const {
 }
 
 const nextVoucherNo =
-  (lastReceipt?.voucher_no || 0) + 1;
-
+  Number(
+    lastReceipt?.voucher_no || 0
+  ) + 1;
   console.log(
   "LAST VOUCHER:",
   lastReceipt
@@ -20912,12 +20931,14 @@ const {
 
   .insert([{
 
-     receipt_no,
+    receipt_no,
 
-    voucher_no:
-      nextVoucherNo,
+voucher_no:
+  nextVoucherNo,
 
-    company_code,
+fy_code,
+
+company_code,
 
     receipt_date:
       receipt.receipt_date,
@@ -20936,11 +20957,14 @@ const {
     payment_mode:
       receipt.payment_mode,
 
-    reference_no:
-      receipt.reference_no || "",
+   reference_no:
+  receipt.reference_no || "",
 
-    bank_name:
-      receipt.bank_name || "",
+bank_code:
+  receipt.bank_code || "",
+
+bank_name:
+  receipt.bank_name || "",
 
     cheque_date:
       receipt.cheque_date,
@@ -22391,6 +22415,1586 @@ app.post(
       });
 
     }
+
+  }
+);
+
+
+app.post(
+  "/savePurchase",
+  async (req, res) => {
+
+    try {
+
+         const purchase =
+        req.body || {};
+
+      console.log(
+        "PURCHASE REQ BODY:",
+        purchase
+      );
+
+      const isEdit =
+        purchase.isEdit === true;
+
+      const company_code =
+
+        String(
+          purchase.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (
+        !purchase.vendor_id
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "vendor missing"
+
+        });
+
+      }
+
+      if (
+        !purchase.invoice_no
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "invoice no missing"
+
+        });
+
+      }
+
+      let purchase_no =
+
+        String(
+          purchase.purchase_no || ""
+        ).trim();
+        
+        
+//=========================
+//PART 2
+//DUPLICATE CHECK
+//=========================
+      const {
+        data: duplicateRows
+      } = await supabase
+
+        .from(
+          "purchase_header"
+        )
+
+        .select(
+          "purchase_no"
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "vendor_id",
+          purchase.vendor_id
+        )
+
+        .eq(
+          "invoice_no",
+          purchase.invoice_no
+        )
+
+        .eq(
+          "is_active",
+          true
+        );
+
+    const duplicate =
+
+  (duplicateRows || [])
+
+    .filter(
+
+      row =>
+
+        row.purchase_no
+
+        !==
+
+        purchase_no
+
+    );
+
+      if (
+        duplicate.length > 0
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+
+            `Invoice No ${purchase.invoice_no} already exists for this vendor`
+
+        });
+
+      }
+
+//=========================
+//PART 3
+//PURCHASE NUMBER
+//=========================      
+
+      if (!isEdit) {
+
+        if (
+  !String(
+    purchase.book_date || ""
+  ).trim()
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "book date missing"
+
+  });
+
+}
+
+        const dt =
+          new Date(
+            purchase.book_date
+          );
+
+        const dd =
+          String(
+            dt.getDate()
+          ).padStart(
+            2,
+            "0"
+          );
+
+        const mm =
+          String(
+            dt.getMonth() + 1
+          ).padStart(
+            2,
+            "0"
+          );
+
+        const yy =
+          String(
+            dt.getFullYear()
+          ).slice(-2);
+
+        const datePart =
+
+          `${dd}${mm}${yy}`;
+
+       const {
+  data: existingDocs,
+  error: existingError
+} = await supabase
+
+  .from(
+    "purchase_header"
+  )
+
+  .select(
+    "purchase_no"
+  )
+
+  .like(
+    "purchase_no",
+    `${company_code}-${datePart}-%`
+  );
+
+if (existingError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      existingError.message
+
+  });
+
+}
+
+        let maxNo = 0;
+
+        (existingDocs || [])
+
+          .forEach(
+            row => {
+
+              const parts =
+
+                String(
+                  row.purchase_no || ""
+                )
+
+                .split("-");
+
+              if (
+
+                parts.length === 3
+
+                &&
+
+                parts[0] === company_code
+
+                &&
+
+                parts[1] === datePart
+
+              ) {
+
+                const seq =
+
+                  parseInt(
+                    parts[2],
+                    10
+                  );
+
+                if (
+                  !isNaN(seq)
+                ) {
+
+                  maxNo =
+                    Math.max(
+                      maxNo,
+                      seq
+                    );
+
+                }
+
+              }
+
+            }
+          );
+
+        purchase_no =
+
+          `${company_code}-${datePart}-${String(
+
+            maxNo + 1
+
+          ).padStart(
+            4,
+            "0"
+          )}`;
+
+      }
+
+      console.log(
+        "PURCHASE NO:",
+        purchase_no
+      );
+
+// =========================
+// SAVE / UPDATE HEADER
+// =========================
+
+if (isEdit) {
+
+  const {
+    error: headerError
+  } = await supabase
+
+    .from(
+      "purchase_header"
+    )
+
+    .update({
+
+      vendor_id:
+        purchase.vendor_id,
+
+      vendor_name:
+        purchase.vendor_name,
+
+      invoice_no:
+        purchase.invoice_no,
+
+      invoice_date:
+        purchase.invoice_date,
+
+      book_date:
+        purchase.book_date,
+
+      remarks:
+        purchase.remarks || "",
+
+      company_state_code:
+        purchase.company_state_code,
+
+      vendor_state_code:
+        purchase.vendor_state_code,
+
+      subtotal:
+        Number(
+          purchase.subtotal || 0
+        ),
+
+      total_charges:
+        Number(
+          purchase.total_charges || 0
+        ),
+
+      cgst:
+        Number(
+          purchase.cgst || 0
+        ),
+
+      sgst:
+        Number(
+          purchase.sgst || 0
+        ),
+
+      igst:
+        Number(
+          purchase.igst || 0
+        ),
+
+      grand_total:
+        Number(
+          purchase.grand_total || 0
+        ),
+
+      updated_at:
+  new Date()
+    .toISOString()
+
+    })
+
+    .eq(
+      "purchase_no",
+      purchase_no
+    );
+
+  if (headerError) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        headerError.message
+
+    });
+
+  }
+
+} else {
+
+  const {
+    error: headerError
+  } = await supabase
+
+    .from(
+      "purchase_header"
+    )
+
+    .insert([{
+
+      purchase_no:
+        purchase_no,
+
+      company_code:
+        company_code,
+
+      vendor_id:
+        purchase.vendor_id,
+
+      vendor_name:
+        purchase.vendor_name,
+
+      invoice_no:
+        purchase.invoice_no,
+
+      invoice_date:
+        purchase.invoice_date,
+
+      book_date:
+        purchase.book_date,
+
+      remarks:
+        purchase.remarks || "",
+
+      company_state_code:
+        purchase.company_state_code,
+
+      vendor_state_code:
+        purchase.vendor_state_code,
+
+      subtotal:
+        Number(
+          purchase.subtotal || 0
+        ),
+
+      total_charges:
+        Number(
+          purchase.total_charges || 0
+        ),
+
+      cgst:
+        Number(
+          purchase.cgst || 0
+        ),
+
+      sgst:
+        Number(
+          purchase.sgst || 0
+        ),
+
+      igst:
+        Number(
+          purchase.igst || 0
+        ),
+
+      grand_total:
+        Number(
+          purchase.grand_total || 0
+        ),
+
+      is_active:
+        true,
+
+    created_at:
+  new Date()
+    .toISOString(),
+
+updated_at:
+  new Date()
+    .toISOString()
+
+    }]);
+
+  if (headerError) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        headerError.message
+
+    });
+
+  }
+
+}
+
+// =========================
+// DELETE OLD ROWS ON EDIT
+// =========================
+if (isEdit) {
+
+  const {
+    error: deleteItemError
+  } = await supabase
+
+    .from(
+      "purchase_detail"
+    )
+
+    .delete()
+
+    .eq(
+      "purchase_no",
+      purchase_no
+    );
+
+  if (deleteItemError) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        deleteItemError.message
+
+    });
+
+  }
+
+  const {
+    error: deleteChargeError
+  } = await supabase
+
+    .from(
+      "purchase_charge"
+    )
+
+    .delete()
+
+    .eq(
+      "purchase_no",
+      purchase_no
+    );
+
+  if (deleteChargeError) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        deleteChargeError.message
+
+    });
+
+  }
+
+}
+
+// =========================
+// SAVE ITEMS
+// =========================
+
+const items =
+  purchase.items || [];
+
+  const detailRows =
+
+  items.map(
+    (item) => ({
+
+      purchase_no:
+        purchase_no,
+
+      sr_no:
+        Number(
+          item.sr_no || 0
+        ),
+
+      item_name:
+        item.item_name || "",
+
+      hsn_code:
+        item.hsn_code || "",
+
+      qty:
+        Number(
+          item.qty || 0
+        ),
+
+      unit:
+        item.unit || "",
+
+      mrp:
+        Number(
+          item.mrp || 0
+        ),
+
+      disc_percent:
+        Number(
+          item.disc_percent || 0
+        ),
+
+      disc_amt:
+        Number(
+          item.disc_amt || 0
+        ),
+
+      rate:
+        Number(
+          item.rate || 0
+        ),
+
+      gst_percent:
+        Number(
+          item.gst_percent || 0
+        ),
+
+      amount:
+        Number(
+          item.amount || 0
+        )
+
+    })
+  );
+
+if (
+  detailRows.length === 0
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "No purchase items found"
+
+  });
+
+}  
+
+const {
+  error: itemError
+} = await supabase
+
+  .from(
+    "purchase_detail"
+  )
+
+  .insert(
+    detailRows
+  );
+
+if (itemError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      itemError.message
+
+  });
+
+}
+
+
+// =========================
+// SAVE CHARGES
+// =========================
+
+const charges =
+  purchase.charges || [];
+
+const chargeRows =
+
+  charges
+
+    .filter(
+      row =>
+        Number(
+          row.amount || 0
+        ) > 0
+    )
+
+    .map(
+      (row) => ({
+
+        purchase_no:
+          purchase_no,
+
+        charge_name:
+          row.charge_name || "",
+
+        amount:
+          Number(
+            row.amount || 0
+          )
+
+      })
+    );
+
+
+if (
+  chargeRows.length > 0
+) {
+
+  const {
+    error: chargeError
+  } = await supabase
+
+    .from(
+      "purchase_charge"
+    )
+
+    .insert(
+      chargeRows
+    );
+
+  if (chargeError) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        chargeError.message
+
+    });
+
+  }
+
+}
+
+// =========================
+// SUCCESS RESPONSE
+// =========================
+
+return res.json({
+
+  success: true,
+
+  message:
+    isEdit
+
+      ? "Purchase updated successfully"
+
+      : "Purchase saved successfully",
+
+  purchase_no:
+    purchase_no,
+
+  isEdit:
+  isEdit
+
+});
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "SAVE PURCHASE ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET VENDOR LEDGER
+// =========================
+
+app.post(
+  "/getVendorLedger",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+        body.company_code;
+
+      const vendor_id =
+        body.vendor_id;
+
+      const from_date =
+        body.from_date;
+
+      const to_date =
+        body.to_date;
+
+        console.log(
+  "VENDOR REQUEST:",
+  {
+    company_code,
+    vendor_id,
+    from_date,
+    to_date
+  }
+);
+
+      if (
+        !company_code ||
+        !vendor_id
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code or vendor_id missing"
+
+        });
+
+      }
+
+      // Vendor Fetch
+
+    const {
+  data: vendorRow,
+  error: vendorError
+} = await supabase
+        .from("vendor")
+
+        .select(
+          "opening_balance"
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "vendor_code",
+          vendor_id
+        )
+
+        .single();
+
+      let openingBalance =
+        Number(
+          vendorRow
+            ?.opening_balance || 0
+        );
+
+      // Previous Purchases
+
+      const {
+        data: oldPurchases
+      } = await supabase
+
+        .from(
+          "purchase_header"
+        )
+
+        .select(
+          "grand_total"
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "vendor_id",
+          vendor_id
+        )
+
+        
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .lt(
+          "book_date",
+          from_date
+        );
+
+      openingBalance +=
+
+        (oldPurchases || [])
+          .reduce(
+
+            (sum, row) =>
+
+              sum +
+
+              Number(
+                row.grand_total || 0
+              ),
+
+            0
+
+          );
+
+          const {
+  data: oldPayments
+} = await supabase
+
+  .from(
+    "vendor_payment"
+  )
+
+  .select(
+    "amount"
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "vendor_id",
+    vendor_id
+  )
+
+  .eq(
+  "is_active",
+  true
+)
+
+  .lt(
+    "payment_date",
+    from_date
+  );
+
+openingBalance -=
+
+  (oldPayments || [])
+    .reduce(
+
+      (sum, row) =>
+
+        sum +
+
+        Number(
+          row.amount || 0
+        ),
+
+      0
+
+    );
+
+      // Current Period Purchases
+
+      const {
+        data: purchases
+      } = await supabase
+
+        .from(
+          "purchase_header"
+        )
+
+        .select(`
+          book_date,
+          purchase_no,
+          grand_total
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "vendor_id",
+          vendor_id
+        )
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .gte(
+          "book_date",
+          from_date
+        )
+
+        .lte(
+          "book_date",
+          to_date
+        );
+
+
+        console.log(
+  "PURCHASES:",
+  purchases
+);
+
+
+const {
+  data: payments
+} = await supabase
+
+  .from(
+    "vendor_payment"
+  )
+
+  .select(`
+    payment_date,
+    payment_no,
+    amount
+  `)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "vendor_id",
+    vendor_id
+  )
+
+  .eq(
+  "is_active",
+  true
+)
+
+  .gte(
+    "payment_date",
+    from_date
+  )
+
+  .lte(
+    "payment_date",
+    to_date
+  );
+      const transactions = [];
+
+      (purchases || []).forEach(
+        (row) => {
+
+          transactions.push({
+
+            date:
+              row.book_date,
+
+            type:
+              "Purchase",
+
+            doc_no:
+              row.purchase_no,
+
+            debit: 0,
+
+            credit:
+              Number(
+                row.grand_total || 0
+              )
+
+          });
+
+        }
+      );
+
+      (payments || []).forEach(
+  (row) => {
+
+    transactions.push({
+
+      date:
+        row.payment_date,
+
+      type:
+        "Payment",
+
+      doc_no:
+        row.payment_no,
+
+      debit:
+        Number(
+          row.amount || 0
+        ),
+
+      credit: 0
+
+    });
+
+  }
+);
+
+      transactions.sort(
+        (a, b) =>
+          new Date(a.date) -
+          new Date(b.date)
+      );
+
+      return res.json({
+
+        success: true,
+
+        openingBalance,
+
+        transactions
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// SAVE VENDOR PAYMENT
+// =========================
+
+app.post(
+  "/saveVendorPayment",
+  async (req, res) => {
+
+    try {
+
+      console.log(
+        "SAVE PAYMENT API HIT"
+      );
+
+      console.log(
+        "REQ BODY:",
+        req.body
+      );
+
+      const body =
+        req.body || {};
+
+      const company_code =
+        String(
+          body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const payment =
+        req.body;
+
+      console.log(
+        "PAYMENT DATA:",
+        payment
+      );
+
+      const date =
+  new Date(
+    payment.payment_date
+  );
+
+const fy =
+  date.getMonth() >= 3
+    ? date.getFullYear()
+    : date.getFullYear() - 1;
+
+const fy_code =
+  `${String(fy).slice(-2)}-${String(fy + 1).slice(-2)}`;
+
+      if (
+        !payment.payment_date ||
+        !payment.vendor_id ||
+        !payment.vendor_name ||
+        !payment.amount
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Required fields missing"
+
+        });
+
+      }
+
+      if (
+        !payment.payment_mode
+      ) {
+
+        payment.payment_mode =
+          "Cash";
+
+      }
+
+
+      if (
+  payment.payment_mode === "Bank" &&
+  payment.reference_no &&
+  payment.bank_code
+) {
+
+  const {
+  data: duplicateCheque,
+  error: duplicateError
+} = await supabase
+
+    .from("vendor_payment")
+
+    .select("id")
+
+    .eq(
+      "company_code",
+      company_code
+    )
+    .eq(
+        "fy_code",
+        fy_code
+      )
+
+    .eq(
+      "bank_code",
+      payment.bank_code
+    )
+
+    .eq(
+      "reference_no",
+      payment.reference_no
+    )
+
+    .maybeSingle();
+
+    if (duplicateError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      duplicateError.message
+
+  });
+
+}
+
+  if (duplicateCheque) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "Cheque number already exists"
+
+    });
+
+  }
+
+}
+
+      const {
+        data: lastPayment,
+        error: lastPaymentError
+      } = await supabase
+        .from("vendor_payment")
+        .select("voucher_no")
+        .eq(
+          "company_code",
+          company_code
+        )
+        .eq(
+          "fy_code",
+          fy_code
+        )
+        .not(
+          "voucher_no",
+          "is",
+          null
+        )
+        .order(
+          "voucher_no",
+          {
+            ascending: false
+          }
+        )
+        .limit(1)
+        .maybeSingle();
+
+      if (
+        lastPaymentError
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            lastPaymentError.message
+
+        });
+
+      }
+
+     const nextVoucherNo =
+  Number(
+    lastPayment?.voucher_no || 0
+  ) + 1;
+
+      console.log(
+        "LAST VOUCHER:",
+        lastPayment
+      );
+
+      console.log(
+        "NEXT VOUCHER:",
+        nextVoucherNo
+      );
+
+      const payment_no =
+        "PAY-" +
+        company_code +
+        "-" +
+        payment.payment_date
+          .substring(2)
+          .replaceAll("-", "") +
+        "-" +
+        String(
+          nextVoucherNo
+        ).padStart(
+          5,
+          "0"
+        );
+
+      console.log(
+        "PAYMENT NO:",
+        payment_no
+      );
+
+      if (
+  payment.payment_mode ===
+  "Cash"
+) {
+
+  payment.reference_no = "";
+
+  payment.bank_code = "";
+
+  payment.bank_name = "";
+
+  payment.cheque_date = null;
+
+}
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("vendor_payment")
+
+        .insert([{
+
+          payment_no,
+
+          voucher_no:
+            nextVoucherNo,
+
+          fy_code,
+
+          company_code,
+
+          payment_date:
+            payment.payment_date,
+
+          vendor_id:
+            payment.vendor_id,
+
+          vendor_name:
+            payment.vendor_name,
+
+          amount:
+            Number(
+              payment.amount
+            ),
+
+          payment_mode:
+            payment.payment_mode,
+
+          reference_no:
+            payment.reference_no || "",
+
+          bank_code:
+            payment.bank_code || "",  
+
+          bank_name:
+            payment.bank_name || "",
+
+          cheque_date:
+            payment.cheque_date,
+
+          remarks:
+            payment.remarks || "",
+
+          status:
+            "PAID"
+
+        }])
+
+        .select()
+
+        .single();
+
+      console.log(
+        "PAYMENT INSERT ERROR:",
+        error
+      );
+
+      console.log(
+        "INSERTED PAYMENT:",
+        data
+      );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+     return res.json({
+
+  success: true,
+
+  message:
+    "Payment Saved",
+
+  payment_no,
+
+  voucher_no:
+    nextVoucherNo,
+
+  fy_code,
+
+  data
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);  
+
+
+app.post(
+  "/getPurchaseByNo",
+  async (req, res) => {
+
+    const purchase_no =
+      req.body.purchase_no;
+
+    const {
+      data,
+      error
+    } = await supabase
+
+      .from("purchase_header")
+
+      .select("*")
+
+      .eq(
+        "purchase_no",
+        purchase_no
+      )
+
+      .single();
+
+    if (error) {
+
+      return res.json({
+        success: false,
+        error: error.message
+      });
+
+    }
+
+    return res.json({
+      success: true,
+      data
+    });
+
+  }
+);
+
+app.post(
+  "/getVendorPaymentByNo",
+  async (req, res) => {
+
+    const payment_no =
+      req.body.payment_no;
+
+    const {
+      data,
+      error
+    } = await supabase
+
+      .from("vendor_payment")
+
+      .select("*")
+
+      .eq(
+        "payment_no",
+        payment_no
+      )
+
+      .single();
+
+    if (error) {
+
+      return res.json({
+        success: false,
+        error: error.message
+      });
+
+    }
+
+    return res.json({
+      success: true,
+      data
+    });
 
   }
 );
