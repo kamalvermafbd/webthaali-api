@@ -21528,12 +21528,13 @@ const {
 
   .from("invoices")
 
-  .select(`
-    invoice_date,
-    invoice_number,
-    grand_total
-  `)
-
+ .select(`
+  id,
+  invoice_id,
+  invoice_date,
+  invoice_number,
+  grand_total
+`)
   .eq(
     "company_code",
     company_code
@@ -21573,10 +21574,11 @@ const {
   .from("receipt_entry")
 
   .select(`
-    receipt_date,
-    receipt_no,
-    amount
-  `)
+  id,
+  receipt_date,
+  receipt_no,
+  amount
+`)
 
   .eq(
     "company_code",
@@ -21612,6 +21614,9 @@ const {
 
     transactions.push({
 
+      id:
+     row.invoice_id,
+
       date:
         row.invoice_date,
 
@@ -21639,6 +21644,9 @@ const {
   (row) => {
 
     transactions.push({
+
+        id:
+    row.id,
 
       date:
         row.receipt_date,
