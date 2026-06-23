@@ -20844,6 +20844,129 @@ if (
 
 }
 
+let voucher_type =
+  receipt.payment_mode === "Bank"
+    ? "BR"
+    : "CR";
+
+let voucher_series =
+  receipt.payment_mode === "Bank"
+
+    ? `BR-${receipt.bank_code}-${fy_code}`
+
+    : `CR-${fy_code}`;
+
+console.log(
+  "VOUCHER TYPE:",
+  voucher_type
+);
+
+console.log(
+  "VOUCHER SERIES:",
+  voucher_series
+);
+
+if (
+  receipt.payment_mode ===
+  "Cash"
+) {
+
+  receipt.reference_no = "";
+
+  receipt.bank_code = "";
+
+  receipt.bank_name = "";
+
+  receipt.cheque_date = null;
+
+}
+
+if (
+  receipt.payment_mode === "Bank" &&
+  !receipt.bank_code
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Bank required"
+
+  });
+
+}
+
+if (
+  receipt.payment_mode === "Bank" &&
+  receipt.reference_no &&
+  receipt.bank_code
+) {
+
+  const {
+    data: duplicateCheque,
+    error: duplicateError
+  } = await supabase
+
+    .from("receipt_entry")
+
+    .select("id")
+
+    .eq(
+      "company_code",
+      company_code
+    )
+
+    .eq(
+      "fy_code",
+      fy_code
+    )
+
+    .eq(
+      "voucher_series",
+      voucher_series
+    )
+
+    .eq(
+      "bank_code",
+      receipt.bank_code
+    )
+
+    .eq(
+      "reference_no",
+      receipt.reference_no
+    )
+
+    .maybeSingle();
+
+  if (duplicateError) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        duplicateError.message
+
+    });
+
+  }
+
+  if (duplicateCheque) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "Cheque number already exists"
+
+    });
+
+  }
+
+}
+
 const {
   data: lastReceipt,
   error: lastReceiptError
@@ -20857,6 +20980,10 @@ const {
 .eq(
   "fy_code",
   fy_code
+)
+.eq(
+  "voucher_series",
+  voucher_series
 )
 .not(
     "voucher_no",
@@ -20901,6 +21028,56 @@ console.log(
   nextVoucherNo
 );
 
+const {
+  data: lastReceiptNo,
+  error: lastReceiptNoError
+} = await supabase
+
+  .from("receipt_entry")
+
+  .select("receipt_no")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .order(
+    "id",
+    {
+      ascending: false
+    }
+  )
+
+  .limit(1)
+
+  .maybeSingle();
+
+if (
+  lastReceiptNoError
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      lastReceiptNoError.message
+
+  });
+
+}
+
+const nextReceiptNo =
+  lastReceiptNo?.receipt_no
+
+    ? Number(
+        lastReceiptNo.receipt_no
+          .split("-")
+          .pop()
+      ) + 1
+
+    : 1;
 
 const receipt_no =
   "RCPT-" +
@@ -20911,7 +21088,7 @@ const receipt_no =
     .replaceAll("-", "") +
   "-" +
   String(
-    nextVoucherNo
+    nextReceiptNo
   ).padStart(
     5,
     "0"
@@ -20935,6 +21112,10 @@ const {
 
 voucher_no:
   nextVoucherNo,
+
+  voucher_type,
+
+voucher_series,
 
 fy_code,
 
@@ -21014,6 +21195,12 @@ return res.json({
 
   voucher_no:
     nextVoucherNo,
+
+    fy_code,
+
+voucher_type,
+
+voucher_series,
 
     data
 
@@ -21615,7 +21802,7 @@ const {
     transactions.push({
 
       id:
-     row.invoice_id,
+     row.invoice_id,  
 
       date:
         row.invoice_date,
@@ -23446,7 +23633,8 @@ const {
   .select(`
     payment_date,
     payment_no,
-    amount
+    amount,
+    payment_mode
   `)
 
   .eq(
@@ -23520,7 +23708,10 @@ const {
           row.amount || 0
         ),
 
-      credit: 0
+      credit: 0,
+
+      payment_mode:
+        row.payment_mode,
 
     });
 
@@ -23650,6 +23841,44 @@ const fy_code =
 
       }
 
+      let voucher_type =
+  payment.payment_mode === "Bank"
+    ? "BP"
+    : "CP";
+
+let voucher_series =
+  payment.payment_mode === "Bank"
+
+    ? `BP-${payment.bank_code}-${fy_code}`
+
+    : `CP-${fy_code}`;
+
+    console.log(
+  "VOUCHER TYPE:",
+  voucher_type
+);
+
+console.log(
+  "VOUCHER SERIES:",
+  voucher_series
+);
+ 
+
+    if (
+  payment.payment_mode === "Bank" &&
+  !payment.bank_code
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Bank required"
+
+  });
+
+}
 
       if (
   payment.payment_mode === "Bank" &&
@@ -23674,6 +23903,11 @@ const fy_code =
         "fy_code",
         fy_code
       )
+
+      .eq(
+  "voucher_series",
+  voucher_series
+)
 
     .eq(
       "bank_code",
@@ -23729,6 +23963,10 @@ const fy_code =
           "fy_code",
           fy_code
         )
+        .eq(
+  "voucher_series",
+  voucher_series
+)
         .not(
           "voucher_no",
           "is",
@@ -23773,20 +24011,55 @@ const fy_code =
         nextVoucherNo
       );
 
-      const payment_no =
-        "PAY-" +
-        company_code +
-        "-" +
-        payment.payment_date
-          .substring(2)
-          .replaceAll("-", "") +
-        "-" +
-        String(
-          nextVoucherNo
-        ).padStart(
-          5,
-          "0"
-        );
+     const {
+  data: lastPaymentNo
+} = await supabase
+
+  .from("vendor_payment")
+
+  .select("payment_no")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .order(
+  "id",
+  {
+    ascending: false
+  }
+)
+
+  .limit(1)
+
+  .maybeSingle();
+
+const nextPaymentNo =
+  lastPaymentNo?.payment_no
+
+    ? Number(
+        lastPaymentNo.payment_no
+          .split("-")
+          .pop()
+      ) + 1
+
+    : 1;
+
+     const payment_no =
+  "PAY-" +
+  company_code +
+  "-" +
+  payment.payment_date
+    .substring(2)
+    .replaceAll("-", "") +
+  "-" +
+  String(
+    nextPaymentNo
+  ).padStart(
+    5,
+    "0"
+  );
 
       console.log(
         "PAYMENT NO:",
@@ -23821,6 +24094,10 @@ const fy_code =
 
           voucher_no:
             nextVoucherNo,
+
+            voucher_type,
+
+            voucher_series,
 
           fy_code,
 
@@ -23939,14 +24216,232 @@ app.post(
       const body =
         req.body || {};
 
-      if (!body.id) {
+        const company_code =
+  String(
+    body.company_code || ""
+  ).trim();
 
-        return res.json({
-          success: false,
-          error: "Payment id missing"
-        });
+if (!company_code) {
 
+  return res.json({
+
+    success: false,
+
+    error:
+      "company_code missing"
+
+  });
+
+}
+
+      const date =
+  new Date(
+    body.payment_date
+  );
+
+const fy =
+  date.getMonth() >= 3
+    ? date.getFullYear()
+    : date.getFullYear() - 1;
+
+const fy_code =
+  `${String(fy).slice(-2)}-${String(fy + 1).slice(-2)}`;  
+
+     let voucher_type =
+  body.payment_mode === "Bank"
+    ? "BP"
+    : "CP";
+
+let voucher_series =
+  body.payment_mode === "Bank"
+
+    ? `BP-${body.bank_code}-${fy_code}`
+
+    : `CP-${fy_code}`;
+
+let voucher_no;
+
+    if (!body.id) {
+
+  return res.json({
+    success: false,
+    error: "Payment id missing"
+  });
+
+}
+
+if (
+  body.payment_mode === "Bank" &&
+  !body.bank_code
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Bank required"
+
+  });
+
+}
+
+if (
+  body.payment_mode === "Cash"
+) {
+
+  body.reference_no = "";
+
+  body.bank_code = "";
+
+  body.bank_name = "";
+
+  body.cheque_date = null;
+
+}
+
+if (
+  body.payment_mode === "Bank" &&
+  body.reference_no &&
+  body.bank_code
+) {
+
+  const {
+    data: duplicateCheque
+  } = await supabase
+
+    .from("vendor_payment")
+
+    .select("id")
+
+    .eq(
+  "company_code",
+  company_code
+)
+
+.eq(
+  "fy_code",
+  fy_code
+)
+
+    .eq(
+      "bank_code",
+      body.bank_code
+    )
+
+    .eq(
+      "reference_no",
+      body.reference_no
+    )
+
+    .neq(
+      "id",
+      body.id
+    )
+
+    .maybeSingle();
+
+  if (duplicateCheque) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "Cheque number already exists"
+
+    });
+
+  }
+
+}
+
+const {
+  data: oldPayment
+} = await supabase
+
+  .from("vendor_payment")
+
+  .select(
+    "voucher_series"
+  )
+
+  .eq(
+    "id",
+    body.id
+  )
+
+  .single();
+
+if (
+  oldPayment?.voucher_series !==
+  voucher_series
+) {
+
+  const {
+    data: lastVoucher
+  } = await supabase
+
+    .from("vendor_payment")
+
+    .select(
+      "voucher_no"
+    )
+
+    .eq(
+      "company_code",
+      company_code
+    )
+
+    .eq(
+      "fy_code",
+      fy_code
+    )
+
+    .eq(
+      "voucher_series",
+      voucher_series
+    )
+
+    .order(
+      "voucher_no",
+      {
+        ascending: false
       }
+    )
+
+    .limit(1)
+
+    .maybeSingle();
+
+  voucher_no =
+    Number(
+      lastVoucher?.voucher_no || 0
+    ) + 1;
+
+} else {
+
+  const {
+    data: currentPayment
+  } = await supabase
+
+    .from("vendor_payment")
+
+    .select(
+      "voucher_no"
+    )
+
+    .eq(
+      "id",
+      body.id
+    )
+
+    .single();
+
+  voucher_no =
+    currentPayment?.voucher_no;
+
+}
 
       const {
         data,
@@ -23971,6 +24466,14 @@ app.post(
 
           payment_mode:
             body.payment_mode,
+
+            voucher_type,
+
+            voucher_series,
+
+            voucher_no,
+
+            fy_code,
 
           reference_no:
             body.reference_no || "",
@@ -24026,6 +24529,403 @@ app.post(
       });
 
     }
+
+  }
+);
+
+// =========================
+// UPDATE RECEIPT
+// =========================
+
+app.post(
+  "/updateReceipt",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+        String(
+          body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const date =
+        new Date(
+          body.receipt_date
+        );
+
+      const fy =
+        date.getMonth() >= 3
+          ? date.getFullYear()
+          : date.getFullYear() - 1;
+
+      const fy_code =
+        `${String(fy).slice(-2)}-${String(fy + 1).slice(-2)}`;
+
+      let voucher_type =
+        body.payment_mode === "Bank"
+          ? "BR"
+          : "CR";
+
+      let voucher_series =
+        body.payment_mode === "Bank"
+
+          ? `BR-${body.bank_code}-${fy_code}`
+
+          : `CR-${fy_code}`;
+
+      let voucher_no;
+
+      if (!body.id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Receipt id missing"
+
+        });
+
+      }
+
+      if (
+        body.payment_mode === "Bank" &&
+        !body.bank_code
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Bank required"
+
+        });
+
+      }
+
+      if (
+        body.payment_mode === "Cash"
+      ) {
+
+        body.reference_no = "";
+
+        body.bank_code = "";
+
+        body.bank_name = "";
+
+        body.cheque_date = null;
+
+      }
+
+      if (
+        body.payment_mode === "Bank" &&
+        body.reference_no &&
+        body.bank_code
+      ) {
+
+        const {
+          data: duplicateCheque
+        } = await supabase
+
+          .from("receipt_entry")
+
+          .select("id")
+
+          .eq(
+            "company_code",
+            company_code
+          )
+
+          .eq(
+            "fy_code",
+            fy_code
+          )
+
+          .eq(
+            "bank_code",
+            body.bank_code
+          )
+
+          .eq(
+            "reference_no",
+            body.reference_no
+          )
+
+          .neq(
+            "id",
+            body.id
+          )
+
+          .maybeSingle();
+
+        if (duplicateCheque) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              "Cheque number already exists"
+
+          });
+
+        }
+
+      }
+
+      const {
+        data: oldReceipt
+      } = await supabase
+
+        .from("receipt_entry")
+
+        .select(
+          "voucher_series"
+        )
+
+        .eq(
+          "id",
+          body.id
+        )
+
+        .single();
+
+      if (
+        oldReceipt?.voucher_series !==
+        voucher_series
+      ) {
+
+        const {
+          data: lastVoucher
+        } = await supabase
+
+          .from("receipt_entry")
+
+          .select(
+            "voucher_no"
+          )
+
+          .eq(
+            "company_code",
+            company_code
+          )
+
+          .eq(
+            "fy_code",
+            fy_code
+          )
+
+          .eq(
+            "voucher_series",
+            voucher_series
+          )
+
+          .order(
+            "voucher_no",
+            {
+              ascending: false
+            }
+          )
+
+          .limit(1)
+
+          .maybeSingle();
+
+        voucher_no =
+          Number(
+            lastVoucher?.voucher_no || 0
+          ) + 1;
+
+      } else {
+
+        const {
+          data: currentReceipt
+        } = await supabase
+
+          .from("receipt_entry")
+
+          .select(
+            "voucher_no"
+          )
+
+          .eq(
+            "id",
+            body.id
+          )
+
+          .single();
+
+        voucher_no =
+          currentReceipt?.voucher_no;
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("receipt_entry")
+
+        .update({
+
+          receipt_date:
+            body.receipt_date,
+
+          party_id:
+            body.party_id,
+
+          party_name:
+            body.party_name,
+
+          amount:
+            Number(
+              body.amount
+            ),
+
+          payment_mode:
+            body.payment_mode,
+
+          voucher_type,
+
+          voucher_series,
+
+          voucher_no,
+
+          fy_code,
+
+          reference_no:
+            body.reference_no || "",
+
+          bank_code:
+            body.bank_code || "",
+
+          bank_name:
+            body.bank_name || "",
+
+          cheque_date:
+            body.cheque_date,
+
+          remarks:
+            body.remarks || ""
+
+        })
+
+        .eq(
+          "id",
+          body.id
+        )
+
+        .select()
+
+        .single();
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Receipt Updated",
+
+        data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// GET RECEIPT BY NO
+// =========================
+
+app.post(
+  "/getReceiptByNo",
+  async (req, res) => {
+
+    const receipt_no =
+      req.body.receipt_no;
+
+    const {
+      data,
+      error
+    } = await supabase
+
+      .from("receipt_entry")
+
+      .select("*")
+
+      .eq(
+        "receipt_no",
+        receipt_no
+      )
+
+      .single();
+
+    if (error) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          error.message
+
+      });
+
+    }
+
+    return res.json({
+
+      success: true,
+
+      data
+
+    });
 
   }
 );
