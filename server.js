@@ -9797,6 +9797,11 @@ app.post(
         base_unit:
           body.base_unit || "",
 
+           opening_stock:
+    Number(
+      body.opening_stock || 0
+    ),
+
         mrp:
           Number(
             body.mrp || 0
@@ -25113,6 +25118,675 @@ app.post(
       success: true,
       data
     });
+
+  }
+);
+
+// =========================
+// GET STOCK SUMMARY
+// =========================
+
+app.post(
+  "/getStockSummary",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+        req.body.company_code;
+
+      if (!company_code) {
+
+        return res.json({
+          success: false,
+          error: "company_code missing"
+        });
+
+      }
+
+      const stockMap = {};
+
+
+      const {
+  data: mm
+} = await supabase
+
+  .from("mm")
+
+ .select(
+  "material_id, item_code, item_name, base_unit, mat_type, opening_stock"
+)
+
+  .eq(
+    "company_code",
+    company_code
+  );
+
+const {
+  data: variants
+} = await supabase
+
+  .from("variant")
+
+ .select(
+  "material_id, item_name, description, variant, sub_variant"
+)
+
+  .eq(
+    "company_code",
+    company_code
+  );
+
+const validStockItems = {};
+const itemCodeMap = {};
+const materialMap = {};
+const openingMap = {};
+const unitMap = {};
+
+
+mm?.forEach((m) => {
+
+  if (
+    m.mat_type ===
+    "single"
+  ) {
+
+    validStockItems[
+      m.item_name
+    ] = true;
+
+  itemCodeMap[
+  m.item_name
+] = m.item_code;
+
+materialMap[
+  m.item_name
+] = m.material_id;
+
+openingMap[
+  m.item_name
+] = Number(
+  m.opening_stock || 0
+);
+
+unitMap[
+  m.item_name
+] = m.base_unit || "";
+
+}
+
+  if (
+    m.mat_type ===
+    "multi"
+  ) {
+
+    variants?.forEach((v) => {
+
+      if (
+
+        v.material_id ===
+  m.material_id &&
+
+        v.variant ===
+          m.base_unit &&
+
+        v.sub_variant ===
+          m.base_unit
+
+      ) {
+
+        validStockItems[
+          v.description
+        ] = true;
+
+         itemCodeMap[
+            v.description
+          ] = m.item_code;
+
+          materialMap[
+            v.description
+          ] = m.material_id;
+
+          openingMap[
+  v.description
+] = Number(
+  m.opening_stock || 0
+);
+
+unitMap[
+  v.description
+] = m.base_unit || "";
+
+      }
+
+    });
+
+  }
+
+});
+
+Object.keys(validStockItems).forEach((name) => {
+
+  stockMap[name] = {
+
+  material_id:
+    materialMap[name],
+
+  item_code:
+    itemCodeMap[name],
+
+  item_name: name,
+
+  base_unit:
+    unitMap[name],
+
+ opening_qty:
+  Number(
+    openingMap[name] || 0
+  ),
+
+  purchase_qty: 0,
+
+  sales_qty: 0,
+
+  closing_qty: 0
+
+};
+
+});
+
+     // PURCHASES
+const {
+  data: purchaseHeaders
+} = await supabase
+
+  .from("purchase_header")
+
+  .select("purchase_no")
+
+  .eq(
+    "company_code",
+    company_code
+  );
+
+const purchaseNos =
+  purchaseHeaders?.map(
+    x => x.purchase_no
+  ) || [];
+
+const {
+  data: purchases
+} = purchaseNos.length
+
+  ? await supabase
+
+      .from("purchase_detail")
+
+      .select(
+        "item_name, qty"
+      )
+
+      .in(
+        "purchase_no",
+        purchaseNos
+      )
+
+  : { data: [] };
+
+purchases?.forEach((item) => {
+
+ const name =
+  item.item_name;
+
+if (
+  !validStockItems[name]
+) {
+  return;
+}
+
+
+  stockMap[name].purchase_qty +=
+    Number(item.qty || 0);
+
+});
+
+// SALES
+const {
+  data: invoices
+} = await supabase
+
+  .from("invoices")
+
+  .select(
+    "invoice_id"
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  );
+
+const invoiceIds =
+  invoices?.map(
+    x => x.invoice_id
+  ) || [];
+
+const {
+  data: sales
+} = invoiceIds.length
+
+  ? await supabase
+
+      .from("invoice_items")
+
+      .select(
+        "item_name, qty"
+      )
+
+      .in(
+        "invoice_id",
+        invoiceIds
+      )
+
+  : { data: [] };
+
+      sales?.forEach((item) => {
+
+   const name =
+  item.item_name;
+
+if (
+  !validStockItems[name]
+) {
+  return;
+}
+
+        stockMap[name].sales_qty +=
+          Number(item.qty || 0);
+
+      });
+
+      const result =
+        Object.values(stockMap)
+          .map((item) => ({
+
+            ...item,
+
+           closing_qty:
+
+  item.opening_qty +
+
+  item.purchase_qty -
+
+  item.sales_qty
+
+          }));
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error: err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// SAVE VENDOR
+// =========================
+
+app.post(
+  "/saveVendorMaster",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+        String(
+          body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "company_code missing"
+
+        });
+
+      }
+
+
+const vendor_name =
+  String(
+    body.vendor_name || ""
+  ).trim();
+
+if (!vendor_name) {
+
+  return res.json({
+
+    success: false,
+
+    message:
+      "Vendor Name is required"
+
+  });
+
+}
+
+// =========================
+// FETCH VENDOR
+// =========================
+
+
+            const {
+        data: allVendors,
+        error: fetchError
+      } = await supabase
+
+        .from("vendor")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+// =========================
+// DUPLICATE GSTIN CHECK
+// =========================
+
+            const gstin =
+
+        String(
+          body.gstin || ""
+        )
+          .trim()
+          .toUpperCase();
+
+     const duplicateGST =
+
+  gstin
+
+    ? (allVendors || []).find(
+              (row) =>
+
+                String(
+                  row.gstin || ""
+                )
+                  .trim()
+                  .toUpperCase()
+
+                ===
+
+                gstin
+            )
+
+          : null;
+
+      if (duplicateGST) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Vendor with same GSTIN already exists"
+
+        });
+
+      }
+
+
+const duplicateName =
+
+  (allVendors || []).find(
+
+    (row) =>
+
+      String(
+        row.vendor_name || ""
+      )
+        .trim()
+        .toUpperCase()
+
+      ===
+
+      vendor_name
+        .toUpperCase()
+
+  );
+
+if (duplicateName) {
+
+  return res.json({
+
+    success: false,
+
+    message:
+      "Vendor already exists"
+
+  });
+
+}
+
+
+// =========================
+// VENDOR CODE GENERATION
+// =========================
+
+
+            let maxNumber = 0;
+
+      (allVendors || []).forEach((row) => {
+
+        const code =
+
+          String(
+            row.vendor_code || ""
+          );
+
+        const num =
+
+          parseInt(
+            code.replace(
+              "VN",
+              ""
+            )
+          );
+
+        if (!isNaN(num)) {
+
+          maxNumber = Math.max(
+            maxNumber,
+            num
+          );
+
+        }
+
+      });
+
+      const vendor_code =
+
+        "VN" +
+
+        String(
+          maxNumber + 1
+        ).padStart(4, "0");
+
+
+// =========================
+// INSERT OBJECT
+// =========================
+
+
+
+              const insertObj = {
+
+        company_code,
+
+        vendor_code,
+
+       vendor_name,
+
+        contact_person:
+          body.contact_person || "",
+
+        mobile:
+          body.mobile || "",
+
+        email:
+          body.email || "",
+
+        gstin:
+          body.gstin || "",
+
+        state:
+          body.state || "",
+
+        statecode:
+          body.statecode || "",
+
+        pincode:
+          body.pincode || "",
+
+        address:
+          body.address || "",
+
+        opening_balance:
+          Number(
+            body.opening_balance || 0
+          ),
+
+        opening_type:
+          body.opening_type || "Payable",
+
+        opening_date:
+          new Date(),
+
+
+        credit_period:
+          Number(
+            body.credit_period || 30
+          ),
+
+        remarks:
+          body.remarks || "",
+
+        is_active: true,
+
+        created_at:
+          new Date(),
+
+        updated_at:
+          new Date()
+
+      };
+
+
+      console.log(
+  "VENDOR INSERT:",
+  insertObj
+);
+
+// =========================
+// INSERT
+// =========================
+
+
+
+            const {
+        error: insertError
+      } = await supabase
+
+        .from("vendor")
+
+        .insert([
+          insertObj
+        ]);
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            insertError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Vendor saved successfully",
+
+        vendor_code
+
+      });
+
+    }
+
+  catch (err) {
+
+  console.error(
+    "SAVE VENDOR ERROR:",
+    err
+  );
+
+  return res.json({
+
+    success: false,
+
+    message:
+      err?.message ||
+      "Something went wrong"
+
+  });
+
+}
 
   }
 );
