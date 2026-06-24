@@ -21795,11 +21795,12 @@ const {
 
   .from("receipt_entry")
 
-  .select(`
+ .select(`
   id,
   receipt_date,
   receipt_no,
-  amount
+  amount,
+  payment_mode
 `)
 
   .eq(
@@ -21865,28 +21866,31 @@ const {
 (receipts || []).forEach(
   (row) => {
 
-    transactions.push({
+   transactions.push({
 
-        id:
+  id:
     row.id,
 
-      date:
-        row.receipt_date,
+  date:
+    row.receipt_date,
 
-      type:
-        "Receipt",
+  type:
+    "Receipt",
 
-      doc_no:
-        row.receipt_no,
+  doc_no:
+    row.receipt_no,
 
-      debit: 0,
+  debit: 0,
 
-      credit:
-        Number(
-          row.amount || 0
-        )
+  credit:
+    Number(
+      row.amount || 0
+    ),
 
-    });
+  payment_mode:
+    row.payment_mode
+
+});
 
   }
 );
@@ -23531,8 +23535,6 @@ app.post(
           vendor_id
         )
 
-        
-
         .eq(
           "is_active",
           true
@@ -23543,22 +23545,22 @@ app.post(
           from_date
         );
 
-      openingBalance +=
+     openingBalance -=
 
-        (oldPurchases || [])
-          .reduce(
+  (oldPurchases || [])
+    .reduce(
 
-            (sum, row) =>
+      (sum, row) =>
 
-              sum +
+        sum +
 
-              Number(
-                row.grand_total || 0
-              ),
+        Number(
+          row.grand_total || 0
+        ),
 
-            0
+      0
 
-          );
+    );
 
           const {
   data: oldPayments
@@ -23592,7 +23594,7 @@ app.post(
     from_date
   );
 
-openingBalance -=
+openingBalance +=
 
   (oldPayments || [])
     .reduce(
