@@ -8993,6 +8993,30 @@ async function generateVariantRows(
 
         : body.item_name || "";
 
+    const isStockItem =
+
+  String(p.variant || "")
+    .trim()
+    .toLowerCase()
+
+  ===
+
+  String(body.base_unit || "")
+    .trim()
+    .toLowerCase()
+
+  &&
+
+  String(p.sub_variant || "")
+    .trim()
+    .toLowerCase()
+
+  ===
+
+  String(body.base_unit || "")
+    .trim()
+    .toLowerCase();
+
     // =========================
     // PUSH ROW
     // =========================
@@ -9058,8 +9082,10 @@ disc_amt:
       selling_rate:
         Number(p.selling_rate || 0),
 
-      opening_stock:
-        Number(body.opening_stock || 0),
+     opening_stock:
+  isStockItem
+    ? Number(body.opening_stock || 0)
+    : 0,
 
       purchase: 0,
 
@@ -9067,8 +9093,7 @@ disc_amt:
 
       retrun: 0,
 
-      closing:
-        Number(body.opening_stock || 0),
+    closing: Number(body.closing || 0),
 
       min_stock:
         Number(body.min_stock || 0),
@@ -10338,6 +10363,11 @@ app.post(
 
         base_unit:
           body.base_unit || "",
+
+        opening_stock:
+          Number(
+            body.opening_stock || 0
+          ),
 
         mrp:
           Number(
@@ -25169,7 +25199,7 @@ const {
   .from("variant")
 
  .select(
-  "material_id, item_name, description, variant, sub_variant"
+  "material_id, item_name, description, variant, sub_variant, opening_stock"
 )
 
   .eq(
@@ -25250,7 +25280,7 @@ unitMap[
           openingMap[
   v.description
 ] = Number(
-  m.opening_stock || 0
+  v.opening_stock || 0
 );
 
 unitMap[
