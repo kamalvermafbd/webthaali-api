@@ -25160,6 +25160,10 @@ app.post(
   "/getStockSummary",
   async (req, res) => {
 
+      console.log(
+      "STOCK API HIT"
+    );
+
     try {
 
       const company_code =
@@ -25184,7 +25188,7 @@ app.post(
   .from("mm")
 
  .select(
-  "material_id, item_code, item_name, base_unit, mat_type, opening_stock"
+  "material_id, item_code, item_name, base_unit, mat_type, opening_stock, hsn_code"
 )
 
   .eq(
@@ -25212,7 +25216,7 @@ const itemCodeMap = {};
 const materialMap = {};
 const openingMap = {};
 const unitMap = {};
-
+const hsnMap = {};
 
 mm?.forEach((m) => {
 
@@ -25242,6 +25246,10 @@ openingMap[
 unitMap[
   m.item_name
 ] = m.base_unit || "";
+
+hsnMap[
+  m.item_name
+] = m.hsn_code || "";
 
 }
 
@@ -25287,6 +25295,10 @@ unitMap[
   v.description
 ] = m.base_unit || "";
 
+hsnMap[
+  v.description
+] = m.hsn_code || "";
+
       }
 
     });
@@ -25296,6 +25308,13 @@ unitMap[
 });
 
 Object.keys(validStockItems).forEach((name) => {
+
+  console.log(
+    "HSN DEBUG:",
+    name,
+    hsnMap[name]
+  );
+
 
   stockMap[name] = {
 
@@ -25307,9 +25326,14 @@ Object.keys(validStockItems).forEach((name) => {
 
   item_name: name,
 
+    hsn_code:
+  hsnMap[name],
+
+  
+
   base_unit:
     unitMap[name],
-
+  
  opening_qty:
   Number(
     openingMap[name] || 0
@@ -25817,6 +25841,579 @@ if (duplicateName) {
   });
 
 }
+
+  }
+);
+
+
+
+// =========================
+// GET STOCK LEDGER
+// =========================
+
+app.post(
+  "/getStockLedger",
+  async (req, res) => {
+
+      console.log(
+      "STOCK API HIT"
+    );
+
+    try {
+
+      const company_code =
+        req.body.company_code;
+
+      if (!company_code) {
+
+        return res.json({
+          success: false,
+          error: "company_code missing"
+        });
+
+      }
+
+      const item_name =
+  String(
+    req.body.item_name || ""
+  ).trim();
+
+const from_date =
+  req.body.from_date;
+
+const to_date =
+  req.body.to_date;
+
+
+   const ledger = [];
+
+
+      const {
+  data: mm
+} = await supabase
+
+  .from("mm")
+
+ .select(
+  "material_id, item_code, item_name, base_unit, mat_type, opening_stock, hsn_code"
+)
+
+  .eq(
+    "company_code",
+    company_code
+  );
+
+const {
+  data: variants
+} = await supabase
+
+  .from("variant")
+
+ .select(
+  "material_id, item_name, description, variant, sub_variant, opening_stock"
+)
+
+  .eq(
+    "company_code",
+    company_code
+  );
+
+const validStockItems = {};
+const itemCodeMap = {};
+const materialMap = {};
+const openingMap = {};
+const unitMap = {};
+const hsnMap = {};
+
+mm?.forEach((m) => {
+
+  if (
+    m.mat_type ===
+    "single"
+  ) {
+
+    validStockItems[
+      m.item_name
+    ] = true;
+
+  itemCodeMap[
+  m.item_name
+] = m.item_code;
+
+materialMap[
+  m.item_name
+] = m.material_id;
+
+openingMap[
+  m.item_name
+] = Number(
+  m.opening_stock || 0
+);
+
+unitMap[
+  m.item_name
+] = m.base_unit || "";
+
+hsnMap[
+  m.item_name
+] = m.hsn_code || "";
+
+}
+
+  if (
+    m.mat_type ===
+    "multi"
+  ) {
+
+    variants?.forEach((v) => {
+
+      if (
+
+        v.material_id ===
+  m.material_id &&
+
+        v.variant ===
+          m.base_unit &&
+
+        v.sub_variant ===
+          m.base_unit
+
+      ) {
+
+        validStockItems[
+          v.description
+        ] = true;
+
+         itemCodeMap[
+            v.description
+          ] = m.item_code;
+
+          materialMap[
+            v.description
+          ] = m.material_id;
+
+          openingMap[
+  v.description
+] = Number(
+  v.opening_stock || 0
+);
+
+unitMap[
+  v.description
+] = m.base_unit || "";
+
+hsnMap[
+  v.description
+] = m.hsn_code || "";
+
+      }
+
+    });
+
+  }
+
+});
+
+
+let openingQty =
+  Number(
+    openingMap[item_name] || 0
+  );
+
+
+
+     // PURCHASES
+const {
+  data: purchaseHeaders
+} = await supabase
+
+  .from("purchase_header")
+
+  .select(
+    "purchase_no, invoice_date, vendor_name"
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .gte(
+    "invoice_date",
+    from_date
+  )
+
+  .lte(
+    "invoice_date",
+    to_date
+  );
+
+  const {
+  data: previousPurchaseHeaders
+} = await supabase
+
+  .from("purchase_header")
+
+  .select(
+    "purchase_no"
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .lt(
+    "invoice_date",
+    from_date
+  );
+
+const purchaseNos =
+  purchaseHeaders?.map(
+    x => x.purchase_no
+  ) || [];
+
+const purchaseMap = {};
+
+purchaseHeaders?.forEach((p) => {
+
+  purchaseMap[
+    p.purchase_no
+  ] = p;
+
+});
+
+
+const {
+  data: purchases
+} = purchaseNos.length
+
+  ? await supabase
+
+      .from("purchase_detail")
+
+     .select(
+  "purchase_no, item_name, qty"
+)
+
+      .in(
+        "purchase_no",
+        purchaseNos
+      )
+
+  : { data: [] };
+
+
+const previousPurchaseNos =
+  previousPurchaseHeaders?.map(
+    x => x.purchase_no
+  ) || [];
+
+const {
+  data: previousPurchases
+} = previousPurchaseNos.length
+
+  ? await supabase
+
+      .from("purchase_detail")
+
+      .select(
+        "purchase_no, item_name, qty"
+      )
+
+      .in(
+        "purchase_no",
+        previousPurchaseNos
+      )
+
+  : { data: [] };
+
+previousPurchases?.forEach((item) => {
+
+  if (
+    item.item_name === item_name
+  ) {
+
+    openingQty +=
+      Number(item.qty || 0);
+
+  }
+
+});  
+
+purchases?.forEach((item) => {
+
+    console.log(
+    "PURCHASE:",
+    item.item_name,
+    "SEARCH:",
+    item_name
+  );
+
+  if (
+    item.item_name !== item_name
+  ) {
+    return;
+  }
+
+  const header =
+  purchaseMap[
+    item.purchase_no
+  ];
+
+ledger.push({
+
+  date:
+  header?.invoice_date || "",
+
+  voucher:
+    item.purchase_no,
+
+  type:
+    "Purchase",
+
+  party:
+    header?.vendor_name || "",
+
+  item_name:
+    item.item_name,
+
+  in_qty:
+    Number(item.qty || 0),
+
+  out_qty:
+    0
+
+});
+
+});
+
+
+
+// SALES
+const {
+  data: invoices
+} = await supabase
+
+  .from("invoices")
+
+  .select(
+  "invoice_id, invoice_date, customer_name"
+)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .gte(
+  "invoice_date",
+  from_date
+)
+
+.lte(
+  "invoice_date",
+  to_date
+);
+
+
+const {
+  data: previousInvoices
+} = await supabase
+
+  .from("invoices")
+
+  .select(
+    "invoice_id"
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .lt(
+    "invoice_date",
+    from_date
+  );
+
+const invoiceIds =
+  invoices?.map(
+    x => x.invoice_id
+  ) || [];
+
+  const invoiceMap = {};
+
+invoices?.forEach((i) => {
+
+  invoiceMap[
+    i.invoice_id
+  ] = i;
+
+});
+
+const previousInvoiceIds =
+  previousInvoices?.map(
+    x => x.invoice_id
+  ) || [];
+
+const {
+  data: sales
+} = invoiceIds.length
+
+  ? await supabase
+
+      .from("invoice_items")
+
+      .select(
+  "invoice_id, item_name, qty"
+)
+
+      .in(
+        "invoice_id",
+        invoiceIds
+      )
+
+  : { data: [] };
+
+const {
+  data: previousSales
+} = previousInvoiceIds.length
+
+  ? await supabase
+
+      .from("invoice_items")
+
+      .select(
+        "invoice_id, item_name, qty"
+      )
+
+      .in(
+        "invoice_id",
+        previousInvoiceIds
+      )
+
+  : { data: [] };
+
+previousSales?.forEach((item) => {
+
+  if (
+    item.item_name === item_name
+  ) {
+
+    openingQty -=
+      Number(item.qty || 0);
+
+  }
+
+});
+
+ledger.push({
+
+  date:
+    from_date,
+
+  voucher:
+    "OPENING",
+
+  type:
+    "Opening",
+
+  item_name:
+    item_name,
+
+in_qty:
+  openingQty,
+
+  out_qty:
+    0
+
+});
+
+  sales?.forEach((item) => {
+
+     console.log(
+    "SALE:",
+    item.item_name,
+    "SEARCH:",
+    item_name
+  );
+
+  if (
+    item.item_name !== item_name
+  ) {
+    return;
+  }
+
+  const header =
+    invoiceMap[
+      item.invoice_id
+    ];
+
+
+
+  ledger.push({
+
+    date:
+      header?.invoice_date || "",
+
+    voucher:
+      item.invoice_id,
+
+    type:
+      "Sale",
+
+    party:
+      header?.customer_name || "",
+
+    item_name:
+      item.item_name,
+
+    in_qty:
+      0,
+
+    out_qty:
+      Number(item.qty || 0)
+
+  });
+
+  
+
+});   
+
+   ledger.sort((a, b) =>
+
+  new Date(a.date).getTime()
+
+  -
+
+  new Date(b.date).getTime()
+
+);
+
+
+
+     return res.json({
+
+  success: true,
+
+  data: ledger
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error: err.message
+
+      });
+
+    }
 
   }
 );
