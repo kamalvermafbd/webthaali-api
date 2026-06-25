@@ -21972,6 +21972,101 @@ app.get(
           company_code
         )
 
+         .eq(
+    "is_active",
+    true
+  )
+
+        .order(
+          "created_at",
+          {
+            ascending: false
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data: data || []
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+
+// =========================
+// GET VENDOR MASTER
+// =========================
+
+app.get(
+  "/getVendormaster",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("vendor")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
         .order(
           "created_at",
           {
@@ -25598,25 +25693,25 @@ if (!vendor_name) {
           .trim()
           .toUpperCase();
 
-     const duplicateGST =
-
+    const duplicateGST =
   gstin
-
     ? (allVendors || []).find(
-              (row) =>
+        (row) =>
 
-                String(
-                  row.gstin || ""
-                )
-                  .trim()
-                  .toUpperCase()
+          row.vendor_code !==
+            body.vendor_code &&
 
-                ===
+          String(
+            row.gstin || ""
+          )
+            .trim()
+            .toUpperCase()
 
-                gstin
-            )
+          ===
 
-          : null;
+          gstin
+      )
+    : null;
 
       if (duplicateGST) {
 
@@ -25633,10 +25728,12 @@ if (!vendor_name) {
 
 
 const duplicateName =
-
   (allVendors || []).find(
 
     (row) =>
+
+      row.vendor_code !==
+        body.vendor_code &&
 
       String(
         row.vendor_name || ""
@@ -25646,8 +25743,7 @@ const duplicateName =
 
       ===
 
-      vendor_name
-        .toUpperCase()
+      vendor_name.toUpperCase()
 
   );
 
@@ -25670,43 +25766,48 @@ if (duplicateName) {
 // =========================
 
 
-            let maxNumber = 0;
+            let vendor_code =
+  body.vendor_code;
 
-      (allVendors || []).forEach((row) => {
+if (!vendor_code) {
 
-        const code =
+  let maxNumber = 0;
 
-          String(
-            row.vendor_code || ""
-          );
+  (allVendors || []).forEach((row) => {
 
-        const num =
+    const code =
+      String(
+        row.vendor_code || ""
+      );
 
-          parseInt(
-            code.replace(
-              "VN",
-              ""
-            )
-          );
+    const num =
+      parseInt(
+        code.replace(
+          "VN",
+          ""
+        )
+      );
 
-        if (!isNaN(num)) {
+    if (!isNaN(num)) {
 
-          maxNumber = Math.max(
-            maxNumber,
-            num
-          );
+      maxNumber =
+        Math.max(
+          maxNumber,
+          num
+        );
 
-        }
+    }
 
-      });
+  });
 
-      const vendor_code =
+  vendor_code =
+    "VN" +
 
-        "VN" +
+    String(
+      maxNumber + 1
+    ).padStart(4, "0");
 
-        String(
-          maxNumber + 1
-        ).padStart(4, "0");
+}
 
 
 // =========================
@@ -25715,13 +25816,13 @@ if (duplicateName) {
 
 
 
-              const insertObj = {
+      const insertObj = {
 
         company_code,
 
         vendor_code,
 
-       vendor_name,
+        vendor_name,
 
         contact_person:
           body.contact_person || "",
@@ -25733,7 +25834,11 @@ if (duplicateName) {
           body.email || "",
 
         gstin:
-          body.gstin || "",
+          String(
+            body.gstin || ""
+          )
+            .trim()
+            .toUpperCase(),
 
         state:
           body.state || "",
@@ -25755,8 +25860,13 @@ if (duplicateName) {
         opening_type:
           body.opening_type || "Payable",
 
-        opening_date:
-          new Date(),
+       opening_date:
+
+          body.vendor_code
+
+            ? undefined
+
+            : new Date(),
 
 
         credit_period:
@@ -25767,37 +25877,78 @@ if (duplicateName) {
         remarks:
           body.remarks || "",
 
-        is_active: true,
+        is_active:
 
-        created_at:
-          new Date(),
+        body.vendor_code
 
-        updated_at:
-          new Date()
+          ? body.is_active ?? true
 
-      };
+          : true,
 
+            created_at:
 
-      console.log(
-  "VENDOR INSERT:",
-  insertObj
-);
+        body.vendor_code
+
+          ? undefined
+
+          : new Date(),
+
+          updated_at:
+            new Date()
+
+                };
+
+      if (
+          body.vendor_code
+        ) {
+
+          delete insertObj.created_at;
+
+          delete insertObj.opening_date;
+
+        }
+
+        console.log(
+        "VENDOR INSERT:",
+        insertObj
+      );
 
 // =========================
 // INSERT
 // =========================
 
 
+const query =
 
-            const {
-        error: insertError
-      } = await supabase
+  body.vendor_code
+
+    ? supabase
+
+        .from("vendor")
+
+        .update(insertObj)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "vendor_code",
+          body.vendor_code
+        )
+
+    : supabase
 
         .from("vendor")
 
         .insert([
           insertObj
         ]);
+
+const {
+  error: insertError
+} = await query;
 
       if (insertError) {
 
@@ -25812,17 +25963,21 @@ if (duplicateName) {
 
       }
 
-      return res.json({
+     return res.json({
 
-        success: true,
+  success: true,
 
-        message:
-          "Vendor saved successfully",
+  message:
 
-        vendor_code
+    body.vendor_code
 
-      });
+      ? "Vendor updated successfully"
 
+      : "Vendor saved successfully",
+
+  vendor_code
+
+});
     }
 
   catch (err) {
@@ -26032,8 +26187,8 @@ const {
   .from("purchase_header")
 
   .select(
-    "purchase_no, invoice_date, vendor_name"
-  )
+  "id, purchase_no, invoice_date, vendor_name"
+)
 
   .eq(
     "company_code",
@@ -26165,6 +26320,9 @@ purchases?.forEach((item) => {
 
 ledger.push({
 
+  id:
+  header?.id,
+
   date:
   header?.invoice_date || "",
 
@@ -26200,7 +26358,7 @@ const {
   .from("invoices")
 
   .select(
-  "invoice_id, invoice_date, customer_name"
+  "id, invoice_id, invoice_number, invoice_date, customer_name"
 )
 
   .eq(
@@ -26312,6 +26470,8 @@ previousSales?.forEach((item) => {
 
 ledger.push({
 
+  id: null,
+
   date:
     from_date,
 
@@ -26320,6 +26480,8 @@ ledger.push({
 
   type:
     "Opening",
+
+  party: "",  
 
   item_name:
     item_name,
@@ -26356,11 +26518,14 @@ in_qty:
 
   ledger.push({
 
+       id:
+  header?.id,
+
     date:
       header?.invoice_date || "",
 
     voucher:
-      item.invoice_id,
+      header?.invoice_number,
 
     type:
       "Sale",
