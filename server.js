@@ -27007,15 +27007,17 @@ app.post(
 
         .from("company")
 
-        .select(`
+      .select(`
 
-          company_code,
+  company_code,
 
-          businessname,
+  businessname,
 
-          ca_tally_company
+  ca_tally_company,
 
-        `)
+  country
+
+`)
 
         .eq(
 
@@ -27054,6 +27056,8 @@ app.post(
 
       );
 
+      console.log("STEP-1");
+
       const {
 
   data: clients,
@@ -27083,9 +27087,15 @@ app.post(
 
   email,
 
-  contact_person,
+contact_person,
 
-  tally_exported
+credit_period,
+
+opening_balance,
+
+gst_registered,
+
+tally_exported
 
 `)
 
@@ -27124,6 +27134,8 @@ app.post(
     }
 
   );
+
+  console.log("STEP-2");
 
 if (clientError) {
 
@@ -27166,6 +27178,8 @@ console.log(
 
 );
 
+console.log("STEP-3");
+
 for (const client of clients) {
 
   console.log(
@@ -27176,9 +27190,11 @@ for (const client of clients) {
 
   );
 
+  console.log("STEP-4");
+
 try {
 
-await createLedger({
+const tallyResponse = await createLedger({
 
   company:
     company.ca_tally_company,
@@ -27204,10 +27220,27 @@ await createLedger({
   email:
     client.email,
 
-  contactPerson:
-    client.contact_person
+ contactPerson:
+  client.contact_person,
+
+creditPeriod:
+  client.credit_period,
+
+openingBalance:
+  client.opening_balance,
+
+gstRegistered:
+  client.gst_registered,
+
+country:
+  company.country
 
 });
+
+console.log("STEP-5");
+
+console.log("===== TALLY RESPONSE MAIN =====");
+console.log(tallyResponse);
 
 const {
 

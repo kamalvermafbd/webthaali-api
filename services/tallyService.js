@@ -1,10 +1,19 @@
 const axios = require("axios");
+const ledgerTemplate =
+  require("./ledger-template");
 
 const TALLY_URL = "http://localhost:9000";
 
 async function sendToTally(xml) {
 
   try {
+
+ console.log("ENTER sendToTally");
+
+    console.log("===== XML SENT TO TALLY =====");
+    console.log(xml);
+
+    console.log("BEFORE AXIOS");
 
     const response = await axios.post(
       TALLY_URL,
@@ -16,8 +25,11 @@ async function sendToTally(xml) {
       }
     );
 
-    return response.data;
+   console.log("AFTER AXIOS");
 
+    console.log(response.data);
+
+    return response.data;
   } catch (err) {
 
     console.error(
@@ -158,66 +170,53 @@ async function createLedger({
 
   contactPerson = "",
 
+creditPeriod = 0,
+
+openingBalance = 0,
+
+gstRegistered = false,
+
+country = "India",
+
   parent = "Sundry Debtors",
 
   billWise = true
 
 }) {
 
-  const xml = `
-<ENVELOPE>
-  <HEADER>
-    <TALLYREQUEST>Import Data</TALLYREQUEST>
-  </HEADER>
+  const xml = ledgerTemplate({
 
-  <BODY>
+  company,
 
-    <IMPORTDATA>
+  name,
 
-     <REQUESTDESC>
+  gstin,
 
-  <REPORTNAME>
+  mobile,
 
-    All Masters
+  address,
 
-  </REPORTNAME>
+  state,
 
-  <STATICVARIABLES>
+  pincode,
 
-    <SVCURRENTCOMPANY>
+  email,
 
-      ${company}
+  contactPerson,
 
-    </SVCURRENTCOMPANY>
+  country,
 
-  </STATICVARIABLES>
+  creditPeriod,
 
-</REQUESTDESC>
+  openingBalance,
 
-      <REQUESTDATA>
+  gstRegistered,
 
-        <TALLYMESSAGE xmlns:UDF="TallyUDF">
+  parent,
 
-          <LEDGER NAME="${name}" ACTION="Create">
+  billWise
 
-            <NAME>${name}</NAME>
-
-            <PARENT>${parent}</PARENT>
-
-            <ISBILLWISEON>${billWise ? "Yes" : "No"}</ISBILLWISEON>
-
-          </LEDGER>
-
-        </TALLYMESSAGE>
-
-      </REQUESTDATA>
-
-    </IMPORTDATA>
-
-  </BODY>
-
-</ENVELOPE>
-`;
+});
 
   return await sendToTally(xml);
 
