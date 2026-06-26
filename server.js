@@ -15,8 +15,13 @@ const nodemailer =
 
 
 const {
+
   createLedger,
-  getTallyCompanies
+
+  getTallyCompanies,
+
+  selectCompany
+
 } = require("./services/tallyService");
 
 const resend = new Resend(
@@ -26959,6 +26964,337 @@ app.get(
     }
 
   }
+);
+
+// =========================
+// EXPORT TO TALLY
+// =========================
+
+app.post(
+
+  "/exportToTally",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company_code
+
+      } = req.body || {};
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code required"
+
+        });
+
+      }
+
+      const {
+
+        data: company,
+
+        error
+
+      } = await supabase
+
+        .from("company")
+
+        .select(`
+
+          company_code,
+
+          businessname,
+
+          ca_tally_company
+
+        `)
+
+        .eq(
+
+          "company_code",
+
+          company_code
+
+        )
+
+        .single();
+
+      if (
+
+        error ||
+
+        !company
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Company not found"
+
+        });
+
+      }
+
+      console.log(
+
+        "EXPORT COMPANY:",
+
+        company
+
+      );
+
+      const {
+
+  data: clients,
+
+  error: clientError
+
+} = await supabase
+
+  .from("client")
+
+  .select(`
+    company_code,
+
+  client_code,
+
+  client_name,
+
+  gstin,
+
+  billing_address,
+
+  bill_state,
+
+  bill_pincode,
+
+  mobile,
+
+  email,
+
+  contact_person,
+
+  tally_exported
+
+`)
+
+  .eq(
+
+    "company_code",
+
+    company_code
+
+  )
+
+  .eq(
+
+    "is_active",
+
+    true
+
+  )
+
+  .eq(
+
+    "tally_exported",
+
+    false
+
+  )
+
+  .order(
+
+    "client_name",
+
+    {
+
+      ascending: true
+
+    }
+
+  );
+
+if (clientError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      clientError.message
+
+  });
+
+}
+
+if (!clients || clients.length === 0) {
+
+  return res.json({
+
+    success: true,
+
+    message:
+      "All clients are already exported to Tally.",
+
+    data: {
+
+      exported: 0
+
+    }
+
+  });
+
+}
+
+console.log(
+
+  "CLIENTS TO EXPORT:",
+
+  clients
+
+);
+
+for (const client of clients) {
+
+  console.log(
+
+    "EXPORTING:",
+
+    client.client_name
+
+  );
+
+try {
+
+await createLedger({
+
+  company:
+    company.ca_tally_company,
+
+  name:
+    client.client_name,
+
+  gstin:
+    client.gstin,
+
+  address:
+    client.billing_address,
+
+  state:
+    client.bill_state,
+
+  pincode:
+    client.bill_pincode,
+
+  mobile:
+    client.mobile,
+
+  email:
+    client.email,
+
+  contactPerson:
+    client.contact_person
+
+});
+
+const {
+
+  error: updateError
+
+} = await supabase
+
+  .from("client")
+
+  .update({
+
+    tally_exported: true,
+
+    tally_exported_at: new Date()
+
+  })
+
+  .eq(
+
+    "company_code",
+
+    client.company_code
+
+  )
+
+  .eq(
+
+    "client_code",
+
+    client.client_code
+
+  );
+
+if (updateError) {
+
+  throw updateError;
+
+}
+
+console.log(
+
+  "CREATED:",
+
+  client.client_name
+
+);
+
+
+ } catch (err) {
+
+    console.error(
+      "FAILED:",
+      client.client_name,
+      err.message
+    );
+}
+}
+    return res.json({
+
+  success: true,
+
+  data: {
+
+    company,
+
+    clients
+
+  }
+
+});
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
 );
 
 app.listen(

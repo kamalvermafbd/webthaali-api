@@ -89,10 +89,79 @@ return {
 
 }
 
+// =========================
+// SELECT TALLY COMPANY
+// =========================
+
+async function selectCompany(
+  companyName
+) {
+
+  const xml = `
+<ENVELOPE>
+
+  <HEADER>
+
+    <TALLYREQUEST>
+      Export
+    </TALLYREQUEST>
+
+  </HEADER>
+
+  <BODY>
+
+    <DESC>
+
+      <STATICVARIABLES>
+
+        <SVCURRENTCOMPANY>
+          ${companyName}
+        </SVCURRENTCOMPANY>
+
+        <SVEXPORTFORMAT>
+          $$SysName:XML
+        </SVEXPORTFORMAT>
+
+      </STATICVARIABLES>
+
+      <REPORTNAME>
+        List of Accounts
+      </REPORTNAME>
+
+    </DESC>
+
+  </BODY>
+
+</ENVELOPE>
+`;
+
+  return await sendToTally(xml);
+
+}
+
 async function createLedger({
+    company,
+
   name,
+
+  gstin = "",
+
+  mobile = "",
+
+  address = "",
+
+  state = "",
+
+  pincode = "",
+
+  email = "",
+
+  contactPerson = "",
+
   parent = "Sundry Debtors",
+
   billWise = true
+
 }) {
 
   const xml = `
@@ -105,9 +174,25 @@ async function createLedger({
 
     <IMPORTDATA>
 
-      <REQUESTDESC>
-        <REPORTNAME>All Masters</REPORTNAME>
-      </REQUESTDESC>
+     <REQUESTDESC>
+
+  <REPORTNAME>
+
+    All Masters
+
+  </REPORTNAME>
+
+  <STATICVARIABLES>
+
+    <SVCURRENTCOMPANY>
+
+      ${company}
+
+    </SVCURRENTCOMPANY>
+
+  </STATICVARIABLES>
+
+</REQUESTDESC>
 
       <REQUESTDATA>
 
@@ -137,8 +222,15 @@ async function createLedger({
   return await sendToTally(xml);
 
 }
+
 module.exports = {
+
   sendToTally,
+
   createLedger,
-  getTallyCompanies
+
+  getTallyCompanies,
+
+  selectCompany
+
 };
