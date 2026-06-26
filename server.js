@@ -13,6 +13,12 @@ const nodemailer =
 
  const { Resend } = require("resend");
 
+
+const {
+  createLedger,
+  getTallyCompanies
+} = require("./services/tallyService");
+
 const resend = new Resend(
   process.env.RESEND_API_KEY
 ); 
@@ -153,7 +159,53 @@ app.get("/", (req, res) => {
   });
 
 });
+app.get("/testTally", async (req, res) => {
 
+  try {
+
+    const response = await createLedger({
+      name: "Test Customer 2"
+    });
+
+    res.send(response);
+
+  } catch (err) {
+
+    console.error(err.response?.data || err.message);
+
+    res.status(500).send(
+      err.response?.data || err.message
+    );
+
+  }
+
+});
+
+app.get("/getTallyCompanies", async (req, res) => {
+
+  try {
+
+    const result =
+      await getTallyCompanies();
+
+    res.json(result);
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+
+      success: false,
+
+      error:
+        err.response?.data || err.message
+
+    });
+
+  }
+
+});
 
 function formatDateByCountry(
   date,
@@ -13184,7 +13236,7 @@ app.post(
   .from("usersheet")
 
  .select(
-  "user_id,email,mobile,password,company_code,name,role,is_active,force_password_change"
+  "user_id,email,mobile,password,company_code,name,role,is_active,force_password_change,is_ca"
 )
 
   .or(
@@ -13322,6 +13374,9 @@ status:
   user.is_active === true
     ? "ACTIVE"
     : "INACTIVE",
+
+    is_ca:
+  user.is_ca === true,
 
     force_password_change:
   user.force_password_change === true,
@@ -22026,7 +22081,7 @@ app.get(
 
 
 // =========================
-// GET VENDOR MASTER
+// GET VENDOR MASTER API
 // =========================
 
 app.get(
@@ -26585,6 +26640,326 @@ in_qty:
   }
 );
 
+
+// =========================
+// GET CA COMPANIES
+// =========================
+
+app.get(
+  "/getCACompanies",
+
+  async (req, res) => {
+
+    try {
+
+      const partner_id =
+
+        String(
+          req.query.partner_id || ""
+        ).trim();
+
+      if (!partner_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "partner_id missing"
+
+        });
+
+      }
+
+      const {
+  data: caUser,
+  error: caError
+} = await supabase
+
+  .from("usersheet")
+
+  .select("id")
+
+  .eq(
+    "user_id",
+    partner_id
+  )
+
+  .eq(
+    "role",
+    "PARTNER"
+  )
+
+  .eq(
+    "is_ca",
+    true
+  )
+
+  .eq(
+    "is_active",
+    true
+  )
+
+  .single();
+
+if (
+  caError ||
+  !caUser
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Unauthorized CA"
+
+  });
+
+}
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("company")
+
+        .select(`
+          company_code,
+          businessname,
+          ca_tally_company,
+          partner_id
+        `)
+
+        .eq(
+          "partner_id",
+          partner_id
+        )
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .order(
+          "businessname",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const result =
+
+        (data || []).map((row) => ({
+
+          company_code:
+            row.company_code,
+
+          businessname:
+            row.businessname,
+
+          partner_id:
+            row.partner_id,
+
+          ca_tally_company:
+            row.ca_tally_company || ""
+
+        }));
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+// =========================
+// SAVE TALLY COMPANY
+// =========================
+
+app.post(
+
+  "/saveTallyCompany",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company_code,
+
+        ca_tally_company
+
+      } = req.body || {};
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code required"
+
+        });
+
+      }
+
+      if (!ca_tally_company) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Tally company required"
+
+        });
+
+      }
+
+      const {
+
+        data,
+
+        error
+
+      } = await supabase
+
+        .from("company")
+
+        .update({
+
+          ca_tally_company
+
+        })
+
+        .eq(
+
+          "company_code",
+
+          company_code
+
+        )
+
+        .select()
+
+        .single();
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
+// GET TALLY COMPANIES
+// =========================
+
+app.get(
+  "/getTallyCompanies",
+  async (req, res) => {
+
+    try {
+
+      console.log("GET TALLY COMPANIES API HIT");
+
+      const result =
+        await getTallyCompanies();
+
+      console.log("TALLY RESULT:", result);
+
+      return res.json(result);
+
+    }
+
+    catch (err) {
+
+      console.log("TALLY ERROR:", err);
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
 
 app.listen(
   process.env.PORT,
