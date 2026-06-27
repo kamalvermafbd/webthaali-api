@@ -45,6 +45,22 @@ igstLedger,
 
 roundOffLedger,
 
+transporterName,
+
+vehicleNo,
+
+grRRNo,
+
+ewayBillNo,
+
+dispatchDate,
+
+lrDate,
+
+ewayDate,
+
+creditPeriod,
+
 salesLedger
 }) => `
 
@@ -116,6 +132,41 @@ salesLedger
 
 <PARTYMAILINGNAME>${partyName}</PARTYMAILINGNAME>
 
+${lrDate ? `
+<BILLOFLADINGDATE>${lrDate}</BILLOFLADINGDATE>
+` : ""}
+
+${grRRNo ? `
+<BILLOFLADINGNO>${grRRNo}</BILLOFLADINGNO>
+` : ""}
+
+${transporterName ? `
+<EICHECKPOST>${transporterName}</EICHECKPOST>
+` : ""}
+
+${vehicleNo ? `
+<BASICSHIPVESSELNO>${vehicleNo}</BASICSHIPVESSELNO>
+` : ""}
+
+${creditPeriod ? `
+<BASICDUEDATEOFPYMT>${creditPeriod} Days</BASICDUEDATEOFPYMT>
+` : ""}
+
+${ewayBillNo ? `
+<EWAYBILLDETAILS.LIST>
+
+<BILLDATE>${ewayDate || dispatchDate}</BILLDATE>
+
+<BILLNUMBER>${ewayBillNo}</BILLNUMBER>
+
+<SHIPPEDFROMSTATE>${state}</SHIPPEDFROMSTATE>
+
+<SHIPPEDTOSTATE>${shippingState || state}</SHIPPEDTOSTATE>
+
+</EWAYBILLDETAILS.LIST>
+` : ""}
+
+
 <BASICSHIPTOADDRESS.LIST TYPE="String">
   <BASICSHIPTOADDRESS>${shippingAddress || billingAddress}</BASICSHIPTOADDRESS>
 </BASICSHIPTOADDRESS.LIST>
@@ -127,6 +178,8 @@ salesLedger
 <CONSIGNEEMAILINGNAME>${partyName}</CONSIGNEEMAILINGNAME>
 
 <BASICSHIPTOSTATECODE>${shippingStateCode || billingStateCode}</BASICSHIPTOSTATECODE>
+
+
 
 ${items.map(item => `
 

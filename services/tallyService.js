@@ -310,6 +310,22 @@ cgstLedger,
 
   roundOffLedger,
 
+  transporterName,
+
+vehicleNo,
+
+grRRNo,
+
+ewayBillNo,
+
+dispatchDate,
+
+lrDate,
+
+ewayDate,
+
+creditPeriod,
+
   salesLedger
 
 }) {
@@ -370,6 +386,22 @@ shippingStateCode,
   igstLedger,
 
   roundOffLedger,
+
+  transporterName,
+
+vehicleNo,
+
+grRRNo,
+
+ewayBillNo,
+
+dispatchDate,
+
+lrDate,
+
+ewayDate,
+
+creditPeriod,
 
   salesLedger
 

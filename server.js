@@ -1355,6 +1355,12 @@ gr_rr_no:
 
 eway_bill_no:
   invoice.eway_bill_no,
+
+  lr_date:
+  invoice.lr_date,
+
+eway_date:
+  invoice.eway_date,
   
             company: {
 
@@ -2295,6 +2301,13 @@ console.log(
 
   eway_bill_no:
     row.eway_bill_no,
+
+    lr_date:
+  row.lr_date,
+
+eway_date:
+  row.eway_date,
+
 
   share_token:
     row.share_token
@@ -3449,7 +3462,14 @@ app.post(
             req.body.gr_rr_no || "",
 
           eway_bill_no:
-            req.body.eway_bill_no || ""
+            req.body.eway_bill_no || "",
+          
+           lr_date:
+              req.body.lr_date || null,
+
+            eway_date:
+              req.body.eway_date || null
+
 
         })
 
@@ -27597,6 +27617,26 @@ sgstLedger: "Sgst 9%",
 igstLedger: "Igst 18%",
 
   roundOffLedger: "Rounding Off",   
+
+  transporterName: invoice.transporter_name,
+
+vehicleNo: invoice.vehicle_no,
+
+grRRNo: invoice.gr_rr_no,
+
+ewayBillNo: invoice.eway_bill_no,
+
+dispatchDate: invoice.invoice_date.replaceAll("-", ""),
+
+lrDate: invoice.lr_date
+  ? invoice.lr_date.replaceAll("-", "")
+  : "",
+
+ewayDate: invoice.eway_date
+  ? invoice.eway_date.replaceAll("-", "")
+  : "",
+
+creditPeriod: invoice.credit_period,
 
   salesLedger: "Sales Account"
 
