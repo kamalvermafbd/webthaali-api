@@ -18,6 +18,8 @@ const {
 
   createLedger,
 
+  createSale,
+
   getTallyCompanies,
 
   selectCompany
@@ -27329,6 +27331,298 @@ console.log(
   }
 
 );
+
+
+app.post("/exportSalesToTally", async (req, res) => {
+
+  try {
+
+    // abhi sirf test
+
+  const { company_code } = req.body || {};
+
+if (!company_code) {
+
+  return res.json({
+
+    success: false,
+
+    error: "company_code required"
+
+  });
+
+}
+
+const {
+
+  data: company,
+
+  error: companyError
+
+} = await supabase
+
+  .from("company")
+
+  .select(`
+  company_code,
+  businessname,
+  ca_tally_company,
+  country
+`)
+
+  .eq(
+
+    "company_code",
+
+    company_code
+
+  )
+
+  .single();
+
+if (
+
+  companyError ||
+
+  !company
+
+) {
+
+  return res.json({
+
+    success: false,
+
+    error: "Company not found."
+
+  });
+
+}  
+
+
+const {
+
+  data: invoices,
+
+  error: invoiceError
+
+} = await supabase
+
+  .from("invoices")
+
+  .select("*")
+
+  .eq(
+
+    "company_code",
+
+    company_code
+
+  )
+
+  .eq(
+
+    "tally_exported",
+
+    false
+
+  )
+
+  .order("invoice_date", { ascending: true })
+
+  .limit(1);
+
+if (invoiceError) {
+
+  return res.json({
+
+    success: false,
+
+    error: invoiceError.message
+
+  });
+
+}
+
+if (!invoices || invoices.length === 0) {
+
+  return res.json({
+
+    success: true,
+
+    message: "No invoices to export."
+
+  });
+
+}
+
+const invoice = invoices[0];
+
+console.log(
+  "SELECTED INVOICE:",
+  invoice.id,
+  invoice.invoice_number
+);
+
+const roundOff = Number(
+  (
+    Number(invoice.grand_total) -
+    (
+      Number(invoice.subtotal) +
+      Number(invoice.cgst) +
+      Number(invoice.sgst) +
+      Number(invoice.igst)
+    )
+  ).toFixed(2)
+);
+
+const roundOffAmount = Math.abs(roundOff);
+
+const roundOffIsNegative = roundOff < 0;
+
+console.log("ROUND OFF:", roundOff);
+console.log("ROUND OFF AMOUNT:", roundOffAmount);
+console.log("ROUND OFF NEGATIVE:", roundOffIsNegative);
+
+const {
+
+  data: items,
+
+  error: itemError
+
+} = await supabase
+
+  .from("invoice_items")
+
+  .select("*")
+
+  .eq(
+
+    "invoice_id",
+
+    invoice.invoice_id
+
+  );
+
+if (itemError) {
+
+  return res.json({
+
+    success: false,
+
+    error: itemError.message
+
+  });
+
+}
+
+if (!items || items.length === 0) {
+
+  return res.json({
+
+    success: false,
+
+    error: "Invoice items not found."
+
+  });
+
+}
+
+console.log("TOTAL ITEMS:", items.length);
+
+console.log("ALL ITEMS:", items);
+
+const item = items[0];
+
+console.log("ITEM:", item);
+
+console.log("INVOICE:", invoice);
+
+
+ const result = await createSale({
+
+  company: company.ca_tally_company,
+  country: company.country,
+
+  voucherDate: invoice.invoice_date.replaceAll("-", ""),
+
+  voucherNumber: invoice.invoice_number,
+
+  partyName: invoice.customer_name,
+
+  billingAddress: invoice.billing_address,
+
+  shippingAddress: invoice.shipping_address,
+
+  state: invoice.state,
+
+shippingState: invoice.shipping_state,
+
+shippingStateCode: invoice.shipping_state_code,
+
+billingPincode: invoice.billing_pincode,
+
+shippingPincode: invoice.shipping_pincode,
+
+partyGstin: invoice.customer_gst,
+
+billingStateCode: invoice.state_code,
+
+placeOfSupply:
+  invoice.shipping_state || invoice.state,
+
+gstRegistrationType:
+  invoice.customer_gst
+    ? "Regular"
+    : "Unregistered",
+
+buyerName: invoice.customer_name,
+
+  items,
+  invoiceAmount: invoice.grand_total,
+
+  cgst: invoice.cgst,
+
+sgst: invoice.sgst,
+
+igst: invoice.igst,
+
+ roundOff: roundOffAmount,
+
+  roundOffIsNegative,
+
+cgstLedger: "Cgst 9%",
+
+sgstLedger: "Sgst 9%",
+
+igstLedger: "Igst 18%",
+
+  roundOffLedger: "Rounding Off",   
+
+  salesLedger: "Sales Account"
+
+});
+
+    return res.json({
+
+      success: true,
+
+      data: result
+
+    });
+
+  } catch (err) {
+
+    return res.json({
+
+      success: false,
+
+      error: err.message
+
+    });
+
+  }
+
+});
 
 app.listen(
   process.env.PORT,

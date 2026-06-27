@@ -1,6 +1,10 @@
 const axios = require("axios");
+const fs = require("fs");
 const ledgerTemplate =
   require("./ledger-template");
+
+const saleTemplate =
+  require("./sale-template");
 
 const TALLY_URL = "http://localhost:9000";
 
@@ -25,11 +29,36 @@ async function sendToTally(xml) {
       }
     );
 
-   console.log("AFTER AXIOS");
+  console.log("AFTER AXIOS");
 
-    console.log(response.data);
+console.log(response.data);
 
-    return response.data;
+// 👇 YAHAN ADD KARO
+fs.writeFileSync(
+  "tally-response.xml",
+  response.data
+);
+
+console.log("Response saved to tally-response.xml");
+
+if (response.data.includes("<LINEERROR>")) {
+
+  console.log("===== LINE ERROR =====");
+
+  const errors =
+    response.data.match(
+      /<LINEERROR>(.*?)<\/LINEERROR>/gs
+    );
+
+  console.log(errors);
+
+}
+
+return response.data;
+
+
+
+
   } catch (err) {
 
     console.error(
@@ -222,11 +251,140 @@ country = "India",
 
 }
 
+
+async function createSale({
+
+  company,
+
+  voucherDate,
+
+  voucherNumber,
+
+  partyName,
+
+  billingAddress,
+
+  state,
+
+shippingState,
+
+  country,
+
+  gstRegistrationType,
+
+partyGstin,
+
+billingStateCode,
+
+placeOfSupply,
+
+buyerName,
+
+shippingAddress,
+
+billingPincode,
+
+shippingPincode,
+
+shippingStateCode,
+
+  items,
+
+  invoiceAmount,
+
+  cgst,
+
+  sgst,
+
+  igst,
+
+ roundOff,
+
+roundOffIsNegative,
+
+cgstLedger,
+
+  sgstLedger,
+
+  igstLedger,
+
+  roundOffLedger,
+
+  salesLedger
+
+}) {
+
+  const xml = saleTemplate({
+
+  company,
+
+  voucherDate,
+
+  voucherNumber,
+
+  partyName,
+
+  billingAddress,
+
+  state,
+shippingState,
+
+  country,
+
+  gstRegistrationType,
+
+partyGstin,
+
+billingStateCode,
+
+placeOfSupply,
+
+buyerName,
+
+shippingAddress,
+
+billingPincode,
+
+shippingPincode,
+
+shippingStateCode,
+
+  items,
+
+  invoiceAmount,
+
+  cgst,
+
+  sgst,
+
+  igst,
+
+  roundOff,
+
+  roundOffIsNegative,
+
+  cgstLedger,
+
+  sgstLedger,
+
+  igstLedger,
+
+  roundOffLedger,
+
+  salesLedger
+
+});
+
+  return await sendToTally(xml);
+
+}
 module.exports = {
 
   sendToTally,
 
   createLedger,
+
+  createSale,
 
   getTallyCompanies,
 
