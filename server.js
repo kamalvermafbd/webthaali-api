@@ -522,6 +522,9 @@ quote_dt:
 
     : null,
 
+bill_to_ship_to:
+  invoice.bill_to_ship_to || false,
+
   
 
     })
@@ -605,11 +608,6 @@ if (
 }
 
 }
-
-
-
-
-
 
 
 } else {
@@ -799,6 +797,9 @@ quote_dt:
     ? invoice.Quote_Dt || null
 
     : null,
+
+bill_to_ship_to:
+  invoice.bill_to_ship_to || false,
 
 
     }]);
@@ -1361,6 +1362,9 @@ eway_bill_no:
 
 eway_date:
   invoice.eway_date,
+
+  bill_to_ship_to:
+  invoice.bill_to_ship_to,
   
             company: {
 
@@ -2307,6 +2311,9 @@ console.log(
 
 eway_date:
   row.eway_date,
+
+  bill_to_ship_to:
+  row.bill_to_ship_to,
 
 
   share_token:
