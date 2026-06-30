@@ -26,7 +26,9 @@ const {
 
   getAllLedgers,
 
-  getStockItems
+  getStockItems,
+
+  getUnits,
 
 } = require("./services/tallyService");
 
@@ -28058,6 +28060,91 @@ if (
         hsnList
       );
 
+// =========================
+// GET UNIQUE UNITS
+// =========================
+
+const {
+
+  data: unitRows,
+
+  error: unitError
+
+} = await supabase
+
+  .from("invoice_items")
+
+  .select("unit")
+
+  .in(
+
+    "invoice_id",
+
+    invoice_ids
+
+  );
+
+if (unitError) {
+
+  return res.json({
+
+    success: false,
+
+    error: unitError.message
+
+  });
+
+}
+
+const unitList = [
+
+  ...new Set(
+
+    (unitRows || [])
+
+      .map((r) =>
+
+        String(r.unit || "").trim()
+
+      )
+
+      .filter(Boolean)
+
+  )
+
+].sort();
+
+console.log(
+
+  "UNITS",
+
+  unitList
+
+);
+
+// =========================
+// BUILD UNIT MAPPING
+// =========================
+
+const units = unitList.map((unit) => ({
+
+  mapping_type: "UNIT",
+
+  billey_key: unit,
+
+  billey_name: unit
+
+}));
+
+console.log(
+
+  "UNIT MAPPING",
+
+  units
+
+);
+
+
       // =========================
       // BUILD STOCK MAPPING
       // =========================
@@ -28252,6 +28339,9 @@ const mappedSaleGL =
 const mappedTaxGL =
   applyMapping(taxGL);
 
+const mappedUnits =
+  applyMapping(units);
+
 const mappedStock =
   applyMapping(stock);
 
@@ -28274,6 +28364,8 @@ const mappedDebtors =
   saleGL: mappedSaleGL,
 
   taxGL: mappedTaxGL,
+
+  units: mappedUnits,
 
   stock: mappedStock,
 
@@ -28588,6 +28680,10 @@ console.log(
   "LEDGER DATA",
   ledgerData
 );
+
+console.log(
+  "STEP 1 DONE"
+);
       // =========================
       // GET TAX LEDGERS
       // =========================
@@ -28633,17 +28729,60 @@ console.log(
   stock
 );
 
-const stockList =
-
-  stock.map((item) => ({
-
-    name: item.NAME
-
-  }));
+const stockList = stock.map((item) => ({
+  name: item.NAME,
+  unit:
+    typeof item.BASEUNITS === "object"
+      ? item.BASEUNITS["#text"]
+      : item.BASEUNITS || ""
+}));
 
 console.log(
   "STOCK LIST",
   stockList
+);
+
+console.log(
+  "STEP 2 DONE"
+);
+
+// =========================
+// GET UNITS
+// =========================
+
+const unitJson =
+  await getUnits(
+    tallyCompany
+  );
+
+const unitRaw =
+  unitJson
+    ?.ENVELOPE
+    ?.BODY
+    ?.DATA
+    ?.TALLYMESSAGE;
+
+const units =
+  Array.isArray(unitRaw)
+    ? unitRaw
+    : unitRaw
+    ? [unitRaw]
+    : [];
+
+const unitList =
+  units
+    .filter(x => x.UNIT)
+    .map(x => ({
+      name: x.UNIT.NAME
+    }));
+
+console.log(
+  "UNIT LIST",
+  unitList
+);
+
+console.log(
+  "STEP 3 DONE"
 );
       // =========================
       // GET HSN CODES
@@ -28677,6 +28816,10 @@ console.log(
 
     taxGL:
       ledgerData.taxGL,
+
+    units:
+      unitList,
+
 
     stock:
       stockList,
@@ -28714,16 +28857,22 @@ console.log(
 
     catch (err) {
 
-      return res.json({
+  console.error(
+    "GET TALLY MAPPING ERROR"
+  );
 
-        success: false,
+  console.error(err);
 
-        error:
-          err.message
+  return res.json({
 
-      });
+    success: false,
 
-    }
+    error:
+      err.stack || err.message
+
+  });
+
+}
 
   }
 
@@ -28850,7 +28999,10 @@ app.get(
       company.client_auto_create_sales_ledger,
 
     auto_create_tax_ledger:
-      company.client_auto_create_tax_ledger
+      company.client_auto_create_tax_ledger,
+      
+    auto_create_unit:
+  company.client_auto_create_unit,
 
   }
 
@@ -28881,7 +29033,10 @@ app.get(
       company.auto_create_sales_ledger,
 
     auto_create_tax_ledger:
-      company.auto_create_tax_ledger
+      company.auto_create_tax_ledger,
+
+    auto_create_unit:
+      company.auto_create_unit,
 
   };
 
@@ -28944,11 +29099,11 @@ app.post(
 
         auto_create_stock,
 
-        auto_create_hsn,
-
         auto_create_sales_ledger,
 
-        auto_create_tax_ledger
+        auto_create_tax_ledger,
+
+        auto_create_unit,
 
       } = req.body || {};
 
@@ -28996,14 +29151,14 @@ app.post(
         updateObj.client_auto_create_stock =
           auto_create_stock;
 
-        updateObj.client_auto_create_hsn =
-          auto_create_hsn;
-
         updateObj.client_auto_create_sales_ledger =
           auto_create_sales_ledger;
 
         updateObj.client_auto_create_tax_ledger =
           auto_create_tax_ledger;
+
+        updateObj.client_auto_create_unit =
+          auto_create_unit;  
 
         updateObj.client_tally_mapping_completed =
           true;
@@ -29022,14 +29177,14 @@ app.post(
         updateObj.auto_create_stock =
           auto_create_stock;
 
-        updateObj.auto_create_hsn =
-          auto_create_hsn;
-
         updateObj.auto_create_sales_ledger =
           auto_create_sales_ledger;
 
         updateObj.auto_create_tax_ledger =
           auto_create_tax_ledger;
+
+        updateObj.auto_create_unit =
+            auto_create_unit;  
 
         updateObj.tally_mapping_completed =
           true;

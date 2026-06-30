@@ -406,7 +406,7 @@ async function getStockItems(
 
     <TYPE>Collection</TYPE>
 
-    <ID>List of Stock Items</ID>
+    <ID>BilleyStockCollection</ID>
 
   </HEADER>
 
@@ -435,12 +435,12 @@ async function getStockItems(
             <TYPE>Stock Item</TYPE>
 
             <FETCH>
-              Name,
-              Parent,
-              BaseUnits,
-              GSTHSNName,
-              HSNCode
-            </FETCH>
+                Name,
+                Parent,
+                BaseUnits,
+                GSTHSNName,
+                HSNCode
+              </FETCH>
 
           </COLLECTION>
 
@@ -454,6 +454,8 @@ async function getStockItems(
 
 </ENVELOPE>
 `;
+
+
 
  const result =
   await sendToTally(xml);
@@ -480,6 +482,52 @@ return json;
 
 }
 
+async function getUnits(company) {
+
+  await selectCompany(company);
+
+  const xml = `
+<ENVELOPE>
+
+  <HEADER>
+
+    <VERSION>1</VERSION>
+
+    <TALLYREQUEST>Export</TALLYREQUEST>
+
+    <TYPE>Data</TYPE>
+
+    <ID>List of Accounts</ID>
+
+  </HEADER>
+
+  <BODY>
+
+    <DESC>
+
+      <STATICVARIABLES>
+
+        <SVCURRENTCOMPANY>${company}</SVCURRENTCOMPANY>
+
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+
+        <ACCOUNTTYPE>Units</ACCOUNTTYPE>
+
+      </STATICVARIABLES>
+
+    </DESC>
+
+  </BODY>
+
+</ENVELOPE>
+`;
+
+  const result = await sendToTally(xml);
+
+  const json = parser.parse(result);
+
+  return json;
+}
 
 async function createLedger({
     company,
@@ -726,6 +774,8 @@ module.exports = {
   getAllLedgers,
 
   getStockItems,
+
+  getUnits,
 
   //getStockMasters
 
