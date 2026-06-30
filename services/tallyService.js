@@ -1,4 +1,13 @@
 const axios = require("axios");
+
+const {
+
+  XMLParser
+
+} = require(
+  "fast-xml-parser"
+);
+
 const fs = require("fs");
 const ledgerTemplate =
   require("./ledger-template");
@@ -7,6 +16,35 @@ const saleTemplate =
   require("./sale-template");
 
 const TALLY_URL = "http://localhost:9000";
+
+const parser =
+  new XMLParser({
+
+    ignoreAttributes: false,
+
+    attributeNamePrefix: "",
+
+    parseTagValue: true,
+
+    trimValues: true
+
+  });
+
+function toArray(value) {
+
+  if (!value) {
+
+    return [];
+
+  }
+
+  return Array.isArray(value)
+
+    ? value
+
+    : [value];
+
+}
 
 async function sendToTally(xml) {
 
@@ -179,6 +217,269 @@ async function selectCompany(
   return await sendToTally(xml);
 
 }
+
+// =========================
+// GET ALL LEDGERS
+// =========================
+
+async function getAllLedgers(
+  company
+) {
+
+  // Company select (future compatibility)
+  await selectCompany(
+    company
+  );
+
+  const xml = `
+<ENVELOPE>
+
+  <HEADER>
+
+    <VERSION>1</VERSION>
+
+    <TALLYREQUEST>Export</TALLYREQUEST>
+
+    <TYPE>Collection</TYPE>
+
+    <ID>List of Ledgers</ID>
+
+  </HEADER>
+
+  <BODY>
+
+    <DESC>
+
+      <STATICVARIABLES>
+
+        <SVCURRENTCOMPANY>
+          ${company}
+        </SVCURRENTCOMPANY>
+
+        <SVEXPORTFORMAT>
+          $$SysName:XML
+        </SVEXPORTFORMAT>
+
+      </STATICVARIABLES>
+
+    </DESC>
+
+  </BODY>
+
+</ENVELOPE>
+`;
+
+  const result = await sendToTally(xml);
+
+  const ledgers = [];
+
+  const regex = /<LEDGER NAME="([^"]+)"/g;
+
+  let match;
+
+  while ((match = regex.exec(result)) !== null) {
+
+    ledgers.push({
+
+      name: match[1]
+
+    });
+
+  }
+
+  console.log(
+    "TALLY LEDGERS",
+    ledgers
+  );
+
+  // =========================
+// BUILD SALES GL
+// =========================
+
+const salesGL = ledgers.filter((x) => {
+
+  const name =
+    x.name.toUpperCase();
+
+  return (
+
+    name.includes("SALE")
+
+  );
+
+});
+
+console.log(
+  "SALES GL",
+  salesGL
+);
+
+// =========================
+// BUILD TAX GL
+// =========================
+
+const taxGL = ledgers.filter((x) => {
+
+  const name =
+    x.name.toUpperCase();
+
+  return (
+
+    name.includes("CGST") ||
+
+    name.includes("SGST") ||
+
+    name.includes("IGST")
+
+  );
+
+});
+
+console.log(
+  "TAX GL",
+  taxGL
+);
+
+// =========================
+// BUILD DEBTORS
+// =========================
+
+const debtors = ledgers.filter((x) => {
+
+  const name =
+    x.name.toUpperCase();
+
+  return !(
+
+    name.includes("SALE") ||
+
+    name.includes("CGST") ||
+
+    name.includes("SGST") ||
+
+    name.includes("IGST") ||
+
+    name.includes("CASH") ||
+
+    name.includes("ROUND") ||
+
+    name.includes("PROFIT")
+
+  );
+
+});
+
+console.log(
+  "DEBTORS",
+  debtors
+);
+
+
+return {
+
+  salesGL,
+
+  taxGL,
+
+  debtors
+
+};
+
+}
+
+// =========================
+// GET STOCK ITEMS
+// =========================
+
+async function getStockItems(
+  company
+) {
+
+  const xml = `
+<ENVELOPE>
+
+  <HEADER>
+
+    <VERSION>1</VERSION>
+
+    <TALLYREQUEST>Export</TALLYREQUEST>
+
+    <TYPE>Collection</TYPE>
+
+    <ID>List of Stock Items</ID>
+
+  </HEADER>
+
+  <BODY>
+
+    <DESC>
+
+      <STATICVARIABLES>
+
+        <SVCURRENTCOMPANY>
+          ${company}
+        </SVCURRENTCOMPANY>
+
+        <SVEXPORTFORMAT>
+          $$SysName:XML
+        </SVEXPORTFORMAT>
+
+      </STATICVARIABLES>
+
+      <TDL>
+
+        <TDLMESSAGE>
+
+          <COLLECTION NAME="BilleyStockCollection">
+
+            <TYPE>Stock Item</TYPE>
+
+            <FETCH>
+              Name,
+              Parent,
+              BaseUnits,
+              GSTHSNName,
+              HSNCode
+            </FETCH>
+
+          </COLLECTION>
+
+        </TDLMESSAGE>
+
+      </TDL>
+
+    </DESC>
+
+  </BODY>
+
+</ENVELOPE>
+`;
+
+ const result =
+  await sendToTally(xml);
+
+// =========================
+// XML TO JSON
+// =========================
+
+const json =
+  parser.parse(result);
+
+console.log(
+  "STOCK JSON"
+);
+
+console.dir(
+  json,
+  {
+    depth: null
+  }
+);
+
+return json;
+
+}
+
 
 async function createLedger({
     company,
@@ -420,6 +721,12 @@ module.exports = {
 
   getTallyCompanies,
 
-  selectCompany
+  selectCompany,
+  
+  getAllLedgers,
+
+  getStockItems,
+
+  //getStockMasters
 
 };

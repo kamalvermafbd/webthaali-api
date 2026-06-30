@@ -22,7 +22,11 @@ const {
 
   getTallyCompanies,
 
-  selectCompany
+  selectCompany,
+
+  getAllLedgers,
+
+  getStockItems
 
 } = require("./services/tallyService");
 
@@ -5479,6 +5483,18 @@ app.get(
 
         businessName:
           data.businessname,
+
+          client_tally_company:
+    data.client_tally_company,
+
+  ca_tally_company:
+    data.ca_tally_company,
+
+  client_tally_enabled:
+    data.client_tally_enabled,
+
+  client_tally_mapping_completed:
+    data.client_tally_mapping_completed,
 
   // =====================
   // COUNTRY
@@ -26840,7 +26856,6 @@ if (
   }
 
 );
-
 // =========================
 // SAVE TALLY COMPANY
 // =========================
@@ -26857,7 +26872,9 @@ app.post(
 
         company_code,
 
-        ca_tally_company
+        is_ca = true,
+
+        tally_company
 
       } = req.body || {};
 
@@ -26874,7 +26891,7 @@ app.post(
 
       }
 
-      if (!ca_tally_company) {
+      if (!tally_company) {
 
         return res.json({
 
@@ -26887,6 +26904,28 @@ app.post(
 
       }
 
+      // =========================
+      // BUILD UPDATE OBJECT
+      // =========================
+
+      const updateObj = {};
+
+      if (is_ca) {
+
+        updateObj.ca_tally_company =
+          tally_company;
+
+      } else {
+
+        updateObj.client_tally_company =
+          tally_company;
+
+      }
+
+      // =========================
+      // UPDATE COMPANY
+      // =========================
+
       const {
 
         data,
@@ -26897,11 +26936,7 @@ app.post(
 
         .from("company")
 
-        .update({
-
-          ca_tally_company
-
-        })
+        .update(updateObj)
 
         .eq(
 
@@ -26955,13 +26990,12 @@ app.post(
 
 );
 
-
 // =========================
 // GET TALLY COMPANIES
 // =========================
 
 app.get(
-  "/getTallyCompanies",
+  "/getTallyCompaniesdebug",
   async (req, res) => {
 
     try {
@@ -27670,6 +27704,1413 @@ creditPeriod: invoice.credit_period,
   }
 
 });
+
+// =========================
+// GET BILLEY MAPPING DATA
+// =========================
+
+app.get(
+  "/getBilleyMappingData",
+  async (req, res) => {
+
+    try {
+
+       // =========================
+      // VALIDATION
+      // =========================
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+// GET PENDING INVOICE IDS
+// =========================
+
+const {
+
+  data: pendingInvoices,
+
+  error: pendingError
+
+} = await supabase
+
+  .from("invoices")
+
+  .select("invoice_id")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "tally_exported",
+    false
+  );
+
+if (pendingError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      pendingError.message
+
+  });
+
+}
+
+const invoice_ids =
+
+  (pendingInvoices || [])
+
+    .map(
+
+      (r) => r.invoice_id
+
+    );
+
+console.log(
+
+  "PENDING INVOICE IDS",
+
+  invoice_ids
+
+);
+
+if (
+
+  invoice_ids.length === 0
+
+) {
+
+  return res.json({
+
+    success: true,
+
+    data: {
+
+      saleGL: [],
+
+      taxGL: [],
+
+      stock: [],
+
+      hsn: [],
+
+      debtors: []
+
+    }
+
+  });
+
+}
+
+
+
+      // =========================
+      // GET GST RATES
+      // =========================
+
+      const {
+
+        data: gstRows,
+
+        error: gstError
+
+      } = await supabase
+
+        .from("invoice_items")
+
+        .select("gst_percent")
+
+        .in(
+
+  "invoice_id",
+
+  invoice_ids
+
+);
+
+      if (gstError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            gstError.message
+
+        });
+
+      }
+
+      const gstRates = [
+
+        ...new Set(
+
+          (gstRows || [])
+
+            .map((r) =>
+
+              Number(
+                r.gst_percent
+              )
+
+            )
+
+            .filter((r) => r > 0)
+
+        )
+
+      ].sort((a, b) => a - b);
+
+      console.log(
+        "GST Rates:",
+        gstRates
+      );
+
+  // =========================
+  // BUILD SALE GL
+  // =========================
+
+      const saleGL = [];
+
+      gstRates.forEach((gstRate) => {
+
+        // Intra State + Normal
+
+        saleGL.push({
+
+          mapping_type: "SALE_GL",
+
+          billey_key:
+            `SALE|INTRA|FALSE|${gstRate}`,
+
+          billey_name:
+            `Local Sale ${gstRate}%`
+
+        });
+
+        // Intra State + Bill To Ship To
+
+        saleGL.push({
+
+          mapping_type: "SALE_GL",
+
+          billey_key:
+            `SALE|INTRA|TRUE|${gstRate}`,
+
+          billey_name:
+            `IGST Sale ${gstRate}%`
+
+        });
+
+        // Inter State
+
+    
+
+        saleGL.push({
+
+          mapping_type: "SALE_GL",
+
+          billey_key:
+            `SALE|INTER|${gstRate}`,
+
+          billey_name:
+            `IGST Sale ${gstRate}%`
+
+        });
+
+      });
+
+      console.log(
+        "SALE GL",
+        saleGL
+      );
+
+      // =========================
+      // BUILD TAX GL
+      // =========================
+
+      const taxGL = [];
+
+      gstRates.forEach((gstRate) => {
+
+       const halfGST = Number((gstRate / 2).toFixed(2));
+
+        // CGST
+
+        taxGL.push({
+
+          mapping_type: "TAX_GL",
+
+          billey_key:
+            `TAX|CGST|${halfGST}`,
+
+          billey_name:
+            `CGST ${halfGST}%`
+
+        });
+
+        // SGST
+
+        taxGL.push({
+
+          mapping_type: "TAX_GL",
+
+          billey_key:
+            `TAX|SGST|${halfGST}`,
+
+          billey_name:
+            `SGST ${halfGST}%`
+
+        });
+
+        // IGST
+
+        taxGL.push({
+
+          mapping_type: "TAX_GL",
+
+          billey_key:
+            `TAX|IGST|${gstRate}`,
+
+          billey_name:
+            `IGST ${gstRate}%`
+
+        });
+
+      });
+ 
+      console.log(
+        "TAX GL",
+        taxGL
+      );
+
+      // =========================
+      // GET UNIQUE HSN
+      // =========================
+
+      const {
+
+        data: hsnRows,
+
+        error: hsnError
+
+      } = await supabase
+
+        .from("invoice_items")
+
+        .select("hsn")
+
+      .in(
+
+  "invoice_id",
+
+  invoice_ids
+
+);
+      if (hsnError) {
+
+        return res.json({
+
+          success: false,
+
+          error: hsnError.message
+
+        });
+
+      }
+
+      const hsnList = [
+
+        ...new Set(
+
+          (hsnRows || [])
+
+            .map(r => String(r.hsn || "").trim())
+
+            .filter(hsn => hsn)
+
+        )
+
+      ].sort();
+
+      console.log(
+        "HSN",
+        hsnList
+      );
+
+      // =========================
+      // BUILD STOCK MAPPING
+      // =========================
+
+      const stock = hsnList.map((hsn) => ({
+
+        mapping_type: "STOCK",
+
+        billey_key: hsn,
+
+        billey_name: hsn
+
+      }));
+
+      console.log(
+        "STOCK",
+        stock
+      );
+
+
+      // =========================
+      // BUILD HSN MAPPING
+      // =========================
+
+      const hsn = hsnList.map((hsnCode) => ({
+
+        mapping_type: "HSN",
+
+        billey_key: hsnCode,
+
+        billey_name: hsnCode
+
+      }));
+
+      console.log(
+        "HSN MAPPING",
+        hsn
+      );
+
+      // =========================
+      // GET DEBTORS
+      // =========================
+
+      const {
+
+        data: debtorRows,
+
+        error: debtorError
+
+      } = await supabase
+
+        .from("client")
+
+        .select(`
+          client_code,
+          client_name
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "client_name"
+        );
+
+      if (debtorError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            debtorError.message
+
+        });
+
+      }
+
+      console.log(
+        "DEBTORS",
+        debtorRows
+      );
+
+      // =========================
+      // BUILD DEBTOR MAPPING
+      // =========================
+
+      const debtors =
+
+        (debtorRows || []).map(
+
+          (row) => ({
+
+            mapping_type:
+              "DEBTOR",
+
+            billey_key:
+              row.client_code,
+
+            billey_name:
+              row.client_name
+
+          })
+
+        );
+
+      console.log(
+        "DEBTOR MAPPING",
+        debtors
+      );
+
+
+      // =========================
+      // GET EXISTING MAPPINGS
+      // =========================
+
+      const {
+
+        data: existingMappings,
+
+        error: mappingError
+
+      } = await supabase
+
+        .from("tally_mapping")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (mappingError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            mappingError.message
+
+        });
+
+      }
+
+      console.log(
+        "EXISTING MAPPINGS",
+        existingMappings
+      );
+
+   // =========================
+// APPLY SAVED MAPPING
+// =========================
+
+function applyMapping(rows) {
+
+  return rows.map((row) => {
+
+    const mapping =
+
+      existingMappings.find(
+
+        (m) =>
+
+          m.mapping_type ===
+            row.mapping_type &&
+
+          m.billey_key ===
+            row.billey_key
+
+      );
+
+    return {
+
+      ...row,
+
+      tally_name:
+        mapping?.tally_name || ""
+
+    };
+
+  });
+
+}
+
+const mappedSaleGL =
+  applyMapping(saleGL);
+
+const mappedTaxGL =
+  applyMapping(taxGL);
+
+const mappedStock =
+  applyMapping(stock);
+
+const mappedHSN =
+  applyMapping(hsn);
+
+const mappedDebtors =
+  applyMapping(debtors);
+
+      // =========================
+      // FINAL RESPONSE
+      // =========================
+
+     return res.json({
+
+  success: true,
+
+ data: {
+
+  saleGL: mappedSaleGL,
+
+  taxGL: mappedTaxGL,
+
+  stock: mappedStock,
+
+  hsn: mappedHSN,
+
+  debtors: mappedDebtors
+
+}
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
+// SAVE TALLY MAPPING
+// =========================
+
+app.post(
+
+  "/saveTallyMapping",
+
+  async (req, res) => {
+
+    try {
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      const {
+
+  company_code,
+
+  mappings
+
+} = req.body;
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error: "company_code missing"
+
+        });
+
+      }
+
+      if (
+
+        !Array.isArray(mappings)
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error: "mappings missing"
+
+        });
+
+      }
+
+
+    // =========================
+// SAVE / UPDATE MAPPINGS
+// =========================
+
+const {
+
+  error: saveError
+
+} = await supabase
+
+  .from("tally_mapping")
+
+  .upsert(
+
+    mappings.map((row) => ({
+
+    company_code,
+
+  mapping_type:
+    row.mapping_type,
+
+  billey_key:
+    row.billey_key,
+
+  billey_name:
+    row.billey_name,
+
+      tally_key:
+    row.tally_key || null,
+
+  tally_name:
+    row.tally_name,
+
+     updated_at: new Date()
+
+    })),
+
+    {
+
+      onConflict:
+        "company_code,mapping_type,billey_key"
+
+    }
+
+  );
+
+if (saveError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      saveError.message
+
+  });
+
+}
+
+return res.json({
+
+  success: true
+
+});
+
+   }   catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error: err.message
+
+      });
+
+    }
+
+  }
+  
+
+);
+
+// =========================
+// GET TALLY MAPPING DATA
+// =========================
+
+app.get(
+  "/getTallyMappingData",
+  async (req, res) => {
+
+    try {
+
+            // =========================
+      // VALIDATION
+      // =========================
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+       // =========================
+      // GET TALLY COMPANY
+      // =========================
+
+      const {
+
+        data: company,
+
+        error: companyError
+
+      } = await supabase
+
+        .from("company")
+
+      .select(`
+  company_code,
+  ca_tally_company,
+  client_tally_company,
+  auto_create_stock,
+  client_auto_create_stock
+`)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .single();
+
+      if (companyError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            companyError.message
+
+        });
+
+      }
+
+      console.log(
+        "COMPANY",
+        company
+      );
+
+      const is_ca =
+
+  String(
+
+    req.query.is_ca || "false"
+
+  ) === "true";
+
+const tallyCompany =
+
+  is_ca
+
+    ? company.ca_tally_company
+
+    : company.client_tally_company;
+
+    console.log(
+
+  "IS CA:",
+
+  is_ca
+
+);
+
+console.log(
+
+  "TALLY COMPANY:",
+
+  tallyCompany
+
+);
+
+      // =========================
+      // CHECK TALLY COMPANY
+      // =========================
+
+   if (
+
+  !tallyCompany ||
+
+  !tallyCompany.trim()
+
+) {
+
+  return res.json({
+
+    success: false,
+
+    error: "Tally company not configured"
+
+  });
+
+}
+
+          // =========================
+      // GET SALES LEDGERS
+      // =========================
+
+const ledgerData =
+  await getAllLedgers(
+
+    tallyCompany
+
+  );
+
+console.log(
+  "LEDGER DATA",
+  ledgerData
+);
+      // =========================
+      // GET TAX LEDGERS
+      // =========================
+
+      // Tally XML call
+
+      // GST Ledgers read
+
+      // =========================
+      // GET STOCK ITEMS
+      // =========================
+
+const stockJson =
+  await getStockItems(
+
+    tallyCompany
+
+  );
+
+const stockRaw =
+
+  stockJson
+    ?.ENVELOPE
+    ?.BODY
+    ?.DATA
+    ?.COLLECTION
+    ?.STOCKITEM;
+
+const stock =
+
+  Array.isArray(stockRaw)
+
+    ? stockRaw
+
+    : stockRaw
+
+      ? [stockRaw]
+
+      : [];
+
+console.log(
+  "TALLY STOCK",
+  stock
+);
+
+const stockList =
+
+  stock.map((item) => ({
+
+    name: item.NAME
+
+  }));
+
+console.log(
+  "STOCK LIST",
+  stockList
+);
+      // =========================
+      // GET HSN CODES
+      // =========================
+
+      // Stock Items se
+
+      // HSN Code extract
+
+      // =========================
+      // GET DEBTORS
+      // =========================
+
+      // Tally XML call
+
+      // Sundry Debtors
+
+      // =========================
+      // FINAL RESPONSE
+      // =========================
+
+
+     return res.json({
+
+  success: true,
+
+  data: {
+
+    salesGL:
+      ledgerData.salesGL,
+
+    taxGL:
+      ledgerData.taxGL,
+
+    stock:
+      stockList,
+
+    hsn: [],
+
+    debtors:
+      ledgerData.debtors
+
+  }
+
+});
+
+   //   return res.json({
+
+  //      success: true,
+
+  //      data: {
+
+   //       salesGL: [],
+
+   //       taxGL: [],
+
+    //      stock: [],
+
+   //       hsn: [],
+
+   //       debtors: []
+
+//}
+
+    //  });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
+// GET TALLY SETTINGS
+// =========================
+
+app.get(
+  "/getTallySettings",
+
+  async (req, res) => {
+
+    console.log(
+      "GET TALLY SETTINGS HIT",
+      req.query
+    );
+
+    try {
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      const is_ca =
+  String(
+    req.query.is_ca || ""
+  ).trim().toLowerCase() === "true";
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // GET COMPANY
+      // =========================
+
+      const {
+
+        data: company,
+
+        error: companyError
+
+      } = await supabase
+
+        .from("company")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .single();
+
+      if (companyError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            companyError.message
+
+        });
+
+      }
+
+      console.log(
+        "COMPANY",
+        company
+      );
+
+      // =========================
+      // BUILD RESPONSE
+      // =========================
+
+    const settings =
+
+!is_ca
+
+? {
+
+    tally_company:
+      company.client_tally_company,
+
+    tally_mapping_completed:
+      company.client_tally_mapping_completed,
+
+    stock_mapping_method:
+      company.client_stock_mapping_method,
+
+    sales_ledger_strategy:
+      company.client_sales_ledger_strategy,
+
+    auto_create_debtor:
+      company.client_auto_create_debtor,
+
+    auto_create_stock:
+      company.client_auto_create_stock,
+
+    auto_create_hsn:
+      company.client_auto_create_hsn,
+
+    auto_create_sales_ledger:
+      company.client_auto_create_sales_ledger,
+
+    auto_create_tax_ledger:
+      company.client_auto_create_tax_ledger
+
+  }
+
+: {
+
+    tally_company:
+      company.ca_tally_company,
+
+    tally_mapping_completed:
+      company.tally_mapping_completed,
+
+    stock_mapping_method:
+      company.stock_mapping_method,
+
+    sales_ledger_strategy:
+      company.sales_ledger_strategy,
+
+    auto_create_debtor:
+      company.auto_create_debtor,
+
+    auto_create_stock:
+      company.auto_create_stock,
+
+    auto_create_hsn:
+      company.auto_create_hsn,
+
+    auto_create_sales_ledger:
+      company.auto_create_sales_ledger,
+
+    auto_create_tax_ledger:
+      company.auto_create_tax_ledger
+
+  };
+
+      console.log(
+        "TALLY SETTINGS",
+        settings
+      );
+
+      return res.json({
+
+        success: true,
+
+        data: settings
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
+// SAVE TALLY SETTINGS
+// =========================
+app.post(
+  "/saveTallySettings",
+
+  async (req, res) => {
+
+    try {
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      const {
+
+        company_code,
+
+        stock_mapping_method,
+
+        sales_ledger_strategy,
+
+        auto_create_debtor,
+
+        auto_create_stock,
+
+        auto_create_hsn,
+
+        auto_create_sales_ledger,
+
+        auto_create_tax_ledger
+
+      } = req.body || {};
+
+      const is_ca =
+        String(
+          req.body.is_ca || ""
+        )
+          .trim()
+          .toLowerCase() === "true";
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // BUILD UPDATE OBJECT
+      // =========================
+
+      const updateObj = {
+
+        updatedat: new Date()
+
+      };
+
+      if (!is_ca) {
+
+        updateObj.client_stock_mapping_method =
+          stock_mapping_method;
+
+        updateObj.client_sales_ledger_strategy =
+          sales_ledger_strategy;
+
+        updateObj.client_auto_create_debtor =
+          auto_create_debtor;
+
+        updateObj.client_auto_create_stock =
+          auto_create_stock;
+
+        updateObj.client_auto_create_hsn =
+          auto_create_hsn;
+
+        updateObj.client_auto_create_sales_ledger =
+          auto_create_sales_ledger;
+
+        updateObj.client_auto_create_tax_ledger =
+          auto_create_tax_ledger;
+
+        updateObj.client_tally_mapping_completed =
+          true;
+
+      } else {
+
+        updateObj.stock_mapping_method =
+          stock_mapping_method;
+
+        updateObj.sales_ledger_strategy =
+          sales_ledger_strategy;
+
+        updateObj.auto_create_debtor =
+          auto_create_debtor;
+
+        updateObj.auto_create_stock =
+          auto_create_stock;
+
+        updateObj.auto_create_hsn =
+          auto_create_hsn;
+
+        updateObj.auto_create_sales_ledger =
+          auto_create_sales_ledger;
+
+        updateObj.auto_create_tax_ledger =
+          auto_create_tax_ledger;
+
+        updateObj.tally_mapping_completed =
+          true;
+
+      }
+
+      console.log("IS CA:", is_ca);
+      console.log("COMPANY:", company_code);
+      console.log("UPDATE OBJECT:", updateObj);
+
+      // =========================
+      // UPDATE COMPANY
+      // =========================
+
+      const {
+
+        error: updateError
+
+      } = await supabase
+
+        .from("company")
+
+        .update(updateObj)
+
+        .eq(
+
+          "company_code",
+
+          company_code
+
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      console.log(
+        "TALLY SETTINGS SAVED"
+      );
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Tally settings saved successfully."
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.error(err);
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+
 
 app.listen(
   process.env.PORT,

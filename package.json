@@ -19,6 +19,7 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
+    "fast-xml-parser": "^5.9.3",
     "nodemailer": "^8.0.9",
     "resend": "^6.12.4"
   },
