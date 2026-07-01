@@ -28986,6 +28986,15 @@ app.get(
     auto_create_unit:
   company.client_auto_create_unit,
 
+  voucher_number_mode:
+  company.client_voucher_number_mode,
+
+voucher_prefix:
+  company.client_voucher_prefix,
+
+voucher_digits:
+  company.client_voucher_digits,
+
   }
 
 : {
@@ -29019,6 +29028,17 @@ app.get(
 
     auto_create_unit:
       company.auto_create_unit,
+
+      voucher_number_mode:
+  company.voucher_number_mode,
+
+voucher_prefix:
+  company.voucher_prefix,
+
+voucher_digits:
+  company.voucher_digits,
+      
+      
 
   };
 
@@ -29087,6 +29107,12 @@ app.post(
 
         auto_create_unit,
 
+        voucher_number_mode,
+
+        voucher_prefix,
+
+        voucher_digits,
+
       } = req.body || {};
 
       const is_ca =
@@ -29145,6 +29171,15 @@ app.post(
         updateObj.client_tally_mapping_completed =
           true;
 
+          updateObj.client_voucher_number_mode =
+            voucher_number_mode;
+
+          updateObj.client_voucher_prefix =
+            voucher_prefix;
+
+          updateObj.client_voucher_digits =
+            voucher_digits;
+
       } else {
 
         updateObj.stock_mapping_method =
@@ -29170,6 +29205,15 @@ app.post(
 
         updateObj.tally_mapping_completed =
           true;
+
+          updateObj.voucher_number_mode =
+            voucher_number_mode;
+
+          updateObj.voucher_prefix =
+            voucher_prefix;
+
+          updateObj.voucher_digits =
+            voucher_digits;
 
       }
 
