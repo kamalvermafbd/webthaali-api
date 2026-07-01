@@ -27830,23 +27830,32 @@ if (
       // GET GST RATES
       // =========================
 
-      const {
+      // =========================
+// GET GST DETAILS
+// =========================
 
-        data: gstRows,
+const {
 
-        error: gstError
+  data: gstRows,
 
-      } = await supabase
+  error: gstError
 
-        .from("invoice_items")
+} = await supabase
 
-        .select("gst_percent")
+  .from("invoice_items")
 
-        .in(
+  .select(`
+    gst_percent,
+    cgst,
+    sgst,
+    igst
+  `)
 
-  "invoice_id",
+  .in(
 
-  invoice_ids
+    "invoice_id",
+
+    invoice_ids
 
 );
 
@@ -27863,148 +27872,121 @@ if (
 
       }
 
-      const gstRates = [
+      
 
-        ...new Set(
+ // =========================
+// BUILD SALE GL
+// =========================
 
-          (gstRows || [])
+const saleMap = new Map();
 
-            .map((r) =>
+(gstRows || []).forEach((row) => {
 
-              Number(
-                r.gst_percent
-              )
+  const gstRate = Number(row.gst_percent);
 
-            )
-
-            .filter((r) => r > 0)
-
-        )
-
-      ].sort((a, b) => a - b);
-
-      console.log(
-        "GST Rates:",
-        gstRates
-      );
+  if (!gstRate) return;
 
   // =========================
-  // BUILD SALE GL
+  // INTER STATE (IGST)
   // =========================
 
-      const saleGL = [];
+  if (Number(row.igst) > 0) {
 
-      gstRates.forEach((gstRate) => {
+    saleMap.set(
+      `SALE|INTER|${gstRate}`,
+      {
+        mapping_type: "SALE_GL",
+        billey_key: `SALE|INTER|${gstRate}`,
+        billey_name: `IGST Sale ${gstRate}%`
+      }
+    );
 
-        // Intra State + Normal
+  }
 
-        saleGL.push({
+  // =========================
+  // INTRA STATE (CGST + SGST)
+  // =========================
 
-          mapping_type: "SALE_GL",
+  else if (
+    Number(row.cgst) > 0 ||
+    Number(row.sgst) > 0
+  ) {
 
-          billey_key:
-            `SALE|INTRA|FALSE|${gstRate}`,
+    saleMap.set(
+      `SALE|INTRA|${gstRate}`,
+      {
+        mapping_type: "SALE_GL",
+        billey_key: `SALE|INTRA|${gstRate}`,
+        billey_name: `Local Sale ${gstRate}%`
+      }
+    );
 
-          billey_name:
-            `Local Sale ${gstRate}%`
+  }
 
-        });
+});
 
-        // Intra State + Bill To Ship To
+const saleGL = [...saleMap.values()];
 
-        saleGL.push({
-
-          mapping_type: "SALE_GL",
-
-          billey_key:
-            `SALE|INTRA|TRUE|${gstRate}`,
-
-          billey_name:
-            `IGST Sale ${gstRate}%`
-
-        });
-
-        // Inter State
-
-    
-
-        saleGL.push({
-
-          mapping_type: "SALE_GL",
-
-          billey_key:
-            `SALE|INTER|${gstRate}`,
-
-          billey_name:
-            `IGST Sale ${gstRate}%`
-
-        });
-
-      });
-
-      console.log(
-        "SALE GL",
-        saleGL
-      );
-
+console.log(
+  "SALE GL",
+  saleGL
+);
       // =========================
       // BUILD TAX GL
       // =========================
 
-      const taxGL = [];
+      // =========================
+// BUILD TAX GL
+// =========================
 
-      gstRates.forEach((gstRate) => {
+const taxMap = new Map();
 
-       const halfGST = Number((gstRate / 2).toFixed(2));
+(gstRows || []).forEach((row) => {
 
-        // CGST
+  const gstRate = Number(row.gst_percent);
 
-        taxGL.push({
+  if (!gstRate) return;
 
-          mapping_type: "TAX_GL",
+  const halfGST = Number((gstRate / 2).toFixed(2));
 
-          billey_key:
-            `TAX|CGST|${halfGST}`,
+  if (Number(row.cgst) > 0) {
+    taxMap.set(
+      `TAX|CGST|${halfGST}`,
+      {
+        mapping_type: "TAX_GL",
+        billey_key: `TAX|CGST|${halfGST}`,
+        billey_name: `CGST ${halfGST}%`
+      }
+    );
+  }
 
-          billey_name:
-            `CGST ${halfGST}%`
+  if (Number(row.sgst) > 0) {
+    taxMap.set(
+      `TAX|SGST|${halfGST}`,
+      {
+        mapping_type: "TAX_GL",
+        billey_key: `TAX|SGST|${halfGST}`,
+        billey_name: `SGST ${halfGST}%`
+      }
+    );
+  }
 
-        });
+  if (Number(row.igst) > 0) {
+    taxMap.set(
+      `TAX|IGST|${gstRate}`,
+      {
+        mapping_type: "TAX_GL",
+        billey_key: `TAX|IGST|${gstRate}`,
+        billey_name: `IGST ${gstRate}%`
+      }
+    );
+  }
 
-        // SGST
+});
 
-        taxGL.push({
+const taxGL = [...taxMap.values()];
 
-          mapping_type: "TAX_GL",
-
-          billey_key:
-            `TAX|SGST|${halfGST}`,
-
-          billey_name:
-            `SGST ${halfGST}%`
-
-        });
-
-        // IGST
-
-        taxGL.push({
-
-          mapping_type: "TAX_GL",
-
-          billey_key:
-            `TAX|IGST|${gstRate}`,
-
-          billey_name:
-            `IGST ${gstRate}%`
-
-        });
-
-      });
- 
-      console.log(
-        "TAX GL",
-        taxGL
-      );
+console.log("TAX GL", taxGL);
 
       // =========================
       // GET UNIQUE HSN
@@ -28024,11 +28006,11 @@ if (
 
       .in(
 
-  "invoice_id",
+          "invoice_id",
 
-  invoice_ids
+          invoice_ids
 
-);
+        );
       if (hsnError) {
 
         return res.json({
@@ -28361,7 +28343,7 @@ const mappedDebtors =
 
  data: {
 
-  saleGL: mappedSaleGL,
+  salesGL: mappedSaleGL,
 
   taxGL: mappedTaxGL,
 
