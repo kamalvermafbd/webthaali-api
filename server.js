@@ -19,7 +19,7 @@ const {
    sendToTally,
   createUnit,
   createStockItem,
-
+ createSalesLedger,
   createLedger,
 
   createSale,
@@ -30035,6 +30035,122 @@ app.get(
         success: false,
 
         error: err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+// =========================
+// CREATE SALES LEDGERS IN TALLY
+// =========================
+
+app.post(
+  "/createSalesLedgersInTally",
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company,
+
+        ledgers
+
+      } = req.body;
+
+      if (
+        !company ||
+        !Array.isArray(ledgers)
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Invalid request"
+
+        });
+
+      }
+
+      const results = [];
+
+      for (const ledger of ledgers) {
+
+        try {
+console.log("LEDGER FROM FRONTEND", ledger);
+
+console.log(
+  "LEDGER NAME:",
+  ledger.ledgerName
+);
+
+          const result =
+  await createSalesLedger({
+
+    company,
+
+    ledgerName:
+      ledger.ledgerName,
+
+  });
+
+        results.push({
+
+  ledger:
+    ledger.ledgerName,
+
+  success: true,
+
+  result
+
+});
+
+        }
+
+        catch (err) {
+
+         results.push({
+
+  ledger:
+    ledger.ledgerName,
+
+  success: false,
+
+  error:
+    err.message
+
+});
+
+        }
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        results
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.error(err);
+
+      return res.status(500).json({
+
+        success: false,
+
+        error:
+          err.message
 
       });
 

@@ -1,3 +1,45 @@
+
+========== XML SENT ==========
+
+
+<ENVELOPE>
+
+  <HEADER>
+
+    <VERSION>1</VERSION>
+
+    <TALLYREQUEST>Export</TALLYREQUEST>
+
+    <TYPE>Data</TYPE>
+
+    <ID>List of Accounts</ID>
+
+  </HEADER>
+
+  <BODY>
+
+    <DESC>
+
+      <STATICVARIABLES>
+
+        <SVCURRENTCOMPANY>Webthaali</SVCURRENTCOMPANY>
+
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+
+        <ACCOUNTTYPE>Units</ACCOUNTTYPE>
+
+      </STATICVARIABLES>
+
+    </DESC>
+
+  </BODY>
+
+</ENVELOPE>
+
+
+
+========== TALLY RESPONSE ==========
+
 <ENVELOPE>
  <HEADER>
   <VERSION>1</VERSION>
@@ -250,3 +292,4 @@
   </DATA>
  </BODY>
 </ENVELOPE>
+

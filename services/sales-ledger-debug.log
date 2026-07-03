@@ -1,0 +1,65 @@
+========== XML ==========
+
+
+
+<ENVELOPE>
+
+  <HEADER>
+    <TALLYREQUEST>Import Data</TALLYREQUEST>
+  </HEADER>
+
+  <BODY>
+
+    <IMPORTDATA>
+
+      <REQUESTDESC>
+
+        <REPORTNAME>All Masters</REPORTNAME>
+
+        <STATICVARIABLES>
+
+          <SVCURRENTCOMPANY>Webthaali</SVCURRENTCOMPANY>
+
+        </STATICVARIABLES>
+
+      </REQUESTDESC>
+
+      <REQUESTDATA>
+
+        <TALLYMESSAGE xmlns:UDF="TallyUDF">
+
+          <LEDGER NAME="Local Sale 13%" ACTION="Create">
+
+            <NAME>Local Sale 13%</NAME>
+
+            <PARENT>Sales Accounts</PARENT>
+
+          </LEDGER>
+
+        </TALLYMESSAGE>
+
+      </REQUESTDATA>
+
+    </IMPORTDATA>
+
+  </BODY>
+
+</ENVELOPE>
+
+
+
+========== RESPONSE ==========
+
+<RESPONSE>
+ <CREATED>1</CREATED>
+ <ALTERED>0</ALTERED>
+ <DELETED>0</DELETED>
+ <LASTVCHID>0</LASTVCHID>
+ <LASTMID>0</LASTMID>
+ <COMBINED>0</COMBINED>
+ <IGNORED>0</IGNORED>
+ <ERRORS>0</ERRORS>
+ <CANCELLED>0</CANCELLED>
+ <EXCEPTIONS>0</EXCEPTIONS>
+</RESPONSE>
+

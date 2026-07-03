@@ -9,6 +9,14 @@ const {
 );
 
 const fs = require("fs");
+
+const path = require("path");
+
+const DEBUG_FILE = path.join(
+  __dirname,
+  "tally-debug.log"
+);
+
 const ledgerTemplate =
   require("./ledger-template");
 
@@ -17,6 +25,9 @@ const saleTemplate =
 
 const stockTemplate =
   require("./stock-template");
+
+  const salesLedgerTemplate =
+require("./sales-ledger-template");
 
 const TALLY_URL = "http://localhost:9000";
 
@@ -53,12 +64,16 @@ async function sendToTally(xml) {
 
   try {
 
- console.log("ENTER sendToTally");
+    // Har API call pe purani log clear
+    fs.writeFileSync(DEBUG_FILE, "");
 
-    console.log("===== XML SENT TO TALLY =====");
-    console.log(xml);
-
-    console.log("BEFORE AXIOS");
+    // XML save
+    fs.appendFileSync(
+      DEBUG_FILE,
+      "\n========== XML SENT ==========\n\n" +
+      xml +
+      "\n\n"
+    );
 
     const response = await axios.post(
       TALLY_URL,
@@ -70,41 +85,23 @@ async function sendToTally(xml) {
       }
     );
 
-  console.log("AFTER AXIOS");
-
-console.log(response.data);
-
-// 👇 YAHAN ADD KARO
-fs.writeFileSync(
-  "tally-response.xml",
-  response.data
-);
-
-console.log("Response saved to tally-response.xml");
-
-if (response.data.includes("<LINEERROR>")) {
-
-  console.log("===== LINE ERROR =====");
-
-  const errors =
-    response.data.match(
-      /<LINEERROR>(.*?)<\/LINEERROR>/gs
+    // Tally response save
+    fs.appendFileSync(
+      DEBUG_FILE,
+      "\n========== TALLY RESPONSE ==========\n\n" +
+      response.data +
+      "\n"
     );
 
-  console.log(errors);
-
-}
-
-return response.data;
-
-
-
+    return response.data;
 
   } catch (err) {
 
-    console.error(
-      "Tally Error:",
-      err.response?.data || err.message
+    fs.appendFileSync(
+      DEBUG_FILE,
+      "\n========== ERROR ==========\n\n" +
+      (err.response?.data || err.message) +
+      "\n"
     );
 
     throw err;
@@ -141,8 +138,7 @@ async function getTallyCompanies() {
 
  const result = await sendToTally(xml);
 
- console.log("RAW TALLY RESPONSE:");
-console.log(result);
+
 
 // Company names extract
 const companies = [];
@@ -159,10 +155,7 @@ while ((match = regex.exec(result)) !== null) {
 
 }
 
-console.log(
-  "EXTRACTED COMPANIES:",
-  companies
-);
+
 
 return {
   success: true,
@@ -470,16 +463,6 @@ async function getStockItems(
 const json =
   parser.parse(result);
 
-console.log(
-  "STOCK JSON"
-);
-
-console.dir(
-  json,
-  {
-    depth: null
-  }
-);
 
 return json;
 
@@ -566,6 +549,65 @@ async function createStockItem({
 
 }
 
+async function createSalesLedger({
+
+  company,
+
+  ledgerName,
+
+}) {
+
+  const xml = salesLedgerTemplate({
+
+    company,
+
+    ledgerName,
+
+  });
+
+  // =========================
+  // DEBUG XML
+  // =========================
+
+  fs.writeFileSync(
+
+    path.join(
+      __dirname,
+      "sales-ledger-debug.log"
+    ),
+
+    "========== XML ==========\n\n" +
+
+    xml +
+
+    "\n\n"
+
+  );
+
+  const result = await sendToTally(xml);
+
+  // =========================
+  // DEBUG RESPONSE
+  // =========================
+
+  fs.appendFileSync(
+
+    path.join(
+      __dirname,
+      "sales-ledger-debug.log"
+    ),
+
+    "========== RESPONSE ==========\n\n" +
+
+    result +
+
+    "\n"
+
+  );
+
+  return result;
+
+}
 
 // =========================
 // CREATE UNIT XML
@@ -893,6 +935,7 @@ creditPeriod,
   return await sendToTally(xml);
 
 }
+
 module.exports = {
 
   sendToTally,
@@ -900,6 +943,8 @@ module.exports = {
   createUnit,
 
   createStockItem,
+
+    createSalesLedger,
 
   createLedger,
 
@@ -912,6 +957,8 @@ module.exports = {
   getAllLedgers,
 
   getStockItems,
+
+  
 
   getUnits,
 
