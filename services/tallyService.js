@@ -15,6 +15,9 @@ const ledgerTemplate =
 const saleTemplate =
   require("./sale-template");
 
+const stockTemplate =
+  require("./stock-template");
+
 const TALLY_URL = "http://localhost:9000";
 
 const parser =
@@ -529,6 +532,137 @@ async function getUnits(company) {
   return json;
 }
 
+
+
+async function createStockItem({
+
+  company,
+
+  stockName,
+
+  unit,
+
+  hsn,
+
+  gstRate
+
+}) {
+
+  const xml = stockTemplate({
+
+    company,
+
+    stockName,
+
+    unit,
+
+    hsn,
+
+    gstRate
+
+  });
+
+  return await sendToTally(xml);
+
+}
+
+
+// =========================
+// CREATE UNIT XML
+// =========================
+
+function createUnit({
+
+  company,
+
+  unitName,
+
+  uqcCode,
+
+}) {
+
+  console.log(
+    "CREATE UNIT PARAMS",
+    {
+      company,
+      unitName,
+      uqcCode,
+    }
+  );
+
+  return `
+
+<ENVELOPE>
+
+<HEADER>
+
+<TALLYREQUEST>Import Data</TALLYREQUEST>
+
+</HEADER>
+
+<BODY>
+
+<IMPORTDATA>
+
+<REQUESTDESC>
+
+<REPORTNAME>All Masters</REPORTNAME>
+
+<STATICVARIABLES>
+
+<SVCURRENTCOMPANY>${company}</SVCURRENTCOMPANY>
+<SVIMPORTMODE>Alter</SVIMPORTMODE>
+
+
+</STATICVARIABLES>
+
+</REQUESTDESC>
+
+<REQUESTDATA>
+
+<TALLYMESSAGE xmlns:UDF="TallyUDF">
+
+<UNIT NAME="${unitName}" RESERVEDNAME="">
+
+<NAME>${unitName}</NAME>
+
+
+<ISUPDATINGTARGETID>No</ISUPDATINGTARGETID>
+
+<ISDELETED>No</ISDELETED>
+
+<ISSECURITYONWHENENTERED>No</ISSECURITYONWHENENTERED>
+
+<ASORIGINAL>Yes</ASORIGINAL>
+
+<ISGSTEXCLUDED>No</ISGSTEXCLUDED>
+
+<ISSIMPLEUNIT>Yes</ISSIMPLEUNIT>
+
+<REPORTINGUQCDETAILS.LIST>
+
+<APPLICABLEFROM>20260401</APPLICABLEFROM>
+
+<REPORTINGUQCNAME>${uqcCode}</REPORTINGUQCNAME>
+
+</REPORTINGUQCDETAILS.LIST>
+
+</UNIT>
+
+</TALLYMESSAGE>
+
+</REQUESTDATA>
+
+</IMPORTDATA>
+
+</BODY>
+
+</ENVELOPE>
+
+`;
+
+}
+
 async function createLedger({
     company,
 
@@ -762,6 +896,10 @@ creditPeriod,
 module.exports = {
 
   sendToTally,
+
+  createUnit,
+
+  createStockItem,
 
   createLedger,
 
