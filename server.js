@@ -5,6 +5,9 @@ const cors = require("cors");
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 
+const fs = require("fs");
+const path = require("path");
+
 const nodemailer =
   require("nodemailer");
 
@@ -12,7 +15,6 @@ const nodemailer =
   require("express-rate-limit");
 
  const { Resend } = require("resend");
-
 
 const {
 
@@ -27409,73 +27411,31 @@ app.post(
 
    try {
 
-  const {
-  company_code,
-  is_ca,
+const {
+  company,
   units
 } = req.body;
 
-console.log("REQ BODY =", req.body);
-
-console.log("UNITS =", units);
-
-  if (!company_code) {
-
-        return res.json({
-
-          success: false,
-
-          error: "company_code required"
-
-        });
-
-      }
-
-// =========================
-// GET COMPANY
-// =========================
-
-const {
-
-  data: company,
-
-  error: companyError
-
-} = await supabase
-
-  .from("company")
-
- .select(`
-  company_code,
-  ca_tally_company,
-  client_tally_company
-`)
-
-  .eq(
-    "company_code",
-    company_code
-  )
-
-  .single();
-
-if (
-
-  companyError ||
-
-  !company
-
-) {
+if (!company || !Array.isArray(units)) {
 
   return res.json({
 
     success: false,
 
-    error: "Company not found."
+    error: "Invalid request",
 
   });
 
 }
 
+console.log("REQ BODY =", req.body);
+
+console.log("UNITS =", units);
+ 
+
+// =========================
+// GET COMPANY
+// =========================
 // =========================
 // UNITS FROM PAYLOAD
 // =========================
@@ -27497,29 +27457,28 @@ console.log(
   units
 );
 
-const tallyCompany =
 
-  is_ca
+// =========================
+// CLEAR UNIT DEBUG LOG
+// =========================
 
-    ? company.ca_tally_company
+fs.writeFileSync(
 
-    : company.client_tally_company;
+  path.join(
+    __dirname,
+    "unit-debug.log"
+  ),
 
-if (!tallyCompany) {
+  ""
 
-  return res.json({
+);
 
-    success: false,
-
-    error: "Tally company not configured."
-
-  });
-
-}
 
 // =========================
 // CREATE UNITS IN TALLY
 // =========================
+
+const results = [];
 
 for (const row of units) {
 
@@ -27538,23 +27497,9 @@ for (const row of units) {
   company
 );
 
-
-
-console.log(
-  "TALLY COMPANY",
-  tallyCompany
-);
-
-    console.log("IS CA :", is_ca);
-
-
-
-
   const xml = createUnit({
-
-    company:
-
-  tallyCompany,
+company:
+  company,
 
   unitName:
   row.unitName,
@@ -27564,18 +27509,47 @@ console.log(
 
   });
 
-  console.log(
+  // =========================
+// SAVE UNIT XML
+// =========================
 
-    "UNIT XML",
+fs.appendFileSync(
 
-    xml
+  path.join(
+    __dirname,
+    "unit-debug.log"
+  ),
 
-  );
+  "========== XML ==========\n\n" +
+
+  xml +
+
+  "\n\n"
+
+);
 
   const response =
 
     await sendToTally(xml);
 
+  // =========================
+// SAVE UNIT RESPONSE
+// =========================
+
+fs.appendFileSync(
+
+  path.join(
+    __dirname,
+    "unit-debug.log"
+  ),
+
+  "========== RESPONSE ==========\n\n" +
+
+  response +
+
+  "\n\n"
+
+);
 
     if (response.includes("<LINEERROR>")) {
 
@@ -27601,26 +27575,35 @@ console.log(
 
 );
 
+results.push(response);
+
 }
-      return res.json({
+     return res.json({
+
   success: true,
-  message: "Units created successfully.",
-  created: units.length
+
+  results,
+
 });
  
     }
 
     catch (err) {
 
-      return res.json({
+  console.error(
+    "CREATE UNIT ERROR",
+    err
+  );
 
-        success: false,
+  return res.json({
 
-        error: err.message
+    success: false,
 
-      });
+    error: err.message
 
-    }
+  });
+
+}
 
   }
 
@@ -29904,6 +29887,10 @@ app.post(
 
       const results = [];
 
+      console.log("CREATE STOCK API BODY");
+
+    console.dir(req.body, { depth: null });
+
       for (const stock of stocks) {
 
         console.log("CREATING STOCK", {
@@ -29919,6 +29906,18 @@ app.post(
   gstRate: stock.gstRate,
 
 });
+
+if (!company || !Array.isArray(stocks)) {
+
+  return res.json({
+
+    success: false,
+
+    error: "Invalid request",
+
+  });
+
+}
 
         const result =
           await createStockItem({
@@ -29938,6 +29937,12 @@ app.post(
               stock.gstRate,
 
           });
+
+          console.log(
+  "createStockItem RESULT",
+  result
+);
+
 
         results.push(result);
 

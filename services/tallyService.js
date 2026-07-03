@@ -516,7 +516,6 @@ async function getUnits(company) {
 }
 
 
-
 async function createStockItem({
 
   company,
@@ -545,10 +544,50 @@ async function createStockItem({
 
   });
 
-  return await sendToTally(xml);
+  // =========================
+  // DEBUG XML
+  // =========================
+
+  fs.writeFileSync(
+
+    path.join(
+      __dirname,
+      "stock-debug.log"
+    ),
+
+    "========== XML ==========\n\n" +
+
+    xml +
+
+    "\n\n"
+
+  );
+
+  const result =
+    await sendToTally(xml);
+
+  // =========================
+  // DEBUG RESPONSE
+  // =========================
+
+  fs.appendFileSync(
+
+    path.join(
+      __dirname,
+      "stock-debug.log"
+    ),
+
+    "========== RESPONSE ==========\n\n" +
+
+    result +
+
+    "\n"
+
+  );
+
+  return result;
 
 }
-
 async function createSalesLedger({
 
   company,

@@ -1,0 +1,154 @@
+========== XML ==========
+
+
+
+<ENVELOPE>
+
+  <HEADER>
+    <TALLYREQUEST>Import Data</TALLYREQUEST>
+  </HEADER>
+
+  <BODY>
+
+    <IMPORTDATA>
+
+      <REQUESTDESC>
+
+        <REPORTNAME>All Masters</REPORTNAME>
+
+        <STATICVARIABLES>
+
+          <SVCURRENTCOMPANY>Ajay Enterprises</SVCURRENTCOMPANY>
+
+        </STATICVARIABLES>
+
+      </REQUESTDESC>
+
+      <REQUESTDATA>
+
+        <TALLYMESSAGE xmlns:UDF="TallyUDF">
+
+          <STOCKITEM NAME="8482" ACTION="Create">
+
+            <NAME>8482</NAME>
+
+            <PARENT></PARENT>
+
+            <CATEGORY>&#4; Not Applicable</CATEGORY>
+
+            <GSTAPPLICABLE>&#4; Applicable</GSTAPPLICABLE>
+
+            <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>
+
+            <BASEUNITS>Tin</BASEUNITS>
+
+            <VATBASEUNIT>Tin</VATBASEUNIT>
+
+            <GSTDETAILS.LIST>
+
+              <APPLICABLEFROM>20260401</APPLICABLEFROM>
+
+              <TAXABILITY>Taxable</TAXABILITY>
+
+              <SRCOFGSTDETAILS>
+                Specify Details Here
+              </SRCOFGSTDETAILS>
+
+              <STATEWISEDETAILS.LIST>
+
+                <STATENAME>&#4; Any</STATENAME>
+
+                <RATEDETAILS.LIST>
+
+                  <GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>
+
+                  <GSTRATEVALUATIONTYPE>
+                    Based on Value
+                  </GSTRATEVALUATIONTYPE>
+
+                  <GSTRATE>14</GSTRATE>
+
+                </RATEDETAILS.LIST>
+
+                <RATEDETAILS.LIST>
+
+                  <GSTRATEDUTYHEAD>
+                    SGST/UTGST
+                  </GSTRATEDUTYHEAD>
+
+                  <GSTRATEVALUATIONTYPE>
+                    Based on Value
+                  </GSTRATEVALUATIONTYPE>
+
+                  <GSTRATE>14</GSTRATE>
+
+                </RATEDETAILS.LIST>
+
+                <RATEDETAILS.LIST>
+
+                  <GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>
+
+                  <GSTRATEVALUATIONTYPE>
+                    Based on Value
+                  </GSTRATEVALUATIONTYPE>
+
+                  <GSTRATE>28</GSTRATE>
+
+                </RATEDETAILS.LIST>
+
+              </STATEWISEDETAILS.LIST>
+
+            </GSTDETAILS.LIST>
+
+            <HSNDETAILS.LIST>
+
+              <APPLICABLEFROM>20260401</APPLICABLEFROM>
+
+              <HSNCODE>8482</HSNCODE>
+
+              <SRCOFHSNDETAILS>
+                Specify Details Here
+              </SRCOFHSNDETAILS>
+
+            </HSNDETAILS.LIST>
+
+            <LANGUAGENAME.LIST>
+
+              <NAME.LIST TYPE="String">
+
+                <NAME>8482</NAME>
+
+              </NAME.LIST>
+
+            </LANGUAGENAME.LIST>
+
+          </STOCKITEM>
+
+        </TALLYMESSAGE>
+
+      </REQUESTDATA>
+
+    </IMPORTDATA>
+
+  </BODY>
+
+</ENVELOPE>
+
+
+
+========== RESPONSE ==========
+
+<RESPONSE>
+ <LINEERROR>Unit &apos;Tin&apos; does not exist!</LINEERROR>
+ <CREATED>0</CREATED>
+ <ALTERED>0</ALTERED>
+ <DELETED>0</DELETED>
+ <LASTVCHID>0</LASTVCHID>
+ <LASTMID>0</LASTMID>
+ <COMBINED>0</COMBINED>
+ <IGNORED>0</IGNORED>
+ <ERRORS>0</ERRORS>
+ <CANCELLED>0</CANCELLED>
+ <EXCEPTIONS>1</EXCEPTIONS>
+</RESPONSE>
+
