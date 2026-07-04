@@ -1,6 +1,10 @@
 require("dotenv").config();
 
 const express = require("express");
+
+const http = require("http");
+const { Server } = require("socket.io");
+
 const cors = require("cors");
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
@@ -47,6 +51,30 @@ const {
 } = require("@supabase/supabase-js");
 
 const app = express();
+
+const server = http.createServer(app);
+
+const { initializeSocket } = require("./socketio/socketserver");
+
+const io = initializeSocket(server);
+
+io.on("connection", (socket) => {
+
+  console.log("================================");
+  console.log("✅ Connector Connected");
+  console.log("Socket ID :", socket.id);
+  console.log("================================");
+
+  socket.on("disconnect", () => {
+
+    console.log("================================");
+    console.log("❌ Connector Disconnected");
+    console.log("Socket ID :", socket.id);
+    console.log("================================");
+
+  });
+
+});
 
 app.set("trust proxy", 1);
 
@@ -30105,6 +30133,11 @@ console.log(
 
   });
 
+  console.log(
+  "createSalesLedger RESULT",
+  result
+);
+
         results.push({
 
   ledger:
@@ -30165,8 +30198,7 @@ console.log(
 
 );
 
-
-app.listen(
+server.listen(
   process.env.PORT,
   () => {
 
