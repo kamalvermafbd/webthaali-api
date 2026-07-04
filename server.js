@@ -52,6 +52,12 @@ const {
 
 const app = express();
 
+const { sendToConnector } =
+  require("./socketio/sendToConnector");
+
+const registry =
+  require("./socketio/connectorRegistry");
+
 const server = http.createServer(app);
 
 const { initializeSocket } = require("./socketio/socketserver");
@@ -29137,7 +29143,7 @@ app.get(
 
     try {
 
-            // =========================
+      // =========================
       // VALIDATION
       // =========================
 
@@ -29222,6 +29228,11 @@ const tallyCompany =
 
     : company.client_tally_company;
 
+
+  const socket = registry.get(company_code);
+
+  console.log("SOCKET FOUND :", !!socket);
+
     console.log(
 
   "IS CA:",
@@ -29229,6 +29240,8 @@ const tallyCompany =
   is_ca
 
 );
+
+
 
 console.log(
 
@@ -29260,174 +29273,27 @@ console.log(
 
 }
 
-          // =========================
-      // GET SALES LEDGERS
-      // =========================
+if (!socket) {
 
-const ledgerData =
-  await getAllLedgers(
+  return res.json({
+    success: false,
+    error: "Connector offline"
+  });
 
-    tallyCompany
+}
 
-  );
-
-console.log(
-  "LEDGER DATA",
-  ledgerData
-);
-
-console.log(
-  "STEP 1 DONE"
-);
-      // =========================
-      // GET TAX LEDGERS
-      // =========================
-
-      // Tally XML call
-
-      // GST Ledgers read
-
-      // =========================
-      // GET STOCK ITEMS
-      // =========================
-
-const stockJson =
-  await getStockItems(
-
-    tallyCompany
-
-  );
-
-const stockRaw =
-
-  stockJson
-    ?.ENVELOPE
-    ?.BODY
-    ?.DATA
-    ?.COLLECTION
-    ?.STOCKITEM;
-
-const stock =
-
-  Array.isArray(stockRaw)
-
-    ? stockRaw
-
-    : stockRaw
-
-      ? [stockRaw]
-
-      : [];
-
-console.log(
-  "TALLY STOCK",
-  stock
-);
-
-const stockList = stock.map((item) => ({
-  name: item.NAME,
-  unit:
-    typeof item.BASEUNITS === "object"
-      ? item.BASEUNITS["#text"]
-      : item.BASEUNITS || ""
-}));
-
-console.log(
-  "STOCK LIST",
-  stockList
-);
-
-console.log(
-  "STEP 2 DONE"
-);
-
-// =========================
-// GET UNITS
-// =========================
-
-const unitJson =
-  await getUnits(
-    tallyCompany
-  );
-
-const unitRaw =
-  unitJson
-    ?.ENVELOPE
-    ?.BODY
-    ?.DATA
-    ?.TALLYMESSAGE;
-
-const units =
-  Array.isArray(unitRaw)
-    ? unitRaw
-    : unitRaw
-    ? [unitRaw]
-    : [];
-
-const unitList =
-  units
-    .filter(x => x.UNIT)
-    .map(x => ({
-      name: x.UNIT.NAME
-    }));
-
-console.log(
-  "UNIT LIST",
-  unitList
-);
-
-console.log(
-  "STEP 3 DONE"
-);
-      // =========================
-      // GET HSN CODES
-      // =========================
-
-      // Stock Items se
-
-      // HSN Code extract
-
-      // =========================
-      // GET DEBTORS
-      // =========================
-
-      // Tally XML call
-
-      // Sundry Debtors
-
-      // =========================
-      // FINAL RESPONSE
-      // =========================
-
-
-     return res.json({
-
-  success: true,
-
-  data: {
-
-    salesGL:
-      ledgerData.salesGL,
-
-    taxGL:
-      ledgerData.taxGL,
-
-    units:
-      unitList,
-
-
-    stock:
-      stockList,
-
-    hsn: [],
-
-    debtors:
-      ledgerData.debtors
-
+const result = await sendToConnector(
+  socket,
+  "getTallyMappingData",
+  {
+    company: tallyCompany
   }
+);
 
-});
+console.log("CONNECTOR RESULT:", result);
+      
 
+return res.json(result);
    //   return res.json({
 
   //      success: true,
