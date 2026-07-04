@@ -3,7 +3,7 @@ require("dotenv").config();
 const express = require("express");
 
 const http = require("http");
-const { Server } = require("socket.io");
+
 
 const cors = require("cors");
 const crypto = require("crypto");
@@ -58,23 +58,27 @@ const { initializeSocket } = require("./socketio/socketserver");
 
 const io = initializeSocket(server);
 
-io.on("connection", (socket) => {
+//io.on("connection", (socket) => {
 
-  console.log("================================");
-  console.log("✅ Connector Connected");
-  console.log("Socket ID :", socket.id);
-  console.log("================================");
+  //console.log("================================");
+  //console.log("✅ Connector Connected");
+  //console.log("Socket ID :", socket.id);
+  //console.log("================================");
 
-  socket.on("disconnect", () => {
+  //socket.on("disconnect", () => {
 
-    console.log("================================");
-    console.log("❌ Connector Disconnected");
-    console.log("Socket ID :", socket.id);
-    console.log("================================");
+    //console.log("================================");
+    //console.log("❌ Connector Disconnected");
+    //console.log("Socket ID :", socket.id);
+    //console.log("================================");
 
-  });
+  //});
 
-});
+//});
+
+const { registerEvents } = require("./socketio/connectorEvents");
+
+registerEvents(io);
 
 app.set("trust proxy", 1);
 
