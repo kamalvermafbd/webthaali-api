@@ -515,7 +515,6 @@ async function getUnits(company) {
   return json;
 }
 
-
 async function createStockItem({
 
   company,
@@ -563,29 +562,11 @@ async function createStockItem({
 
   );
 
-  const result =
-    await sendToTally(xml);
-
   // =========================
-  // DEBUG RESPONSE
+  // RETURN XML
   // =========================
 
-  fs.appendFileSync(
-
-    path.join(
-      __dirname,
-      "stock-debug.log"
-    ),
-
-    "========== RESPONSE ==========\n\n" +
-
-    result +
-
-    "\n"
-
-  );
-
-  return result;
+  return xml;
 
 }
 async function createSalesLedger({
