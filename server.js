@@ -238,6 +238,76 @@ app.get("/testTally", async (req, res) => {
 
 });
 
+
+// =========================
+// PAIR CONNECTOR
+// =========================
+
+app.post("/pairConnector", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    if (!company_code) {
+
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+
+    }
+
+   const socket = registry.getAny();
+
+   console.log("PAIR SOCKET FOUND :", !!socket);
+
+    if (!socket) {
+
+      return res.json({
+        success: false,
+        error: "Connector offline"
+      });
+
+    }
+
+    const result =
+      await sendToConnector(
+
+        socket,
+
+        "pair",
+
+        {
+          company_code
+        }
+
+      );
+
+      console.log("PAIR RESULT :", result);
+
+    return res.json(result);
+
+    console.log("PAIR RESULT :", result);
+
+  } catch (err) {
+
+    console.error(err);
+
+    return res.json({
+
+      success: false,
+
+      error:
+        err.stack || err.message
+
+    });
+
+  }
+
+});
+
 app.get("/getTallyCompanies", async (req, res) => {
 
   try {

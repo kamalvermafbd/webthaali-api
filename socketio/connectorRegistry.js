@@ -21,6 +21,15 @@ function get(companyCode) {
 }
 
 /**
+ * Get Any Connector
+ */
+function getAny() {
+
+    return connectors.values().next().value;
+
+}
+
+/**
  * Remove Connector
  */
 function remove(companyCode) {
@@ -54,6 +63,8 @@ module.exports = {
     register,
 
     get,
+
+    getAny,
 
     remove,
 
