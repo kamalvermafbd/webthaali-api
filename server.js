@@ -29997,7 +29997,7 @@ if (!company || !Array.isArray(stocks)) {
 }
 
        const xml =
-  createStockItem({
+  await createStockItem({
 
     company,
 
@@ -30014,6 +30014,9 @@ if (!company || !Array.isArray(stocks)) {
       stock.gstRate,
 
   });
+
+  console.log("XML TYPE :", typeof xml);
+console.log("XML START :", String(xml).substring(0, 80));
 
 const result =
   await sendToConnector(
