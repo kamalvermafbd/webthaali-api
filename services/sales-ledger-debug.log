@@ -28,9 +28,9 @@
 
         <TALLYMESSAGE xmlns:UDF="TallyUDF">
 
-          <LEDGER NAME="IGST Sale 15%" ACTION="Create">
+          <LEDGER NAME="IGST Sale 18%" ACTION="Create">
 
-            <NAME>IGST Sale 15%</NAME>
+            <NAME>IGST Sale 18%</NAME>
 
             <PARENT>Sales Accounts</PARENT>
 

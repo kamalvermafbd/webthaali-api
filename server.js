@@ -27565,6 +27565,43 @@ const {
   units
 } = req.body;
 
+
+
+const company_code =
+  String(req.body.company_code || "").trim();
+
+console.log("================================");
+console.log("CREATE UNITS API");
+console.log("REQ BODY :", req.body);
+console.log("COMPANY CODE :", company_code);
+console.log("REGISTERED :", registry.list());
+
+const socket =
+  registry.get(company_code);
+
+console.log("SOCKET FOUND :", !!socket);
+
+if (socket) {
+
+  console.log(
+    "SOCKET ID :",
+    socket.id
+  );
+
+}
+
+if (!socket) {
+
+  return res.json({
+
+    success: false,
+
+    error: "Connector offline"
+
+  });
+
+}
+
 if (!company || !Array.isArray(units)) {
 
   return res.json({
@@ -27677,10 +27714,18 @@ fs.appendFileSync(
 
 );
 
-  const response =
+ const response =
+  await sendToConnector(
 
-    await sendToTally(xml);
+    socket,
 
+    "createUnitsInTally",
+
+    {
+      xml
+    }
+
+);
   // =========================
 // SAVE UNIT RESPONSE
 // =========================
@@ -29894,6 +29939,29 @@ app.post(
 
       } = req.body;
 
+      const company_code =
+         String(req.body.company_code || "").trim();
+
+          const socket =
+            registry.get(company_code);
+
+          console.log(
+            "SOCKET FOUND :",
+            !!socket
+          );
+
+          if (!socket) {
+
+            return res.json({
+
+              success: false,
+
+              error: "Connector offline"
+
+            });
+
+          }
+
       const results = [];
 
       console.log("CREATE STOCK API BODY");
@@ -29928,24 +29996,39 @@ if (!company || !Array.isArray(stocks)) {
 
 }
 
-        const result =
-          await createStockItem({
+       const xml =
+  createStockItem({
 
-            company,
+    company,
 
-            stockName:
-              stock.stockName,
+    stockName:
+      stock.stockName,
 
-            hsn:
-              stock.hsn,
+    hsn:
+      stock.hsn,
 
-            unit:
-              stock.unit,
+    unit:
+      stock.unit,
 
-            gstRate:
-              stock.gstRate,
+    gstRate:
+      stock.gstRate,
 
-          });
+  });
+
+const result =
+  await sendToConnector(
+
+    socket,
+
+    "createStocksInTally",
+
+    {
+      xml
+    }
+
+  );
+
+          
 
           console.log(
   "createStockItem RESULT",
@@ -30076,6 +30159,30 @@ app.post(
 
       } = req.body;
 
+
+    const company_code =
+  String(req.body.company_code || "").trim();
+
+    const socket =
+      registry.get(company_code);
+
+    console.log(
+      "SOCKET FOUND :",
+      !!socket
+    );
+
+    if (!socket) {
+
+      return res.json({
+
+        success: false,
+
+        error: "Connector offline"
+
+      });
+
+    }
+
       if (
         !company ||
         !Array.isArray(ledgers)
@@ -30097,38 +30204,51 @@ app.post(
       for (const ledger of ledgers) {
 
         try {
-console.log("LEDGER FROM FRONTEND", ledger);
+        console.log("LEDGER FROM FRONTEND", ledger);
 
-console.log(
-  "LEDGER NAME:",
-  ledger.ledgerName
-);
+        console.log(
+          "LEDGER NAME:",
+          ledger.ledgerName
+        );
+
+          const xml =
+            await createSalesLedger({
+
+              company,
+
+              ledgerName:
+                ledger.ledgerName,
+
+            });
 
           const result =
-  await createSalesLedger({
+            await sendToConnector(
 
-    company,
+              socket,
 
-    ledgerName:
-      ledger.ledgerName,
+              "createSalesLedgersInTally",
 
-  });
+              {
+                xml
+              }
 
-  console.log(
-  "createSalesLedger RESULT",
-  result
-);
+            );
 
-        results.push({
+              console.log(
+              "createSalesLedger RESULT",
+              result
+            );
 
-  ledger:
-    ledger.ledgerName,
+                    results.push({
 
-  success: true,
+              ledger:
+                ledger.ledgerName,
 
-  result
+              success: true,
 
-});
+              result
+
+            });
 
         }
 
@@ -30136,15 +30256,15 @@ console.log(
 
          results.push({
 
-  ledger:
-    ledger.ledgerName,
+          ledger:
+            ledger.ledgerName,
 
-  success: false,
+          success: false,
 
-  error:
-    err.message
+          error:
+            err.message
 
-});
+        });
 
         }
 
