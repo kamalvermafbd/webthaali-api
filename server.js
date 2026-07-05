@@ -242,21 +242,50 @@ app.get("/getTallyCompanies", async (req, res) => {
 
   try {
 
-    const result =
-      await getTallyCompanies();
+    const company_code =
+      String(req.query.company_code || "").trim();
 
-    res.json(result);
+    if (!company_code) {
+
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+
+    }
+
+    const socket = registry.get(company_code);
+
+    console.log("SOCKET FOUND :", !!socket);
+
+    if (!socket) {
+
+      return res.json({
+        success: false,
+        error: "Connector offline"
+      });
+
+    }
+
+    const result = await sendToConnector(
+      socket,
+      "getTallyCompanies",
+      {}
+    );
+
+    console.log("CONNECTOR RESULT:", result);
+
+    return res.json(result);
 
   } catch (err) {
 
     console.error(err);
 
-    res.status(500).json({
+    return res.status(500).json({
 
       success: false,
 
-      error:
-        err.response?.data || err.message
+      error: err.response?.data || err.message
 
     });
 
