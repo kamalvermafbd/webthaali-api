@@ -245,6 +245,12 @@ app.get("/getTallyCompanies", async (req, res) => {
     const company_code =
       String(req.query.company_code || "").trim();
 
+      console.log("================================");
+console.log("GET TALLY COMPANIES");
+console.log("QUERY :", req.query);
+console.log("COMPANY CODE :", company_code);
+console.log("REGISTERED :", registry.list());
+
     if (!company_code) {
 
       return res.json({
@@ -258,8 +264,14 @@ app.get("/getTallyCompanies", async (req, res) => {
 
     console.log("SOCKET FOUND :", !!socket);
 
-    if (!socket) {
 
+    if (socket) {
+      console.log("SOCKET ID :", socket.id);
+    }
+
+
+    if (!socket) {
+      
       return res.json({
         success: false,
         error: "Connector offline"
