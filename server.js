@@ -27,7 +27,7 @@ const {
   createStockItem,
  createSalesLedger,
   createLedger,
-
+createTaxLedger,
   createSale,
 
   getTallyCompanies,
@@ -35,6 +35,8 @@ const {
   selectCompany,
 
   getAllLedgers,
+
+  createDebtorLedger,
 
   getStockItems,
 
@@ -27959,9 +27961,6 @@ console.log(
 
 // TODO
 
-
-
-
 const {
 
   data: invoices,
@@ -27982,13 +27981,7 @@ const {
 
   )
 
-  .eq(
 
-    "tally_exported",
-
-    false
-
-  )
 
   .order("invoice_date", { ascending: true })
 
@@ -28459,29 +28452,108 @@ app.get(
 
     try {
 
-       // =========================
-      // VALIDATION
-      // =========================
+// =========================
+// VALIDATION
+// =========================
 
-      const company_code =
-        String(
-          req.query.company_code || ""
-        ).trim();
+const company_code =
+  String(
+    req.query.company_code || ""
+  ).trim();
 
-      if (!company_code) {
+if (!company_code) {
 
-        return res.json({
+  return res.json({
 
-          success: false,
+    success:false,
 
-          error:
-            "company_code missing"
+    error:"company_code missing"
 
-        });
+  });
 
-      }
+}
 
-      // =========================
+// =========================
+// GET BATCH
+// =========================
+
+const {
+
+  data: batch,
+
+  error: batchError
+
+} = await supabase
+
+  .from("vw_batches_units")
+
+  .select(`
+    company_code,
+    inv_from,
+    inv_to,
+    tally_owner
+  `)
+
+  .eq(
+  "company_code",
+  company_code
+)
+
+.eq(
+  "status",
+  "PENDING"
+)
+
+.order(
+  "sequence_no",
+  {
+    ascending:true
+  }
+)
+
+.limit(1)
+
+.single();
+
+if (batchError) {
+
+  return res.json({
+
+    success: false,
+
+    error: batchError.message
+
+  });
+
+}
+
+if (!batch) {
+
+  return res.json({
+
+    success: false,
+
+    error: "No pending batch found"
+
+  });
+
+}
+
+const inv_from =
+  batch.inv_from;
+
+const inv_to =
+  batch.inv_to;
+
+const tally_owner =
+  batch.tally_owner;
+
+console.log(
+  "BATCH",
+  batch
+);
+
+// =========================
 // GET PENDING INVOICE IDS
 // =========================
 
@@ -28495,7 +28567,10 @@ const {
 
   .from("invoices")
 
-  .select("invoice_id")
+  .select(`
+    invoice_id,
+    invoice_number
+  `)
 
   .eq(
     "company_code",
@@ -28524,11 +28599,41 @@ const invoice_ids =
 
   (pendingInvoices || [])
 
+    .filter((r) => {
+
+      const invoiceNo = parseInt(
+
+        String(r.invoice_number)
+
+          .split("/")[2],
+
+        10
+
+      );
+
+      return (
+
+        invoiceNo >= inv_from &&
+
+        invoiceNo <= inv_to
+
+      );
+
+    })
+
     .map(
 
       (r) => r.invoice_id
 
     );
+
+    console.log(
+
+  "FILTERED INVOICE IDS",
+
+  invoice_ids
+
+);
 
 console.log(
 
@@ -28566,8 +28671,6 @@ if (
 
 }
 
-
-  
 // =========================
 // GET GST DETAILS
 // =========================
@@ -28669,11 +28772,8 @@ console.log(
   "SALE GL",
   saleGL
 );
-      // =========================
-      // BUILD TAX GL
-      // =========================
-
-      // =========================
+      
+// =========================
 // BUILD TAX GL
 // =========================
 
@@ -28726,11 +28826,11 @@ const taxGL = [...taxMap.values()];
 
 console.log("TAX GL", taxGL);
 
-      // =========================
-      // GET UNIQUE HSN
-      // =========================
+// =========================
+// GET UNIQUE HSN
+// =========================
 
-      const {
+const {
   data: stockRows,
   error: stockError
 } = await supabase
@@ -28753,9 +28853,6 @@ if (stockError) {
   });
 
 }
-
-
-   
 
       const hsnList = [
 
@@ -28928,33 +29025,29 @@ console.log("STOCK", stock);
         hsn
       );
 
-      // =========================
-      // GET DEBTORS
-      // =========================
+// =========================
+// GET DEBTORS
+// =========================
 
-      const {
+const {
 
-        data: debtorRows,
+  data: debtorRows,
 
-        error: debtorError
+  error: debtorError
 
-      } = await supabase
+} = await supabase
 
-        .from("client")
+  .from("invoices")
 
-        .select(`
-          client_code,
-          client_name
-        `)
+  .select(`
+    client_code,
+    customer_name
+  `)
 
-        .eq(
-          "company_code",
-          company_code
-        )
-
-        .order(
-          "client_name"
-        );
+  .in(
+    "invoice_id",
+    invoice_ids
+  );
 
       if (debtorError) {
 
@@ -28978,24 +29071,37 @@ console.log("STOCK", stock);
       // BUILD DEBTOR MAPPING
       // =========================
 
-      const debtors =
+     const debtorMap = new Map();
 
-        (debtorRows || []).map(
+(debtorRows || []).forEach((row) => {
 
-          (row) => ({
+  if (!debtorMap.has(row.client_code)) {
 
-            mapping_type:
-              "DEBTOR",
+    debtorMap.set(
 
-            billey_key:
-              row.client_code,
+      row.client_code,
 
-            billey_name:
-              row.client_name
+      {
 
-          })
+        mapping_type: "DEBTOR",
 
-        );
+        billey_key: row.client_code,
+
+        billey_name: row.customer_name
+
+      }
+
+    );
+
+  }
+
+});
+
+const debtors = [
+
+  ...debtorMap.values()
+
+];
 
       console.log(
         "DEBTOR MAPPING",
@@ -29042,7 +29148,7 @@ console.log("STOCK", stock);
         existingMappings
       );
 
-   // =========================
+// =========================
 // APPLY SAVED MAPPING
 // =========================
 
@@ -29098,9 +29204,9 @@ const mappedHSN =
 const mappedDebtors =
   applyMapping(debtors);
 
- // =========================
-      // FINAL RESPONSE
-      // =========================
+// =========================
+// FINAL RESPONSE
+// =========================
 
      return res.json({
 
@@ -30301,6 +30407,1258 @@ app.post(
   }
 
 );
+
+// =========================
+// CREATE TAX LEDGERS IN TALLY
+// =========================
+
+app.post(
+  "/createTaxLedgersInTally",
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company,
+
+        ledgers
+
+      } = req.body;
+
+      const company_code =
+        String(req.body.company_code || "").trim();
+
+      const socket =
+        registry.get(company_code);
+
+      console.log(
+        "SOCKET FOUND :",
+        !!socket
+      );
+
+      if (!socket) {
+
+        return res.json({
+
+          success: false,
+
+          error: "Connector offline"
+
+        });
+
+      }
+
+      if (
+        !company ||
+        !Array.isArray(ledgers)
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error: "Invalid request"
+
+        });
+
+      }
+
+      const results = [];
+
+      for (const ledger of ledgers) {
+
+        try {
+
+          console.log(
+            "LEDGER FROM FRONTEND",
+            ledger
+          );
+
+          console.log(
+            "LEDGER NAME:",
+            ledger.ledgerName
+          );
+
+          const xml =
+            await createTaxLedger({
+
+              company,
+
+              ledgerName:
+                ledger.ledgerName,
+
+            });
+
+          const result =
+            await sendToConnector(
+
+              socket,
+
+              "createTaxLedgersInTally",
+
+              {
+                xml
+              }
+
+            );
+
+          console.log(
+            "createTaxLedger RESULT",
+            result
+          );
+
+          results.push({
+
+            ledger:
+              ledger.ledgerName,
+
+            success: true,
+
+            result
+
+          });
+
+        }
+
+        catch (err) {
+
+          results.push({
+
+            ledger:
+              ledger.ledgerName,
+
+            success: false,
+
+            error:
+              err.message
+
+          });
+
+        }
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        results
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.error(err);
+
+      return res.status(500).json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
+// CREATE DEBTORS IN TALLY
+// =========================
+
+app.post(
+  "/createDebtorsInTally",
+  async (req, res) => {
+
+    try {
+
+      const {
+        company,
+        ledgers
+      } = req.body;
+
+      const company_code =
+        String(req.body.company_code || "").trim();
+
+      const socket =
+        registry.get(company_code);
+
+      console.log(
+        "SOCKET FOUND :",
+        !!socket
+      );
+
+      if (!socket) {
+
+        return res.json({
+
+          success: false,
+
+          error: "Connector offline"
+
+        });
+
+      }
+
+      if (
+        !company ||
+        !Array.isArray(ledgers)
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error: "Invalid request"
+
+        });
+
+      }
+
+      const {
+  data: companyInfo,
+  error: companyError
+} = await supabase
+  .from("company")
+  .select(`
+    ca_tally_company,
+    country
+  `)
+  .eq("company_code", company_code)
+  .single();
+
+if (companyError || !companyInfo) {
+
+  return res.json({
+    success: false,
+    error: "Company not found"
+  });
+
+}
+
+      const results = [];
+
+      for (const ledger of ledgers) {
+
+        try {
+
+          console.log(
+            "DEBTOR FROM FRONTEND",
+            ledger
+          );
+
+          console.log(
+            "DEBTOR NAME:",
+            ledger.ledgerName
+          );
+
+
+          const {
+  data: client,
+  error: clientError
+} = await supabase
+  .from("client")
+  .select(`
+    company_code,
+    client_code,
+    client_name,
+    gstin,
+    billing_address,
+    bill_state,
+    bill_pincode,
+    mobile,
+    email,
+    contact_person,
+    credit_period,
+    opening_balance,
+    gst_registered
+  `)
+  .eq("company_code", company_code)
+  .eq("client_code", ledger.billey_key)
+  .single();
+
+if (clientError || !client) {
+  throw new Error("Client not found");
+}
+
+       const xml =
+  await createDebtorLedger({
+
+    company:
+      companyInfo.ca_tally_company,
+
+    name:
+      client.client_name,
+
+    gstin:
+      client.gstin,
+
+    address:
+      client.billing_address,
+
+    state:
+      client.bill_state,
+
+    pincode:
+      client.bill_pincode,
+
+    mobile:
+      client.mobile,
+
+    email:
+      client.email,
+
+    contactPerson:
+      client.contact_person,
+
+    creditPeriod:
+      client.credit_period,
+
+    openingBalance:
+      client.opening_balance,
+
+    gstRegistered:
+      client.gst_registered,
+
+    country:
+      companyInfo.country
+
+  });
+          const result =
+            await sendToConnector(
+
+              socket,
+
+              "createDebtorsInTally",
+
+              {
+                xml
+              }
+
+            );
+
+          console.log(
+            "createDebtor RESULT",
+            result
+          );
+
+          if (
+  result?.success === false
+) {
+
+  throw new Error(
+
+    result.error ||
+
+    "Debtor creation failed"
+
+  );
+
+}
+
+      
+          results.push({
+    ledger: ledger.ledgerName,
+    success: result.success,
+    result
+});
+
+        }
+
+        catch (err) {
+
+          results.push({
+
+            ledger:
+              ledger.ledgerName,
+
+            success: false,
+
+            error:
+              err.message
+
+          });
+
+        }
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        results
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.error(err);
+
+      return res.status(500).json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+// =========================
+// GET BATCH INVOICE RANGE
+// =========================
+
+app.post(
+
+  "/getBatchInvoiceRange",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company_code,
+
+        posting_date
+
+      } = req.body;
+
+      if (
+
+        !company_code ||
+
+        !posting_date
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code and posting_date required"
+
+        });
+
+      }
+
+
+      const {
+
+  data: invoices,
+
+  error: invoiceError
+
+} = await supabase
+
+  .from("invoices")
+
+  .select(`
+
+  id,
+
+  invoice_number,
+
+  invoice_date,
+
+  customer_name,
+
+  grand_total,
+
+  status
+
+`)
+
+  .eq(
+
+    "company_code",
+
+    company_code
+
+  )
+
+  .eq(
+
+    "doc_type",
+
+    "invoice"
+
+  )
+
+ 
+
+  .is(
+
+    "batch_id",
+
+    null
+
+  )
+
+  .lte(
+
+    "invoice_date",
+
+    posting_date
+
+  )
+
+  .order(
+
+    "invoice_date",
+
+    {
+
+      ascending: true
+
+    }
+
+  )
+
+  .order(
+
+    "id",
+
+    {
+
+      ascending: true
+
+    }
+
+  );
+
+if (invoiceError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      invoiceError.message
+
+  });
+
+}
+
+if (!invoices || invoices.length === 0) {
+
+  return res.json({
+
+    success: true,
+
+    invoiceFrom: null,
+
+    invoiceTo: null,
+
+    totalInvoices: 0,
+
+    invoices: []
+
+  });
+
+
+}
+
+const invoiceFrom =   invoices[0];
+
+const invoiceTo = invoices[invoices.length - 1];
+
+return res.json({
+
+  success: true,
+
+  invoiceFrom: {
+
+  id: invoiceFrom.id,
+
+  invoice_number:
+    invoiceFrom.invoice_number,
+
+  invoice_date:
+    invoiceFrom.invoice_date
+
+},
+
+invoiceTo: {
+
+  id: invoiceTo.id,
+
+  invoice_number:
+    invoiceTo.invoice_number,
+
+  invoice_date:
+    invoiceTo.invoice_date
+
+},
+
+totalInvoices:
+
+  invoices.length,
+
+  invoices
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+function getInvoiceSequence(
+
+  invoiceNumber
+
+) {
+
+  return Number(
+
+    invoiceNumber
+
+      .split("/")
+
+      .pop()
+
+  );
+
+}
+
+// =========================
+// CREATE SALES BATCH
+// =========================
+
+app.post(
+
+  "/createSalesBatch",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company_code,
+
+        tally_owner,
+
+        posting_date
+
+      } = req.body;
+
+      if (
+
+        !company_code ||
+
+        !tally_owner ||
+
+        !posting_date
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+
+            "company_code, tally_owner and posting_date required"
+
+        });
+
+      }
+
+      const {
+
+  data: openBatch,
+
+  error: batchError
+
+} = await supabase
+
+  .from("batches")
+
+  .select(`
+
+    batch_id,
+
+    step_name,
+
+    status
+
+  `)
+
+  .eq(
+
+    "company_code",
+
+    company_code
+
+  )
+
+  .eq(
+
+    "tally_owner",
+
+    tally_owner
+
+  )
+
+  .neq(
+
+    "status",
+
+    "COMPLETED"
+
+  )
+
+  .order(
+
+    "sequence_no",
+
+    {
+
+      ascending: true
+
+    }
+
+  );
+
+  if (batchError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      batchError.message
+
+  });
+
+}
+
+if (
+
+  openBatch &&
+
+  openBatch.length > 0
+
+) {
+
+  return res.json({
+
+    success: false,
+
+    resume: true,
+
+    batch_id:
+
+      openBatch[0].batch_id,
+
+    message:
+
+      "An unfinished batch already exists. Please resume the current batch."
+
+  });
+
+}
+
+const {
+
+  data: invoices,
+
+  error: invoiceError
+
+} = await supabase
+
+  .from("invoices")
+
+  .select(`
+
+    id,
+
+    invoice_number,
+
+    status
+
+  `)
+
+  .eq(
+
+    "company_code",
+
+    company_code
+
+  )
+
+  .eq(
+
+    "doc_type",
+
+    "invoice"
+
+  )
+
+  .is(
+
+    "batch_id",
+
+    null
+
+  )
+
+  .lte(
+
+    "invoice_date",
+
+    posting_date
+
+  )
+
+  .order(
+
+    "invoice_date",
+
+    {
+
+      ascending: true
+
+    }
+
+  )
+
+  .order(
+
+    "id",
+
+    {
+
+      ascending: true
+
+    }
+
+  );
+
+  if (invoiceError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      invoiceError.message
+
+  });
+
+}
+
+if (
+
+  !invoices ||
+
+  invoices.length === 0
+
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      "No invoices found."
+
+  });
+
+}
+
+const draftInvoices =
+
+  invoices.filter(
+
+    x => !x.status
+
+  );
+
+  if (
+
+  draftInvoices.length > 0
+
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      `${draftInvoices.length} invoice${draftInvoices.length > 1 ? "s are" : " is"} not posted yet. Please ask the client to post ${draftInvoices.length > 1 ? "them" : "it"} first.`
+
+  });
+
+}
+
+const today = new Date(posting_date);
+
+const dd =
+
+  String(
+
+    today.getDate()
+
+  ).padStart(2, "0");
+
+const mm =
+
+  String(
+
+    today.getMonth() + 1
+
+  ).padStart(2, "0");
+
+const yyyy =
+
+  today.getFullYear();
+
+const batchPrefix =
+
+  `${dd}${mm}${yyyy}`;
+
+  const {
+
+  data: existingBatch,
+
+  error: existingBatchError
+
+} = await supabase
+
+  .from("batches")
+
+  .select("batch_id")
+
+  .eq(
+
+  "company_code",
+
+  company_code
+
+)
+
+.eq(
+
+  "tally_owner",
+
+  tally_owner
+
+)
+
+  .like(
+
+    "batch_id",
+
+    `${batchPrefix}-%`
+
+  )
+
+  .order(
+
+    "batch_id",
+
+    {
+
+      ascending: false
+
+    }
+
+  )
+
+  .limit(1);
+
+
+  if (existingBatchError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      existingBatchError.message
+
+  });
+
+}
+
+let batchNo = 1;
+
+if (
+
+  existingBatch &&
+
+  existingBatch.length > 0
+
+) {
+
+  batchNo =
+
+    Number(
+
+      existingBatch[0]
+
+        .batch_id
+
+        .split("-")
+
+        .pop()
+
+    ) + 1;
+
+}
+
+const batchId =
+
+  `${batchPrefix}-${String(batchNo).padStart(2, "0")}`;
+
+  const invoiceFrom =
+
+  getInvoiceSequence(
+
+    invoices[0].invoice_number
+
+  );
+
+const invoiceTo =
+
+  getInvoiceSequence(
+
+    invoices[
+
+      invoices.length - 1
+
+    ].invoice_number
+
+  );
+
+  
+  const batchSteps = [
+
+  "UNITS",
+
+  "STOCK",
+
+  "SALES_LEDGER",
+
+  "TAX_LEDGER",
+
+  "DEBTORS",
+
+  "SALES_EXPORT"
+
+].map(
+
+  (
+
+    step,
+
+    index
+
+  ) => ({
+
+    batch_id:
+
+      batchId,
+
+ batch_name:
+
+  batchId,
+
+    batch_type:
+
+      "SALES",
+
+    batch_date:
+
+      posting_date,
+
+    company_code,
+
+    tally_owner,
+
+    inv_from:
+
+      invoiceFrom,
+
+    inv_to:
+
+      invoiceTo,
+
+    sequence_no:
+
+      index + 1,
+
+    step_name:
+
+      step,
+
+    status:
+
+      "PENDING"
+
+  })
+
+);
+
+const {
+
+  error: insertBatchError
+
+} = await supabase
+
+  .from("batches")
+
+  .insert(
+
+    batchSteps
+
+  );
+
+  if (insertBatchError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      insertBatchError.message
+
+  });
+
+}
+
+const invoiceIds =
+
+  invoices.map(
+
+    x => x.id
+
+  );
+
+const {
+
+  error: updateInvoiceError
+
+} = await supabase
+
+  .from("invoices")
+
+  .update({
+
+    batch_id:
+
+      batchId
+
+  })
+
+  .in(
+
+    "id",
+
+    invoiceIds
+
+  );
+
+if (updateInvoiceError) {
+
+  await supabase
+
+    .from("batches")
+
+   .delete()
+
+.eq("batch_id", batchId)
+
+.eq("company_code", company_code)
+
+.eq("tally_owner", tally_owner)
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      updateInvoiceError.message
+
+  });
+
+}
+
+return res.json({
+
+  success: true,
+
+  batch_id: batchId,
+
+  message:
+
+    "Sales batch created successfully."
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
 
 server.listen(
   process.env.PORT,

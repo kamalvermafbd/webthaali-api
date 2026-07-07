@@ -1,6 +1,7 @@
 module.exports = ({
   company,
   ledgerName,
+  dutyHead,
 }) => {
 
   return `
@@ -34,9 +35,14 @@ module.exports = ({
           <LEDGER NAME="${ledgerName}" ACTION="Create">
 
             <NAME>${ledgerName}</NAME>
-            <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>
 
-            <PARENT>Sales Accounts</PARENT>
+            <PARENT>Duties &amp; Taxes</PARENT>
+
+            <TAXTYPE>GST</TAXTYPE>
+
+            <GSTDUTYHEAD>${dutyHead}</GSTDUTYHEAD>
+
+            <ROUNDINGMETHOD>&#4; Not Applicable</ROUNDINGMETHOD>
 
           </LEDGER>
 

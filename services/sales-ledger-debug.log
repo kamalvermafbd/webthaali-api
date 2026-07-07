@@ -28,9 +28,10 @@
 
         <TALLYMESSAGE xmlns:UDF="TallyUDF">
 
-          <LEDGER NAME="IGST Sale 18%" ACTION="Create">
+          <LEDGER NAME="IGST Sale 19%" ACTION="Create">
 
-            <NAME>IGST Sale 18%</NAME>
+            <NAME>IGST Sale 19%</NAME>
+            <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>
 
             <PARENT>Sales Accounts</PARENT>
 
@@ -47,19 +48,4 @@
 </ENVELOPE>
 
 
-
-========== RESPONSE ==========
-
-<RESPONSE>
- <CREATED>1</CREATED>
- <ALTERED>0</ALTERED>
- <DELETED>0</DELETED>
- <LASTVCHID>0</LASTVCHID>
- <LASTMID>0</LASTMID>
- <COMBINED>0</COMBINED>
- <IGNORED>0</IGNORED>
- <ERRORS>0</ERRORS>
- <CANCELLED>0</CANCELLED>
- <EXCEPTIONS>0</EXCEPTIONS>
-</RESPONSE>
 

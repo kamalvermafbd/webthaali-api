@@ -1,9 +1,6 @@
-module.exports = ({
-  company,
-  ledgerName,
-}) => {
+========== XML ==========
 
-  return `
+
 
 <ENVELOPE>
 
@@ -21,7 +18,7 @@ module.exports = ({
 
         <STATICVARIABLES>
 
-          <SVCURRENTCOMPANY>${company}</SVCURRENTCOMPANY>
+          <SVCURRENTCOMPANY>Ajay Enterprises</SVCURRENTCOMPANY>
 
         </STATICVARIABLES>
 
@@ -31,12 +28,17 @@ module.exports = ({
 
         <TALLYMESSAGE xmlns:UDF="TallyUDF">
 
-          <LEDGER NAME="${ledgerName}" ACTION="Create">
+          <LEDGER NAME="IGST 19%" ACTION="Create">
 
-            <NAME>${ledgerName}</NAME>
-            <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>
+            <NAME>IGST 19%</NAME>
 
-            <PARENT>Sales Accounts</PARENT>
+            <PARENT>Duties &amp; Taxes</PARENT>
+
+            <TAXTYPE>GST</TAXTYPE>
+
+            <GSTDUTYHEAD>IGST</GSTDUTYHEAD>
+
+            <ROUNDINGMETHOD>&#4; Not Applicable</ROUNDINGMETHOD>
 
           </LEDGER>
 
@@ -50,6 +52,5 @@ module.exports = ({
 
 </ENVELOPE>
 
-`;
 
-};
+

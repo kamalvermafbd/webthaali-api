@@ -29,6 +29,10 @@ const stockTemplate =
   const salesLedgerTemplate =
 require("./sales-ledger-template");
 
+const taxTemplate =
+  require("./taxtemplate");
+
+
 const TALLY_URL = "http://localhost:9000";
 
 const parser =
@@ -107,6 +111,90 @@ async function sendToTally(xml) {
     throw err;
 
   }
+
+}
+
+async function createTaxLedger({
+
+  company,
+
+  ledgerName,
+
+}) {
+
+  let dutyHead = "GST";
+
+  const name =
+    ledgerName.toUpperCase();
+
+  if (name.startsWith("CGST")) {
+
+    dutyHead = "CGST";
+
+  }
+
+  else if (
+
+    name.startsWith("SGST") ||
+
+    name.startsWith("UTGST")
+
+  ) {
+
+    dutyHead = "SGST";
+
+  }
+
+  else if (
+
+    name.startsWith("IGST")
+
+  ) {
+
+    dutyHead = "IGST";
+
+  }
+
+  else if (
+
+    name.startsWith("CESS")
+
+  ) {
+
+    dutyHead = "Cess";
+
+  }
+
+  const xml =
+    taxTemplate({
+
+      company,
+
+      ledgerName,
+
+      dutyHead,
+
+    });
+
+  fs.writeFileSync(
+
+    path.join(
+
+      __dirname,
+
+      "tax-ledger-debug.log"
+
+    ),
+
+    "========== XML ==========\n\n" +
+
+    xml +
+
+    "\n\n"
+
+  );
+
+  return xml;
 
 }
 
@@ -570,6 +658,104 @@ async function createStockItem({
 
 }
 
+async function createDebtorLedger({
+
+  company,
+
+  name,
+
+  gstin = "",
+
+  mobile = "",
+
+  address = "",
+
+  state = "",
+
+  pincode = "",
+
+  email = "",
+
+  contactPerson = "",
+
+  creditPeriod = 0,
+
+  openingBalance = 0,
+
+  gstRegistered = false,
+
+  country = "India",
+
+  parent = "Sundry Debtors",
+
+  billWise = true
+
+}) {
+
+  const xml = ledgerTemplate({
+
+    company,
+
+    name,
+
+    gstin,
+
+    mobile,
+
+    address,
+
+    state,
+
+    pincode,
+
+    email,
+
+    contactPerson,
+
+    country,
+
+    creditPeriod,
+
+    openingBalance,
+
+    gstRegistered,
+
+    parent,
+
+    billWise
+
+  });
+
+  // =========================
+  // DEBUG XML
+  // =========================
+
+  fs.writeFileSync(
+
+    path.join(
+
+      __dirname,
+
+      "debtor-ledger-debug.log"
+
+    ),
+
+    "========== XML ==========\n\n" +
+
+    xml +
+
+    "\n\n"
+
+  );
+
+  // =========================
+  // RETURN XML
+  // =========================
+
+  return xml;
+
+}
+
 async function createSalesLedger({
 
   company,
@@ -612,6 +798,10 @@ async function createSalesLedger({
   return xml;
 
 }
+
+
+
+
 
 // =========================
 // CREATE UNIT XML
@@ -962,7 +1152,9 @@ module.exports = {
 
   getStockItems,
 
-  
+   createTaxLedger,
+
+   createDebtorLedger,
 
   getUnits,
 
