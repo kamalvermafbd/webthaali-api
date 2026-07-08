@@ -31660,6 +31660,183 @@ return res.json({
 );
 
 
+// =========================
+// GET BATCH PROGRESS
+// =========================
+
+app.get(
+  "/getBatchProgress",
+  async (req, res) => {
+
+    try {
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error: "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // GET CURRENT CA BATCH
+      // =========================
+
+      const {
+
+        data: rows,
+
+        error
+
+      } = await supabase
+
+        .from("vw_batches_units")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "tally_owner",
+          "CA"
+        )
+
+        .order(
+          "sequence_no",
+          { ascending: true }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error: error.message
+
+        });
+
+      }
+
+      // =========================
+      // NO ACTIVE BATCH
+      // =========================
+
+      if (!rows || rows.length === 0) {
+
+        return res.json({
+
+          success: true,
+
+          hasPendingBatch: false,
+
+          batch: null,
+
+          steps: []
+
+        });
+
+      }
+
+      // =========================
+      // BATCH INFO
+      // =========================
+
+      const batch = {
+
+        batch_id:
+          rows[0].batch_id,
+
+        batch_name:
+          rows[0].batch_name,
+
+        batch_date:
+          rows[0].batch_date,
+
+        company_code:
+          rows[0].company_code,
+
+        tally_owner:
+          rows[0].tally_owner,
+
+        inv_from:
+          rows[0].inv_from,
+
+        inv_to:
+          rows[0].inv_to
+
+      };
+
+      // =========================
+      // STEP STATUS
+      // =========================
+
+      const steps =
+        rows.map((r) => ({
+
+          sequence_no:
+            r.sequence_no,
+
+          step_name:
+            r.step_name,
+
+          status:
+            r.status,
+
+          error_message:
+            r.error_message
+
+        }));
+
+      // =========================
+      // FINAL RESPONSE
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        hasPendingBatch: true,
+
+        batch,
+
+        steps
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error: err.message
+
+      });
+
+    }
+
+  }
+);
+
 server.listen(
   process.env.PORT,
   () => {

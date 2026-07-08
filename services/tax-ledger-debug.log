@@ -18,7 +18,7 @@
 
         <STATICVARIABLES>
 
-          <SVCURRENTCOMPANY>Ajay Enterprises</SVCURRENTCOMPANY>
+          <SVCURRENTCOMPANY>Ravi Enterprises</SVCURRENTCOMPANY>
 
         </STATICVARIABLES>
 
@@ -28,9 +28,9 @@
 
         <TALLYMESSAGE xmlns:UDF="TallyUDF">
 
-          <LEDGER NAME="IGST 19%" ACTION="Create">
+          <LEDGER NAME="IGST 18%" ACTION="Create">
 
-            <NAME>IGST 19%</NAME>
+            <NAME>IGST 18%</NAME>
 
             <PARENT>Duties &amp; Taxes</PARENT>
 
