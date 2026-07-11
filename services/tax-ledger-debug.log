@@ -18,7 +18,7 @@
 
         <STATICVARIABLES>
 
-          <SVCURRENTCOMPANY>Ravi Enterprises</SVCURRENTCOMPANY>
+          <SVCURRENTCOMPANY>Webthaali</SVCURRENTCOMPANY>
 
         </STATICVARIABLES>
 
@@ -28,15 +28,15 @@
 
         <TALLYMESSAGE xmlns:UDF="TallyUDF">
 
-          <LEDGER NAME="IGST 18%" ACTION="Create">
+          <LEDGER NAME="SGST 9%" ACTION="Create">
 
-            <NAME>IGST 18%</NAME>
+            <NAME>SGST 9%</NAME>
 
             <PARENT>Duties &amp; Taxes</PARENT>
 
             <TAXTYPE>GST</TAXTYPE>
 
-            <GSTDUTYHEAD>IGST</GSTDUTYHEAD>
+            <GSTDUTYHEAD>SGST</GSTDUTYHEAD>
 
             <ROUNDINGMETHOD>&#4; Not Applicable</ROUNDINGMETHOD>
 

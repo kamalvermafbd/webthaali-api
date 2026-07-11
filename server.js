@@ -12011,7 +12011,8 @@ app.get(
   "Pkt",
   "Carton",
   "Tin",
-  "Set"
+  "Set",
+  "Nos"
 
 ];
 
@@ -30692,7 +30693,7 @@ if (clientError || !client) {
   await createDebtorLedger({
 
     company:
-      companyInfo.ca_tally_company,
+      company,
 
     name:
       client.client_name,
@@ -31679,6 +31680,12 @@ app.get(
           req.query.company_code || ""
         ).trim();
 
+      const tally_owner =
+        String(
+          req.query.tally_owner || "CA"
+        ).trim();
+        
+
       if (!company_code) {
 
         return res.json({
@@ -31708,15 +31715,14 @@ app.get(
         .select("*")
 
         .eq(
-          "company_code",
-          company_code
-        )
+        "company_code",
+        company_code
+      )
 
-        .eq(
-          "tally_owner",
-          "CA"
-        )
-
+      .eq(
+        "tally_owner",
+        tally_owner
+      )
         .order(
           "sequence_no",
           { ascending: true }
@@ -31804,6 +31810,15 @@ app.get(
 
         }));
 
+
+const completedSteps =
+  steps.filter(
+    (x) => x.status === "COMPLETED"
+  ).length;
+
+const totalSteps =
+  steps.length;
+
       // =========================
       // FINAL RESPONSE
       // =========================
@@ -31816,7 +31831,11 @@ app.get(
 
         batch,
 
-        steps
+        steps,
+
+        completedSteps,
+
+        totalSteps,
 
       });
 

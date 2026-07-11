@@ -18,7 +18,7 @@
 
         <STATICVARIABLES>
 
-          <SVCURRENTCOMPANY>Ravi Enterprises</SVCURRENTCOMPANY>
+          <SVCURRENTCOMPANY>Webthaali</SVCURRENTCOMPANY>
 
         </STATICVARIABLES>
 
@@ -28,9 +28,9 @@
 
         <TALLYMESSAGE xmlns:UDF="TallyUDF">
 
-          <STOCKITEM NAME="3917" ACTION="Create">
+          <STOCKITEM NAME="39171010" ACTION="Create">
 
-            <NAME>3917</NAME>
+            <NAME>39171010</NAME>
 
             <PARENT></PARENT>
 
@@ -40,9 +40,9 @@
 
             <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>
 
-            <BASEUNITS>Pc</BASEUNITS>
+            <BASEUNITS>Pkt</BASEUNITS>
 
-            <VATBASEUNIT>Pc</VATBASEUNIT>
+            <VATBASEUNIT>Pkt</VATBASEUNIT>
 
             <GSTDETAILS.LIST>
 
@@ -104,7 +104,7 @@
 
               <APPLICABLEFROM>20260401</APPLICABLEFROM>
 
-              <HSNCODE>3917</HSNCODE>
+              <HSNCODE>39171010</HSNCODE>
 
               <SRCOFHSNDETAILS>
                 Specify Details Here
@@ -116,7 +116,7 @@
 
               <NAME.LIST TYPE="String">
 
-                <NAME>3917</NAME>
+                <NAME>39171010</NAME>
 
               </NAME.LIST>
 

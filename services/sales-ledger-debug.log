@@ -18,7 +18,7 @@
 
         <STATICVARIABLES>
 
-          <SVCURRENTCOMPANY>Ravi Enterprises</SVCURRENTCOMPANY>
+          <SVCURRENTCOMPANY>Webthaali</SVCURRENTCOMPANY>
 
         </STATICVARIABLES>
 
@@ -28,9 +28,9 @@
 
         <TALLYMESSAGE xmlns:UDF="TallyUDF">
 
-          <LEDGER NAME="IGST Sale 18%" ACTION="Create">
+          <LEDGER NAME="Local Sale 18%" ACTION="Create">
 
-            <NAME>IGST Sale 18%</NAME>
+            <NAME>Local Sale 18%</NAME>
             <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>
 
             <PARENT>Sales Accounts</PARENT>
