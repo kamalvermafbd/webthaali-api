@@ -27812,19 +27812,515 @@ app.post("/exportSalesToTally", async (req, res) => {
 
     // abhi sirf test
 
-  const { company_code } = req.body || {};
+ const {
 
-if (!company_code) {
+  company_code,
+
+  batch_id,
+
+  tally_owner,
+
+  inv_from,
+
+  inv_to
+
+} = req.body || {};
+
+
+if (
+
+  !company_code ||
+
+  !batch_id ||
+
+  !tally_owner ||
+
+  inv_from == null ||
+
+  inv_to == null
+
+) {
 
   return res.json({
 
     success: false,
 
-    error: "company_code required"
+    error:
+      "company_code, batch_id, tally_owner, inv_from and inv_to required"
 
   });
 
 }
+
+// =========================
+// GET CONNECTOR SOCKET
+// =========================
+
+const socket =
+  registry.get(company_code);
+
+console.log(
+  "SALES EXPORT SOCKET FOUND :",
+  !!socket
+);
+
+if (!socket) {
+
+  return res.json({
+
+    success: false,
+
+    error: "Connector offline"
+
+  });
+
+}
+
+console.log(
+  "=================================="
+);
+
+console.log(
+  "EXPORT SALES REQUEST"
+);
+
+console.log({
+  company_code,
+  batch_id,
+  tally_owner,
+  inv_from,
+  inv_to
+});
+
+// =========================
+// GET EXPORT SETTINGS
+// =========================
+
+const {
+
+  data: exportCompany,
+
+  error: exportCompanyError
+
+} = await supabase
+
+  .from("company")
+
+  .select(`
+
+    company_code,
+
+    businessname,
+
+    country,
+
+    client_tally_company,
+
+    ca_tally_company,
+
+    client_voucher_number_mode,
+
+    client_voucher_prefix,
+
+    client_voucher_digits,
+
+    voucher_number_mode,
+
+    voucher_prefix,
+
+    voucher_digits,
+
+    round_off_ledger,
+
+    client_round_off_ledger
+
+  `)
+
+  .eq(
+
+    "company_code",
+
+    company_code
+
+  )
+
+  .single();
+
+
+if (
+
+  exportCompanyError ||
+
+  !exportCompany
+
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      exportCompanyError?.message ||
+
+      "Company not found."
+
+  });
+
+}
+
+
+const isCaOwner =
+
+  String(tally_owner)
+
+    .toUpperCase() === "CA";
+
+
+const exportSettings = {
+
+  tally_company:
+
+    isCaOwner
+
+      ? exportCompany.ca_tally_company
+
+      : exportCompany.client_tally_company,
+
+
+  voucher_number_mode:
+
+    isCaOwner
+
+      ? exportCompany.voucher_number_mode
+
+      : exportCompany.client_voucher_number_mode,
+
+
+  voucher_prefix:
+
+    isCaOwner
+
+      ? exportCompany.voucher_prefix
+
+      : exportCompany.client_voucher_prefix,
+
+
+  voucher_digits:
+
+    Number(
+
+      isCaOwner
+
+        ? exportCompany.voucher_digits
+
+        : exportCompany.client_voucher_digits
+
+    ) || 4,
+
+round_off_ledger:
+
+  isCaOwner
+
+    ? exportCompany.round_off_ledger
+
+    : exportCompany.client_round_off_ledger
+
+};
+
+
+console.log(
+  "EXPORT SETTINGS:",
+  exportSettings
+);
+
+if (!exportSettings.round_off_ledger) {
+
+  return res.json({
+
+    success: false,
+
+    code: "ROUND_OFF_LEDGER_NOT_CONFIGURED",
+
+    error:
+      "Round Off ledger is not configured in Tally Export Settings."
+
+  });
+
+}
+ 
+// =========================
+// BUILD VOUCHER NUMBER PREVIEW
+// =========================
+
+function getInvoiceSequence(
+
+  invoiceNumber
+
+) {
+
+  const value =
+    String(
+      invoiceNumber || ""
+    ).trim();
+
+
+  const match =
+    value.match(
+      /(\d+)\s*$/
+    );
+
+
+  if (!match) {
+
+    return null;
+
+  }
+
+
+  return Number(
+    match[1]
+  );
+
+}
+
+
+function buildVoucherNumber(
+
+  invoice
+
+) {
+
+  const mode =
+    String(
+      exportSettings.voucher_number_mode || "AUTO"
+    ).toUpperCase();
+
+
+  // =========================
+  // TALLY AUTOMATIC
+  // =========================
+
+  if (mode === "AUTO") {
+
+    return "";
+
+  }
+
+
+  // =========================
+  // USE BILLEY INVOICE NUMBER
+  // =========================
+
+  if (mode === "BILLEY") {
+
+    return String(
+      invoice.invoice_number || ""
+    ).trim();
+
+  }
+
+
+  // =========================
+  // CUSTOM PREFIX + BILLEY NUMBER
+  // =========================
+
+  if (mode === "CUSTOM") {
+
+    const sequence =
+      getInvoiceSequence(
+        invoice.invoice_number
+      );
+
+
+    if (sequence == null) {
+
+      throw new Error(
+
+        `Unable to extract invoice sequence from ${invoice.invoice_number}`
+
+      );
+
+    }
+
+
+    const paddedSequence =
+      String(sequence).padStart(
+
+        exportSettings.voucher_digits,
+
+        "0"
+
+      );
+
+
+    return (
+
+      String(
+        exportSettings.voucher_prefix || ""
+      ) +
+
+      paddedSequence
+
+    );
+
+  }
+
+
+  throw new Error(
+
+    `Invalid voucher number mode: ${mode}`
+
+  );
+
+}
+
+// =========================
+// TEST VOUCHER NUMBER PREVIEW
+// =========================
+
+const {
+
+  data: previewInvoices,
+
+  error: previewInvoiceError
+
+} = await supabase
+
+  .from("invoices")
+
+  .select(`
+
+    id,
+
+    invoice_id,
+
+    invoice_number,
+
+    invoice_date,
+
+    batch_id
+
+  `)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "batch_id",
+    batch_id
+  )
+
+  .eq(
+    "doc_type",
+    "invoice"
+  )
+
+  .order(
+    "invoice_date",
+    {
+      ascending: true
+    }
+  )
+
+  .order(
+    "id",
+    {
+      ascending: true
+    }
+  );
+
+
+if (previewInvoiceError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      previewInvoiceError.message
+
+  });
+
+}
+
+previewInvoices.sort((a, b) => {
+
+  return (
+    getInvoiceSequence(a.invoice_number) -
+    getInvoiceSequence(b.invoice_number)
+  );
+
+});
+
+console.log(
+  "=================================="
+);
+
+console.log(
+  "VOUCHER NUMBER PREVIEW"
+);
+
+
+for (
+  const invoice of previewInvoices || []
+) {
+
+  console.log(
+
+    String(
+      invoice.invoice_number || ""
+    ).trim(),
+
+    "=>",
+
+    buildVoucherNumber(invoice) || "[TALLY AUTOMATIC]"
+
+  );
+
+}
+
+
+console.log(
+  "=================================="
+);
+
+
+// =========================
+// TEMPORARY TEST MODE
+// REMOVE BEFORE FINAL EXPORT
+// =========================
+/*
+return res.json({
+
+  success: true,
+
+  test_mode: true,
+
+  received: {
+
+  company_code,
+
+  batch_id,
+
+  tally_owner,
+
+  inv_from,
+
+  inv_to,
+
+  exportSettings
+
+},
+
+  message:
+    "Export request received successfully. No invoice exported in test mode."
+
+});
+
+*/
 
 const {
 
@@ -27890,7 +28386,8 @@ console.log(
 
 const billeyMapping =
   await buildBilleyMapping(
-    company_code
+    company_code,
+    batch_id
   );
 
 console.log(
@@ -27982,11 +28479,84 @@ const {
 
   )
 
+  .eq(
+
+    "batch_id",
+
+    batch_id
+
+  )
+
+  .eq(
+
+    "doc_type",
+
+    "invoice"
+
+  );
+
+  if (
+
+  invoices &&
+
+  invoices.length > 0
+
+) {
+
+  invoices.sort((a, b) => {
+
+    return (
+
+      getInvoiceSequence(a.invoice_number) -
+
+      getInvoiceSequence(b.invoice_number)
+
+    );
+
+  });
+
+}
+
+// =========================
+// FILTER INVOICE RANGE
+// =========================
+
+const filteredInvoices =
+
+  (invoices || []).filter((invoice) => {
+
+    const sequence =
+
+      getInvoiceSequence(
+        invoice.invoice_number
+      );
+
+    return (
+
+      sequence !== null &&
+
+      sequence >= Number(inv_from) &&
+
+      sequence <= Number(inv_to)
+
+    );
+
+  });
 
 
-  .order("invoice_date", { ascending: true })
-
-  .limit(1);
+console.log(
+  "FILTERED INVOICE RANGE:",
+  {
+    inv_from,
+    inv_to,
+    total_before: invoices?.length || 0,
+    total_after: filteredInvoices.length,
+    invoice_numbers:
+      filteredInvoices.map(
+        (invoice) => invoice.invoice_number
+      )
+  }
+);
 
 if (invoiceError) {
 
@@ -28000,19 +28570,21 @@ if (invoiceError) {
 
 }
 
-if (!invoices || invoices.length === 0) {
+if (!filteredInvoices || filteredInvoices.length === 0) {
 
   return res.json({
 
     success: true,
 
-    message: "No invoices to export."
+    message: "No invoices found in selected range."
 
   });
 
 }
 
-const invoice = invoices[0];
+const exportResults = [];
+
+for (const invoice of filteredInvoices) {
 
 console.log(
   "SELECTED INVOICE:",
@@ -28088,21 +28660,272 @@ console.log("TOTAL ITEMS:", items.length);
 
 console.log("ALL ITEMS:", items);
 
-const item = items[0];
-
-console.log("ITEM:", item);
-
 console.log("INVOICE:", invoice);
 
+// =========================
+// RESOLVE SALES LEDGER
+// =========================
+
+const saleType =
+
+  Number(invoice.igst) > 0
+
+    ? "INTER"
+
+    : "INTRA";
+
+
+for (const item of items) {
+
+  const gstRate =
+
+    Number(item.gst_percent);
+
+    // =========================
+  // RESOLVE STOCK MAPPING
+  // HSN + UNIT BASIS
+  // =========================
+
+  const stockKey =
+    `STOCK|${String(item.hsn || "").trim()}|${String(item.unit || "").trim()}`;
+
+
+  const stockMapping =
+
+    billeyMapping.stock.find(
+
+      (row) =>
+
+        row.billey_key ===
+        stockKey
+
+    );
+
+
+  if (
+
+    !stockMapping ||
+
+    !stockMapping.tally_name
+
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        `Stock mapping not found for ${stockKey}`
+
+    });
+
+  }
+
+
+  item.stockName =
+
+    stockMapping.tally_name;
+
+
+  console.log(
+
+    "ITEM STOCK RESOLVED:",
+
+    {
+
+      invoice:
+        invoice.invoice_number,
+
+      hsn:
+        item.hsn,
+
+      unit:
+        item.unit,
+
+      key:
+        stockKey,
+
+      tally_name:
+        item.stockName
+
+    }
+
+  );
+
+
+
+  const salesLedgerKey =
+
+    `SALE|${saleType}|${gstRate}`;
+
+
+  const salesLedgerMapping =
+
+    billeyMapping.salesGL.find(
+
+      (row) =>
+
+        row.billey_key ===
+        salesLedgerKey
+
+    );
+
+
+  if (
+
+    !salesLedgerMapping ||
+
+    !salesLedgerMapping.tally_name
+
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        `Sales ledger mapping not found for ${salesLedgerKey}`
+
+    });
+
+  }
+
+  item.salesLedger =
+
+    salesLedgerMapping.tally_name;
+
+
+  console.log(
+
+    "ITEM SALES LEDGER RESOLVED:",
+
+    {
+
+      invoice:
+        invoice.invoice_number,
+
+      hsn:
+        item.hsn,
+
+      gstRate,
+
+      key:
+        salesLedgerKey,
+
+      tally_name:
+        item.salesLedger
+
+    }
+
+  );
+
+// =========================
+// RESOLVE ITEM TAX LEDGERS
+// =========================
+
+if (saleType === "INTRA") {
+
+  const halfRate =
+    gstRate / 2;
+
+
+  const cgstKey =
+    `TAX|CGST|${halfRate}`;
+
+  const sgstKey =
+    `TAX|SGST|${halfRate}`;
+
+
+  const cgstMapping =
+
+    billeyMapping.taxGL.find(
+
+      (row) =>
+        row.billey_key === cgstKey
+
+    );
+
+
+  const sgstMapping =
+
+    billeyMapping.taxGL.find(
+
+      (row) =>
+        row.billey_key === sgstKey
+
+    );
+
+
+  if (
+
+    !cgstMapping?.tally_name ||
+
+    !sgstMapping?.tally_name
+
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        `Tax ledger mapping not found for GST ${gstRate}%`
+
+    });
+
+  }
+
+  item.cgstLedger =
+    cgstMapping.tally_name;
+
+  item.sgstLedger =
+    sgstMapping.tally_name;
+
+}
+
+if (saleType === "INTER") {
+
+  const igstKey =
+    `TAX|IGST|${gstRate}`;
+
+
+  const igstMapping =
+
+    billeyMapping.taxGL.find(
+
+      (row) =>
+        row.billey_key === igstKey
+
+    );
+
+  if (!igstMapping?.tally_name) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        `Tax ledger mapping not found for ${igstKey}`
+
+    });
+
+  }
+
+  item.igstLedger =
+    igstMapping.tally_name;
+
+}
+
+}
 
  const result = await createSale({
 
-  company: company.ca_tally_company,
+  company: exportSettings.tally_company,
   country: company.country,
 
-  voucherDate: invoice.invoice_date.replaceAll("-", ""),
-
-  voucherNumber: invoice.invoice_number,
+  //voucherDate: invoice.invoice_date.replaceAll("-", ""),
+voucherDate: "20260501",
+  voucherNumber: buildVoucherNumber(invoice),
 
   partyName: invoice.customer_name,
 
@@ -28147,13 +28970,8 @@ igst: invoice.igst,
 
   roundOffIsNegative,
 
-cgstLedger: "Cgst 9%",
-
-sgstLedger: "Sgst 9%",
-
-igstLedger: "Igst 18%",
-
-  roundOffLedger: "Rounding Off",   
+  roundOffLedger:
+  exportSettings.round_off_ledger,
 
   transporterName: invoice.transporter_name,
 
@@ -28175,17 +28993,139 @@ ewayDate: invoice.eway_date
 
 creditPeriod: invoice.credit_period,
 
-  salesLedger: "Sales Account"
+});
+
+const connectorResult =
+  await sendToConnector(
+
+    socket,
+
+    "exportSalesToTally",
+
+    {
+      xml: result
+    }
+
+  );
+
+console.log(
+  "SALES EXPORT CONNECTOR RESULT:",
+  invoice.invoice_number,
+  connectorResult
+);
+
+// =========================
+// VALIDATE TALLY RESPONSE
+// =========================
+
+const tallyResponse =
+  String(connectorResult || "");
+
+const getTallyValue = (tag) => {
+
+  const match = tallyResponse.match(
+    new RegExp(
+      `<${tag}>(.*?)</${tag}>`,
+      "i"
+    )
+  );
+
+  return match
+    ? Number(match[1])
+    : 0;
+
+};
+
+
+const created =
+  getTallyValue("CREATED");
+
+const altered =
+  getTallyValue("ALTERED");
+
+const errors =
+  getTallyValue("ERRORS");
+
+const exceptions =
+  getTallyValue("EXCEPTIONS");
+
+const ignored =
+  getTallyValue("IGNORED");
+
+const lastVchId =
+  getTallyValue("LASTVCHID");
+
+
+const isTallySuccess =
+
+  (
+    created === 1 ||
+    altered === 1
+  )
+
+  && errors === 0
+
+  && exceptions === 0
+
+  && ignored === 0
+
+  && lastVchId > 0;
+
+
+console.log(
+  "TALLY VALIDATION:",
+  {
+    invoice_number:
+      invoice.invoice_number,
+
+    created,
+
+    altered,
+
+    errors,
+
+    exceptions,
+
+    ignored,
+
+    lastVchId,
+
+    isTallySuccess
+  }
+);
+
+exportResults.push({
+
+  invoice_id:
+    invoice.invoice_id,
+
+  invoice_number:
+    invoice.invoice_number,
+
+  voucher_number:
+    buildVoucherNumber(invoice),
+
+  success:
+    connectorResult?.success !== false,
+
+  result:
+    connectorResult
 
 });
 
-    return res.json({
+}
 
-      success: true,
+   return res.json({
 
-      data: result
+  success: true,
 
-    });
+  total:
+    exportResults.length,
+
+  data:
+    exportResults
+
+});
 
   } catch (err) {
 
@@ -28208,20 +29148,15 @@ creditPeriod: invoice.credit_period,
 // =========================
 
 async function buildBilleyMapping(
-  company_code
+  company_code,
+  batch_id = null
 ) {
 
   // =========================
 // GET PENDING INVOICE IDS
 // =========================
 
-const {
-
-  data: pendingInvoices,
-
-  error: pendingError
-
-} = await supabase
+let pendingInvoiceQuery = supabase
 
   .from("invoices")
 
@@ -28236,6 +29171,27 @@ const {
     "tally_exported",
     false
   );
+
+
+if (batch_id) {
+
+  pendingInvoiceQuery =
+
+    pendingInvoiceQuery.eq(
+      "batch_id",
+      batch_id
+    );
+
+}
+
+
+const {
+
+  data: pendingInvoices,
+
+  error: pendingError
+
+} = await pendingInvoiceQuery;
 
 if (pendingError) {
 
@@ -28302,6 +29258,8 @@ const {
   .from("invoice_items")
 
   .select(`
+    hsn,
+    unit,
     gst_percent,
     cgst,
     sgst,
@@ -28335,9 +29293,158 @@ console.log(
 );
 
 // =========================
-// BUILD UNIT MAPPING
+// BUILD STOCK MAPPING
+// HSN + UNIT BASIS
 // =========================
 
+const stockMap = new Map();
+
+
+(gstRows || []).forEach((row) => {
+
+  const hsn =
+    String(row.hsn || "").trim();
+
+  const unit =
+    String(row.unit || "").trim();
+
+  const gstRate =
+    Number(row.gst_percent || 0);
+
+
+  if (!hsn || !unit) return;
+
+
+  const stockKey =
+    `STOCK|${hsn}|${unit}`;
+
+
+  if (!stockMap.has(stockKey)) {
+
+    stockMap.set(
+
+      stockKey,
+
+      {
+
+        mapping_type:
+          "STOCK",
+
+        billey_key:
+          stockKey,
+
+        billey_name:
+          `${hsn}-${unit}`,
+
+        hsn,
+
+        unit,
+
+        gstRate
+
+      }
+
+    );
+
+  }
+
+});
+
+
+const stock =
+
+  [...stockMap.values()];
+
+
+console.log(
+  "STOCK MAPPING",
+  stock
+);
+
+// =========================
+// GET EXISTING STOCK MAPPINGS
+// =========================
+
+const {
+
+  data: existingStockMappings,
+
+  error: stockMappingError
+
+} = await supabase
+
+  .from("tally_mapping")
+
+  .select("*")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "mapping_type",
+    "STOCK"
+  );
+
+
+if (stockMappingError) {
+
+  throw new Error(
+    stockMappingError.message
+  );
+
+}
+
+
+console.log(
+  "EXISTING STOCK MAPPINGS",
+  existingStockMappings
+);
+
+
+// =========================
+// APPLY SAVED STOCK MAPPING
+// =========================
+
+const mappedStock =
+
+  stock.map((row) => {
+
+    const mapping =
+
+      (existingStockMappings || []).find(
+
+        (m) =>
+
+          m.billey_key ===
+          row.billey_key
+
+      );
+
+
+    return {
+
+      ...row,
+
+      tally_name:
+        mapping?.tally_name || ""
+
+    };
+
+  });
+
+
+console.log(
+  "MAPPED STOCK",
+  mappedStock
+);
+
+const units = [];
+// =========================
+// BUILD UNIT MAPPING
+// =========================
+/*
 const units =
 
   unitList.map((unit) => ({
@@ -28357,6 +29464,7 @@ console.log(
   units
 
 );
+*/
 
 // =========================
 // BUILD SALE GL
@@ -28437,6 +29545,291 @@ console.log(
   saleGL
 
 );
+
+// =========================
+// GET EXISTING SALE GL MAPPINGS
+// =========================
+
+const {
+
+  data: existingMappings,
+
+  error: mappingError
+
+} = await supabase
+
+  .from("tally_mapping")
+
+  .select("*")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "mapping_type",
+    "SALE_GL"
+  );
+
+
+if (mappingError) {
+
+  throw new Error(
+    mappingError.message
+  );
+
+}
+
+
+// =========================
+// APPLY SAVED SALE GL MAPPING
+// =========================
+
+const mappedSaleGL =
+
+  saleGL.map((row) => {
+
+    const mapping =
+
+      (existingMappings || []).find(
+
+        (m) =>
+
+          m.billey_key ===
+          row.billey_key
+
+      );
+
+    return {
+
+      ...row,
+
+      tally_name:
+        mapping?.tally_name || ""
+
+    };
+
+  });
+
+
+console.log(
+  "MAPPED SALE GL",
+  mappedSaleGL
+);
+
+// =========================
+// GET EXISTING TAX GL MAPPINGS
+// =========================
+
+const {
+
+  data: existingTaxMappings,
+
+  error: taxMappingError
+
+} = await supabase
+
+  .from("tally_mapping")
+
+  .select("*")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "mapping_type",
+    "TAX_GL"
+  );
+
+
+if (taxMappingError) {
+
+  throw new Error(
+    taxMappingError.message
+  );
+
+}
+
+
+console.log(
+  "EXISTING TAX GL MAPPINGS",
+  existingTaxMappings
+);
+
+
+// =========================
+// BUILD TAX GL
+// =========================
+
+const taxMap = new Map();
+
+
+(gstRows || []).forEach((row) => {
+
+  const gstRate =
+    Number(row.gst_percent);
+
+
+  if (!gstRate) return;
+
+
+  // =========================
+  // CGST + SGST
+  // =========================
+
+  if (
+
+    Number(row.cgst) > 0 ||
+
+    Number(row.sgst) > 0
+
+  ) {
+
+    const halfRate =
+      gstRate / 2;
+
+
+    taxMap.set(
+
+      `TAX|CGST|${halfRate}`,
+
+      {
+
+        mapping_type:
+          "TAX_GL",
+
+        billey_key:
+          `TAX|CGST|${halfRate}`,
+
+        billey_name:
+          `CGST ${halfRate}%`
+
+      }
+
+    );
+
+
+    taxMap.set(
+
+      `TAX|SGST|${halfRate}`,
+
+      {
+
+        mapping_type:
+          "TAX_GL",
+
+        billey_key:
+          `TAX|SGST|${halfRate}`,
+
+        billey_name:
+          `SGST ${halfRate}%`
+
+      }
+
+    );
+
+  }
+
+
+  // =========================
+  // IGST
+  // =========================
+
+  if (Number(row.igst) > 0) {
+
+    taxMap.set(
+
+      `TAX|IGST|${gstRate}`,
+
+      {
+
+        mapping_type:
+          "TAX_GL",
+
+        billey_key:
+          `TAX|IGST|${gstRate}`,
+
+        billey_name:
+          `IGST ${gstRate}%`
+
+      }
+
+    );
+
+  }
+
+});
+
+
+const taxGL =
+
+  [...taxMap.values()];
+
+
+console.log(
+  "TAX GL",
+  taxGL
+);
+
+// =========================
+// APPLY SAVED TAX GL MAPPING
+// =========================
+
+const mappedTaxGL =
+
+  taxGL.map((row) => {
+
+    const mapping =
+
+      (existingTaxMappings || []).find(
+
+        (m) =>
+
+          m.billey_key ===
+          row.billey_key
+
+      );
+
+
+    return {
+
+      ...row,
+
+      tally_name:
+        mapping?.tally_name || ""
+
+    };
+
+  });
+
+
+console.log(
+  "MAPPED TAX GL",
+  mappedTaxGL
+);
+
+// =========================
+// RETURN BILLEY MAPPING
+// =========================
+
+return {
+
+  salesGL: mappedSaleGL,
+
+  taxGL: mappedTaxGL,
+
+  units,
+
+  stock: mappedStock,
+
+  hsn: [],
+
+  debtors: []
+
+};
 
 }
 
@@ -28774,6 +30167,8 @@ console.log(
   saleGL
 );
       
+
+
 // =========================
 // BUILD TAX GL
 // =========================
@@ -28959,37 +30354,44 @@ console.log(
 );
 
 
-      // =========================
-      // BUILD STOCK MAPPING
-      // =========================
-
-     // =========================
+// =========================
 // BUILD STOCK MAPPING
+// HSN + UNIT BASIS
 // =========================
 
 const stockMap = new Map();
 
 (stockRows || []).forEach((row) => {
 
-  const hsn = String(row.hsn || "").trim();
+  const hsn =
+    String(row.hsn || "").trim();
 
-  if (!hsn) return;
+  const unit =
+    String(row.unit || "").trim();
 
-  if (!stockMap.has(hsn)) {
+  const gstRate =
+    Number(row.gst_percent || 0);
 
-    stockMap.set(hsn, {
+  if (!hsn || !unit) return;
+
+  const stockKey =
+    `STOCK|${hsn}|${unit}`;
+
+  if (!stockMap.has(stockKey)) {
+
+    stockMap.set(stockKey, {
 
       mapping_type: "STOCK",
 
-      billey_key: hsn,
+      billey_key: stockKey,
 
-      billey_name: hsn,
+      billey_name: `${hsn}-${unit}`,
 
       hsn,
 
-      unit: row.unit,
+      unit,
 
-      gstRate: Number(row.gst_percent)
+      gstRate
 
     });
 
@@ -28999,12 +30401,10 @@ const stockMap = new Map();
 
 const stock = [...stockMap.values()];
 
-console.log("STOCK", stock);
-
-      console.log(
-        "STOCK",
-        stock
-      );
+console.log(
+  "STOCK MAPPING",
+  stock
+);
 
 
       // =========================
@@ -29737,6 +31137,9 @@ voucher_prefix:
 voucher_digits:
   company.client_voucher_digits,
 
+  round_off_ledger:
+  company.client_round_off_ledger,
+
   }
 
 : {
@@ -29780,7 +31183,8 @@ voucher_prefix:
 voucher_digits:
   company.voucher_digits,
       
-      
+round_off_ledger:
+  company.round_off_ledger,   
 
   };
 
@@ -29855,6 +31259,8 @@ app.post(
 
         voucher_digits,
 
+        round_off_ledger,
+
       } = req.body || {};
 
       const is_ca =
@@ -29922,6 +31328,9 @@ app.post(
           updateObj.client_voucher_digits =
             voucher_digits;
 
+            updateObj.client_round_off_ledger =
+  round_off_ledger;
+
       } else {
 
         updateObj.stock_mapping_method =
@@ -29956,6 +31365,9 @@ app.post(
 
           updateObj.voucher_digits =
             voucher_digits;
+
+          updateObj.round_off_ledger =
+            round_off_ledger;
 
       }
 
@@ -30069,15 +31481,27 @@ app.post(
 
           }
 
-      const results = [];
+const results = [];
 
-      console.log("CREATE STOCK API BODY");
+console.log("CREATE STOCK API BODY");
 
-    console.dir(req.body, { depth: null });
+console.dir(req.body, { depth: null });
 
-      for (const stock of stocks) {
+if (!company || !Array.isArray(stocks)) {
 
-        console.log("CREATING STOCK", {
+return res.json({
+
+success: false,
+
+error: "Invalid request",
+
+});
+
+}
+
+for (const stock of stocks) {
+
+console.log("CREATING STOCK", {
 
   company,
 
@@ -30091,19 +31515,8 @@ app.post(
 
 });
 
-if (!company || !Array.isArray(stocks)) {
 
-  return res.json({
-
-    success: false,
-
-    error: "Invalid request",
-
-  });
-
-}
-
-       const xml =
+const xml =
   await createStockItem({
 
     company,
@@ -30122,7 +31535,7 @@ if (!company || !Array.isArray(stocks)) {
 
   });
 
-  console.log("XML TYPE :", typeof xml);
+console.log("XML TYPE :", typeof xml);
 console.log("XML START :", String(xml).substring(0, 80));
 
 const result =
@@ -30140,7 +31553,7 @@ const result =
 
           
 
-          console.log(
+console.log(
   "createStockItem RESULT",
   result
 );
@@ -30859,6 +32272,47 @@ app.post(
 
       }
 
+      // =========================
+// CALCULATE FINANCIAL YEAR
+// =========================
+
+const postingDateObj =
+  new Date(
+    `${posting_date}T00:00:00`
+  );
+
+const postingYear =
+  postingDateObj.getFullYear();
+
+const postingMonth =
+  postingDateObj.getMonth() + 1;
+
+const financialYearStartYear =
+
+  postingMonth >= 4
+
+    ? postingYear
+
+    : postingYear - 1;
+
+const financialYearStart =
+
+  `${financialYearStartYear}-04-01`;
+
+const financialYear =
+
+  `${financialYearStartYear}-${String(
+    financialYearStartYear + 1
+  ).slice(-2)}`;
+
+console.log(
+  "GET BATCH RANGE FINANCIAL YEAR:",
+  {
+    posting_date,
+    financialYearStart,
+    financialYear
+  }
+);
 
       const {
 
@@ -30901,24 +32355,29 @@ app.post(
     "invoice"
 
   )
+.is(
 
- 
+  "batch_id",
 
-  .is(
+  null
 
-    "batch_id",
+)
 
-    null
+.gte(
 
-  )
+  "invoice_date",
 
-  .lte(
+  financialYearStart
 
-    "invoice_date",
+)
 
-    posting_date
+.lte(
 
-  )
+  "invoice_date",
+
+  posting_date
+
+)
 
   .order(
 
@@ -30977,9 +32436,60 @@ if (!invoices || invoices.length === 0) {
 
 }
 
-const invoiceFrom =   invoices[0];
+const sortedInvoices =
 
-const invoiceTo = invoices[invoices.length - 1];
+  [...invoices].sort(
+
+    (a, b) =>
+
+      getInvoiceSequence(
+        a.invoice_number
+      ) -
+
+      getInvoiceSequence(
+        b.invoice_number
+      )
+
+  );
+
+const invoiceFrom =
+
+  invoices.reduce(
+
+    (minInvoice, currentInvoice) =>
+
+      getInvoiceSequence(
+        currentInvoice.invoice_number
+      ) <
+      getInvoiceSequence(
+        minInvoice.invoice_number
+      )
+
+        ? currentInvoice
+
+        : minInvoice
+
+  );
+
+
+const invoiceTo =
+
+  invoices.reduce(
+
+    (maxInvoice, currentInvoice) =>
+
+      getInvoiceSequence(
+        currentInvoice.invoice_number
+      ) >
+      getInvoiceSequence(
+        maxInvoice.invoice_number
+      )
+
+        ? currentInvoice
+
+        : maxInvoice
+
+  );
 
 return res.json({
 
@@ -31011,10 +32521,11 @@ invoiceTo: {
 
 totalInvoices:
 
-  invoices.length,
+  sortedInvoices.length,
 
-  invoices
+invoices:
 
+  sortedInvoices
 });
 
     }
@@ -31196,6 +32707,57 @@ if (
 
 }
 
+// =========================
+// CALCULATE FINANCIAL YEAR
+// =========================
+
+const postingDateObj =
+  new Date(
+    `${posting_date}T00:00:00`
+  );
+
+
+const postingYear =
+  postingDateObj.getFullYear();
+
+
+const postingMonth =
+  postingDateObj.getMonth() + 1;
+
+
+const financialYearStartYear =
+
+  postingMonth >= 4
+
+    ? postingYear
+
+    : postingYear - 1;
+
+
+const financialYearStart =
+
+  `${financialYearStartYear}-04-01`;
+
+
+const financialYear =
+
+  `${financialYearStartYear}-${String(
+    financialYearStartYear + 1
+  ).slice(-2)}`;
+
+console.log(
+  "🔥🔥🔥 NEW CREATE SALES BATCH CODE RUNNING 🔥🔥🔥"
+);
+
+console.log(
+  "BATCH FINANCIAL YEAR:",
+  {
+    posting_date,
+    financialYearStart,
+    financialYear
+  }
+);
+
 const {
 
   data: invoices,
@@ -31234,19 +32796,27 @@ const {
 
   .is(
 
-    "batch_id",
+  "batch_id",
 
-    null
+  null
 
-  )
+)
 
-  .lte(
+.gte(
 
-    "invoice_date",
+  "invoice_date",
 
-    posting_date
+  financialYearStart
 
-  )
+)
+
+.lte(
+
+  "invoice_date",
+
+  posting_date
+
+)
 
   .order(
 
@@ -31453,24 +33023,26 @@ const batchId =
 
   `${batchPrefix}-${String(batchNo).padStart(2, "0")}`;
 
-  const invoiceFrom =
+  const invoiceSequences =
 
-  getInvoiceSequence(
+  invoices.map(
 
-    invoices[0].invoice_number
+    x => getInvoiceSequence(
+      x.invoice_number
+    )
 
+  );
+
+const invoiceFrom =
+
+  Math.min(
+    ...invoiceSequences
   );
 
 const invoiceTo =
 
-  getInvoiceSequence(
-
-    invoices[
-
-      invoices.length - 1
-
-    ].invoice_number
-
+  Math.max(
+    ...invoiceSequences
   );
 
   
@@ -31517,6 +33089,9 @@ const invoiceTo =
     company_code,
 
     tally_owner,
+
+    financial_year:
+  financialYear,
 
     inv_from:
 
@@ -31855,6 +33430,172 @@ const totalSteps =
 
   }
 );
+
+
+// =========================
+// GET BATCH INVOICES
+// =========================
+
+app.get(
+  "/getBatchInvoices",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      const batch_id =
+        String(
+          req.query.batch_id || ""
+        ).trim();
+
+
+      if (
+        !company_code ||
+        !batch_id
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code and batch_id are required"
+
+        });
+
+      }
+
+
+      const {
+
+        data: invoices,
+
+        error
+
+      } = await supabase
+
+        .from("invoices")
+
+        .select(`
+
+          id,
+
+          invoice_id,
+
+          invoice_number,
+
+          invoice_date,
+
+          customer_name,
+
+          grand_total,
+
+          status,
+
+          tally_exported,
+
+          tally_exported_at,
+
+          batch_id
+
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "batch_id",
+          batch_id
+        )
+
+        .eq(
+          "doc_type",
+          "invoice"
+        )
+
+        .order(
+          "invoice_date",
+          {
+            ascending: true
+          }
+        )
+
+        .order(
+          "id",
+          {
+            ascending: true
+          }
+        );
+
+
+      if (error) {
+
+        console.error(
+          "GET BATCH INVOICES ERROR:",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+
+      console.log(
+        "BATCH INVOICES:",
+        invoices
+      );
+
+
+      return res.json({
+
+        success: true,
+
+        invoices:
+          invoices || [],
+
+        totalInvoices:
+          invoices?.length || 0
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.error(
+        "GET BATCH INVOICES ERROR:",
+        err
+      );
+
+
+      return res.status(500).json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
 
 server.listen(
   process.env.PORT,

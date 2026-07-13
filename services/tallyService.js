@@ -1021,11 +1021,6 @@ shippingStateCode,
 
 roundOffIsNegative,
 
-cgstLedger,
-
-  sgstLedger,
-
-  igstLedger,
 
   roundOffLedger,
 
@@ -1045,7 +1040,6 @@ ewayDate,
 
 creditPeriod,
 
-  salesLedger
 
 }) {
 
@@ -1098,12 +1092,6 @@ shippingStateCode,
 
   roundOffIsNegative,
 
-  cgstLedger,
-
-  sgstLedger,
-
-  igstLedger,
-
   roundOffLedger,
 
   transporterName,
@@ -1122,11 +1110,9 @@ ewayDate,
 
 creditPeriod,
 
-  salesLedger
-
 });
 
-  return await sendToTally(xml);
+  return xml;
 
 }
 

@@ -1,3 +1,96 @@
+
+function buildTaxLedgerEntries(items) {
+
+  const taxLedgerMap = new Map();
+
+  for (const item of items) {
+
+    const cgstAmount =
+      Number(item.cgst || 0);
+
+    const sgstAmount =
+      Number(item.sgst || 0);
+
+    const igstAmount =
+      Number(item.igst || 0);
+
+
+    if (
+      cgstAmount > 0 &&
+      item.cgstLedger
+    ) {
+
+      const current =
+        taxLedgerMap.get(
+          item.cgstLedger
+        ) || 0;
+
+      taxLedgerMap.set(
+        item.cgstLedger,
+        current + cgstAmount
+      );
+
+    }
+
+
+    if (
+      sgstAmount > 0 &&
+      item.sgstLedger
+    ) {
+
+      const current =
+        taxLedgerMap.get(
+          item.sgstLedger
+        ) || 0;
+
+      taxLedgerMap.set(
+        item.sgstLedger,
+        current + sgstAmount
+      );
+
+    }
+
+
+    if (
+      igstAmount > 0 &&
+      item.igstLedger
+    ) {
+
+      const current =
+        taxLedgerMap.get(
+          item.igstLedger
+        ) || 0;
+
+      taxLedgerMap.set(
+        item.igstLedger,
+        current + igstAmount
+      );
+
+    }
+
+  }
+
+
+  return [...taxLedgerMap.entries()]
+
+    .map(([ledgerName, amount]) => `
+
+<LEDGERENTRIES.LIST>
+
+  <LEDGERNAME>${ledgerName}</LEDGERNAME>
+
+  <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+
+  <AMOUNT>${amount.toFixed(2)}</AMOUNT>
+
+</LEDGERENTRIES.LIST>
+
+`)
+
+    .join("");
+
+}
+
 module.exports = ({
   company,
   voucherDate,
@@ -39,10 +132,6 @@ gstRegistrationType,
 
 roundOffIsNegative,
 
-cgstLedger,
-sgstLedger,
-igstLedger,
-
 roundOffLedger,
 
 transporterName,
@@ -59,9 +148,7 @@ lrDate,
 
 ewayDate,
 
-creditPeriod,
-
-salesLedger
+creditPeriod
 }) => `
 
 <ENVELOPE>
@@ -185,7 +272,7 @@ ${items.map(item => `
 
 <ALLINVENTORYENTRIES.LIST>
 
-  <STOCKITEMNAME>${item.hsn}</STOCKITEMNAME>
+  <STOCKITEMNAME>${item.stockName}</STOCKITEMNAME>
 
   <GSTHSNNAME>${item.hsn}</GSTHSNNAME>
 
@@ -199,7 +286,7 @@ ${items.map(item => `
 
 <ACCOUNTINGALLOCATIONS.LIST>
 
-  <LEDGERNAME>${salesLedger}</LEDGERNAME>
+  <LEDGERNAME>${item.salesLedger}</LEDGERNAME>
 
   <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
 
@@ -225,41 +312,7 @@ ${items.map(item => `
 
 </LEDGERENTRIES.LIST>
 
-${cgst > 0 ? `
-<LEDGERENTRIES.LIST>
-
-  <LEDGERNAME>${cgstLedger}</LEDGERNAME>
-
-  <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-
-  <AMOUNT>${cgst}</AMOUNT>
-
-</LEDGERENTRIES.LIST>
-` : ""}
-
-${sgst > 0 ? `
-<LEDGERENTRIES.LIST>
-
-  <LEDGERNAME>${sgstLedger}</LEDGERNAME>
-
-  <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-
-  <AMOUNT>${sgst}</AMOUNT>
-
-</LEDGERENTRIES.LIST>
-` : ""}
-
-${igst > 0 ? `
-<LEDGERENTRIES.LIST>
-
-  <LEDGERNAME>${igstLedger}</LEDGERNAME>
-
-  <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-
-  <AMOUNT>${igst}</AMOUNT>
-
-</LEDGERENTRIES.LIST>
-` : ""}
+${buildTaxLedgerEntries(items)}
 
 ${roundOff !== 0 ? `
 <LEDGERENTRIES.LIST>

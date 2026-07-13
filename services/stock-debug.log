@@ -28,9 +28,9 @@
 
         <TALLYMESSAGE xmlns:UDF="TallyUDF">
 
-          <STOCKITEM NAME="39171010" ACTION="Create">
+          <STOCKITEM NAME="39171010-Pkt" ACTION="Create">
 
-            <NAME>39171010</NAME>
+            <NAME>39171010-Pkt</NAME>
 
             <PARENT></PARENT>
 
@@ -116,7 +116,7 @@
 
               <NAME.LIST TYPE="String">
 
-                <NAME>39171010</NAME>
+                <NAME>39171010-Pkt</NAME>
 
               </NAME.LIST>
 
