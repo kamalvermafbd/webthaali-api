@@ -29248,8 +29248,14 @@ exportResults.push({
 async function buildBilleyMapping(
   company_code,
   batch_id = null,
-  tally_owner = "CA"
+  tally_owner
 ) {
+
+  if (!tally_owner) {
+  throw new Error(
+    "tally_owner is required"
+  );
+}
 
   const isCaOwner =
     String(tally_owner)
@@ -29491,15 +29497,20 @@ const {
 
   .select("*")
 
-  .eq(
-    "company_code",
-    company_code
-  )
+.eq(
+  "company_code",
+  company_code
+)
 
-  .eq(
-    "mapping_type",
-    "STOCK"
-  );
+.eq(
+  "tally_owner",
+  tally_owner
+)
+
+.eq(
+  "mapping_type",
+  "STOCK"
+);
 
 
 if (stockMappingError) {
@@ -29676,16 +29687,20 @@ const {
 
   .select("*")
 
-  .eq(
-    "company_code",
-    company_code
-  )
+.eq(
+  "company_code",
+  company_code
+)
 
-  .eq(
-    "mapping_type",
-    "SALE_GL"
-  );
+.eq(
+  "tally_owner",
+  tally_owner
+)
 
+.eq(
+  "mapping_type",
+  "SALE_GL"
+);
 
 if (mappingError) {
 
@@ -29749,15 +29764,19 @@ const {
   .select("*")
 
   .eq(
-    "company_code",
-    company_code
-  )
+  "company_code",
+  company_code
+)
 
-  .eq(
-    "mapping_type",
-    "TAX_GL"
-  );
+.eq(
+  "tally_owner",
+  tally_owner
+)
 
+.eq(
+  "mapping_type",
+  "TAX_GL"
+);
 
 if (taxMappingError) {
 
@@ -30639,23 +30658,27 @@ const debtors = [
       // GET EXISTING MAPPINGS
       // =========================
 
-      const {
+const {
 
-        data: existingMappings,
+  data: existingMappings,
 
-        error: mappingError
+  error: mappingError
 
-      } = await supabase
+} = await supabase
 
-        .from("tally_mapping")
+  .from("tally_mapping")
 
-        .select("*")
+  .select("*")
 
-        .eq(
-          "company_code",
-          company_code
-        );
+  .eq(
+    "company_code",
+    company_code
+  )
 
+  .eq(
+    "tally_owner",
+    tally_owner
+  );
       if (mappingError) {
 
         return res.json({
@@ -30792,12 +30815,10 @@ app.post(
       // VALIDATION
       // =========================
 
-      const {
-
+     const {
   company_code,
-
+  tally_owner,
   mappings
-
 } = req.body;
 
 console.log(
@@ -30805,17 +30826,18 @@ console.log(
   JSON.stringify(mappings, null, 2)
 );
 
-      if (!company_code) {
+     if (!company_code || !tally_owner) {
 
-        return res.json({
+  return res.json({
 
-          success: false,
+    success: false,
 
-          error: "company_code missing"
+    error:
+      "company_code and tally_owner required"
 
-        });
+  });
 
-      }
+}
 
       if (
 
@@ -30848,9 +30870,11 @@ const {
 
   .upsert(
 
-    mappings.map((row) => ({
+   mappings.map((row) => ({
 
-    company_code,
+  company_code,
+
+  tally_owner,
 
   mapping_type:
     row.mapping_type,
@@ -30861,25 +30885,24 @@ const {
   billey_name:
     row.billey_name,
 
-      tally_key:
+  tally_key:
     row.tally_key || null,
 
   tally_name:
     row.tally_name,
 
-     uqc_code:
+  uqc_code:
     row.uqc_code || null,
 
-     updated_at: new Date()
+  updated_at:
+    new Date()
 
-
-
-    })),
+})),
 
     {
 
       onConflict:
-        "company_code,mapping_type,billey_key"
+  "company_code,tally_owner,mapping_type,billey_key"
 
     }
 
