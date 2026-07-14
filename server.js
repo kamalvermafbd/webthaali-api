@@ -27976,6 +27976,22 @@ const isCaOwner =
 
     .toUpperCase() === "CA";
 
+const batchIdColumn =
+  isCaOwner
+    ? "batch_id"
+    : "client_batch_id";
+
+
+const tallyExportedColumn =
+  isCaOwner
+    ? "tally_exported"
+    : "client_tally_exported";
+
+
+const tallyExportedAtColumn =
+  isCaOwner
+    ? "tally_exported_at"
+    : "client_tally_exported_at";
 
 const exportSettings = {
 
@@ -28208,15 +28224,20 @@ const {
     company_code
   )
 
-  .eq(
-    "batch_id",
-    batch_id
-  )
+.eq(
+  batchIdColumn,
+  batch_id
+)
 
-  .eq(
-    "doc_type",
-    "invoice"
-  )
+.eq(
+  "doc_type",
+  "invoice"
+)
+
+.eq(
+  tallyExportedColumn,
+  false
+)
 
   .order(
     "invoice_date",
@@ -28387,7 +28408,8 @@ console.log(
 const billeyMapping =
   await buildBilleyMapping(
     company_code,
-    batch_id
+    batch_id,
+    tally_owner
   );
 
 console.log(
@@ -28480,20 +28502,14 @@ const {
   )
 
   .eq(
+  batchIdColumn,
+  batch_id
+)
 
-    "batch_id",
-
-    batch_id
-
-  )
-
-  .eq(
-
-    "doc_type",
-
-    "invoice"
-
-  );
+.eq(
+  "doc_type",
+  "invoice"
+);
 
   if (
 
@@ -29094,6 +29110,88 @@ console.log(
   }
 );
 
+// =========================
+// UPDATE INVOICE TALLY STATUS
+// =========================
+
+if (isTallySuccess) {
+
+  const exportedAt =
+    new Date().toISOString();
+
+
+ const updateData = isCaOwner
+
+  ? {
+
+      tally_exported: true,
+
+      tally_exported_at:
+        exportedAt,
+
+      batch_posted_at:
+        exportedAt
+
+    }
+
+  : {
+
+      client_tally_exported: true,
+
+      client_tally_exported_at:
+        exportedAt,
+
+      batch_posted_at:
+        exportedAt
+
+    };
+
+
+const {
+  error: tallyUpdateError
+} = await supabase
+
+  .from("invoices")
+
+  .update(
+    updateData
+  )
+
+  .eq(
+    "invoice_id",
+    invoice.invoice_id
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    batchIdColumn,
+    batch_id
+  );
+
+  if (tallyUpdateError) {
+
+    throw new Error(
+
+      `Voucher created in Tally but invoice status update failed: ${tallyUpdateError.message}`
+
+    );
+
+  }
+
+
+  console.log(
+    "✅ INVOICE MARKED TALLY EXPORTED:",
+    invoice.invoice_number
+  );
+
+}
+
+
+
 exportResults.push({
 
   invoice_id:
@@ -29105,8 +29203,8 @@ exportResults.push({
   voucher_number:
     buildVoucherNumber(invoice),
 
-  success:
-    connectorResult?.success !== false,
+    success:
+    isTallySuccess,
 
   result:
     connectorResult
@@ -29149,8 +29247,24 @@ exportResults.push({
 
 async function buildBilleyMapping(
   company_code,
-  batch_id = null
+  batch_id = null,
+  tally_owner = "CA"
 ) {
+
+  const isCaOwner =
+    String(tally_owner)
+      .trim()
+      .toUpperCase() === "CA";
+
+  const batchIdColumn =
+    isCaOwner
+      ? "batch_id"
+      : "client_batch_id";
+
+  const tallyExportedColumn =
+    isCaOwner
+      ? "tally_exported"
+      : "client_tally_exported";
 
   // =========================
 // GET PENDING INVOICE IDS
@@ -29168,9 +29282,9 @@ let pendingInvoiceQuery = supabase
   )
 
   .eq(
-    "tally_exported",
-    false
-  );
+  tallyExportedColumn,
+  false
+);
 
 
 if (batch_id) {
@@ -29178,9 +29292,9 @@ if (batch_id) {
   pendingInvoiceQuery =
 
     pendingInvoiceQuery.eq(
-      "batch_id",
-      batch_id
-    );
+  batchIdColumn,
+  batch_id
+);
 
 }
 
@@ -29855,6 +29969,30 @@ const company_code =
     req.query.company_code || ""
   ).trim();
 
+  const is_ca =
+  String(
+    req.query.is_ca || "false"
+  ).toLowerCase() === "true";
+
+
+const tally_owner =
+  is_ca
+    ? "CA"
+    : "USER";
+
+
+const batchIdColumn =
+  is_ca
+    ? "batch_id"
+    : "client_batch_id";
+
+
+const tallyExportedColumn =
+  is_ca
+    ? "tally_exported"
+    : "client_tally_exported";
+
+
 if (!company_code) {
 
   return res.json({
@@ -29881,16 +30019,22 @@ const {
 
   .from("vw_batches_units")
 
-  .select(`
-    company_code,
-    inv_from,
-    inv_to,
-    tally_owner
-  `)
+.select(`
+  batch_id,
+  company_code,
+  inv_from,
+  inv_to,
+  tally_owner
+`)
 
   .eq(
   "company_code",
   company_code
+)
+
+.eq(
+  "tally_owner",
+  tally_owner
 )
 
 .eq(
@@ -29933,14 +30077,15 @@ if (!batch) {
 
 }
 
+const batch_id =
+  batch.batch_id;
+
 const inv_from =
   batch.inv_from;
 
 const inv_to =
   batch.inv_to;
 
-const tally_owner =
-  batch.tally_owner;
 
 console.log(
   "BATCH",
@@ -29972,7 +30117,12 @@ const {
   )
 
   .eq(
-    "tally_exported",
+    batchIdColumn,
+    batch_id
+  )
+
+  .eq(
+    tallyExportedColumn,
     false
   );
 
@@ -29988,37 +30138,12 @@ if (pendingError) {
   });
 
 }
-
 const invoice_ids =
 
   (pendingInvoices || [])
 
-    .filter((r) => {
-
-      const invoiceNo = parseInt(
-
-        String(r.invoice_number)
-
-          .split("/")[2],
-
-        10
-
-      );
-
-      return (
-
-        invoiceNo >= inv_from &&
-
-        invoiceNo <= inv_to
-
-      );
-
-    })
-
     .map(
-
       (r) => r.invoice_id
-
     );
 
     console.log(
@@ -32245,32 +32370,52 @@ app.post(
 
     try {
 
-      const {
+     const {
 
-        company_code,
+  company_code,
 
-        posting_date
+  posting_date,
 
-      } = req.body;
+  tally_owner
 
-      if (
+} = req.body;
 
-        !company_code ||
+    if (
 
-        !posting_date
+  !company_code ||
 
-      ) {
+  !posting_date ||
+
+  !tally_owner
+
+) {
 
         return res.json({
 
           success: false,
 
           error:
-            "company_code and posting_date required"
-
+  "company_code, posting_date and tally_owner required"
         });
 
       }
+
+      const isCaOwner =
+
+  String(tally_owner)
+
+    .trim()
+
+    .toUpperCase() === "CA";
+
+
+const batchIdColumn =
+
+  isCaOwner
+
+    ? "batch_id"
+
+    : "client_batch_id";
 
       // =========================
 // CALCULATE FINANCIAL YEAR
@@ -32355,9 +32500,10 @@ console.log(
     "invoice"
 
   )
+
 .is(
 
-  "batch_id",
+  batchIdColumn,
 
   null
 
@@ -32611,6 +32757,24 @@ app.post(
 
       }
 
+
+      const isCaOwner =
+
+  String(tally_owner)
+
+    .toUpperCase() === "CA";
+
+
+const batchIdColumn =
+
+  isCaOwner
+
+    ? "batch_id"
+
+    : "client_batch_id";
+
+
+
       const {
 
   data: openBatch,
@@ -32619,7 +32783,7 @@ app.post(
 
 } = await supabase
 
-  .from("batches")
+  .from("vw_batches_units")
 
   .select(`
 
@@ -32666,6 +32830,17 @@ app.post(
     }
 
   );
+
+
+  console.log(
+  "OPEN BATCH CHECK:",
+  {
+    company_code,
+    tally_owner,
+    openBatch,
+    batchError
+  }
+);
 
   if (batchError) {
 
@@ -32794,9 +32969,9 @@ const {
 
   )
 
-  .is(
+ .is(
 
-  "batch_id",
+  batchIdColumn,
 
   null
 
@@ -33163,11 +33338,11 @@ const {
 
   .update({
 
-    batch_id:
+  [batchIdColumn]:
 
-      batchId
+    batchId
 
-  })
+})
 
   .in(
 
@@ -33273,35 +33448,110 @@ app.get(
 
       }
 
+
+      
       // =========================
       // GET CURRENT CA BATCH
       // =========================
 
       const {
 
-        data: rows,
+  data: latestBatchRows,
 
-        error
+  error: latestBatchError
 
-      } = await supabase
+} = await supabase
 
-        .from("vw_batches_units")
+  .from("vw_batches_units")
 
-        .select("*")
+  .select("batch_id, created_at")
 
-        .eq(
-        "company_code",
-        company_code
-      )
+  .eq(
+    "company_code",
+    company_code
+  )
 
-      .eq(
-        "tally_owner",
-        tally_owner
-      )
-        .order(
-          "sequence_no",
-          { ascending: true }
-        );
+  .eq(
+    "tally_owner",
+    tally_owner
+  )
+
+  .order(
+    "created_at",
+    { ascending: false }
+  )
+
+  .limit(1);
+
+  if (latestBatchError) {
+
+  return res.json({
+
+    success: false,
+
+    error: latestBatchError.message
+
+  });
+
+}
+
+if (
+  !latestBatchRows ||
+  latestBatchRows.length === 0
+) {
+
+  return res.json({
+
+    success: true,
+
+    hasPendingBatch: false,
+
+    batch: null,
+
+    steps: [],
+
+    completedSteps: 0,
+
+    totalSteps: 0
+
+  });
+
+}
+const latestBatchId =
+  latestBatchRows[0].batch_id;
+
+
+     const {
+
+  data: rows,
+
+  error
+
+} = await supabase
+
+  .from("vw_batches_units")
+
+  .select("*")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "tally_owner",
+    tally_owner
+  )
+
+  .eq(
+    "batch_id",
+    latestBatchId
+  )
+
+  .order(
+    "sequence_no",
+    { ascending: true }
+  );
 
       if (error) {
 
@@ -33321,18 +33571,21 @@ app.get(
 
       if (!rows || rows.length === 0) {
 
-        return res.json({
+       return res.json({
 
-          success: true,
+  success: true,
 
-          hasPendingBatch: false,
+  hasPendingBatch: false,
 
-          batch: null,
+  batch: null,
 
-          steps: []
+  steps: [],
 
-        });
+  completedSteps: 0,
 
+  totalSteps: 0
+
+});
       }
 
       // =========================
@@ -33402,7 +33655,8 @@ const totalSteps =
 
         success: true,
 
-        hasPendingBatch: true,
+        hasPendingBatch:
+  completedSteps < totalSteps,
 
         batch,
 
@@ -33432,6 +33686,7 @@ const totalSteps =
 );
 
 
+
 // =========================
 // GET BATCH INVOICES
 // =========================
@@ -33452,6 +33707,34 @@ app.get(
           req.query.batch_id || ""
         ).trim();
 
+      const tally_owner =
+        String(
+          req.query.tally_owner || "CA"
+        )
+          .trim()
+          .toUpperCase();
+
+          const isCaOwner =
+  tally_owner === "CA";
+
+
+const batchIdColumn =
+  isCaOwner
+    ? "batch_id"
+    : "client_batch_id";
+
+
+const tallyExportedColumn =
+  isCaOwner
+    ? "tally_exported"
+    : "client_tally_exported";
+
+
+const tallyExportedAtColumn =
+  isCaOwner
+    ? "tally_exported_at"
+    : "client_tally_exported_at";
+
 
       if (
         !company_code ||
@@ -33470,9 +33753,13 @@ app.get(
       }
 
 
+      // =========================
+      // GET ALL BATCH INVOICES
+      // =========================
+
       const {
 
-        data: invoices,
+        data: allInvoices,
 
         error
 
@@ -33480,7 +33767,7 @@ app.get(
 
         .from("invoices")
 
-        .select(`
+       .select(`
 
           id,
 
@@ -33500,7 +33787,13 @@ app.get(
 
           tally_exported_at,
 
-          batch_id
+          batch_id,
+
+          client_tally_exported,
+
+          client_tally_exported_at,
+
+          client_batch_id
 
         `)
 
@@ -33509,8 +33802,8 @@ app.get(
           company_code
         )
 
-        .eq(
-          "batch_id",
+      .eq(
+          batchIdColumn,
           batch_id
         )
 
@@ -33553,21 +33846,61 @@ app.get(
       }
 
 
+      // =========================
+      // SEPARATE PENDING INVOICES
+      // =========================
+
+      const pendingInvoices =
+
+  (allInvoices || []).filter(
+
+    (invoice) =>
+      invoice[tallyExportedColumn] !== true
+
+  );
+
+
+      const totalInvoices =
+        allInvoices?.length || 0;
+
+
+      const pendingCount =
+        pendingInvoices.length;
+
+
+      const exportedCount =
+        totalInvoices - pendingCount;
+
+
       console.log(
-        "BATCH INVOICES:",
-        invoices
+        "BATCH INVOICE STATUS:",
+        {
+          totalInvoices,
+          exportedCount,
+          pendingCount
+        }
       );
 
+
+      // =========================
+      // FINAL RESPONSE
+      // =========================
 
       return res.json({
 
         success: true,
 
+        // Only these should be exported
         invoices:
-          invoices || [],
+          pendingInvoices,
 
-        totalInvoices:
-          invoices?.length || 0
+        totalInvoices,
+
+        exportedInvoices:
+          exportedCount,
+
+        pendingInvoices:
+          pendingCount
 
       });
 
@@ -33577,6 +33910,315 @@ app.get(
 
       console.error(
         "GET BATCH INVOICES ERROR:",
+        err
+      );
+
+
+      return res.status(500).json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
+// GET BATCH HISTORY
+// =========================
+
+app.get(
+  "/getBatchHistory",
+
+  async (req, res) => {
+
+    try {
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      const tally_owner =
+        String(
+          req.query.tally_owner || "CA"
+        )
+          .trim()
+          .toUpperCase();
+
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+
+      // =========================
+      // GET ALL BATCH ROWS
+      // =========================
+
+      const {
+
+        data: rows,
+
+        error
+
+      } = await supabase
+
+        .from("vw_batches_units")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "tally_owner",
+          tally_owner
+        )
+
+        .order(
+          "created_at",
+          {
+            ascending: false
+          }
+        )
+
+        .order(
+          "sequence_no",
+          {
+            ascending: true
+          }
+        );
+
+
+      if (error) {
+
+        console.error(
+          "GET BATCH HISTORY ERROR:",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+
+      // =========================
+      // NO BATCHES
+      // =========================
+
+      if (
+        !rows ||
+        rows.length === 0
+      ) {
+
+        return res.json({
+
+          success: true,
+
+          batches: []
+
+        });
+
+      }
+
+
+      // =========================
+      // GROUP BY BATCH
+      // =========================
+
+      const batchMap =
+        new Map();
+
+
+      for (const row of rows) {
+
+        const key = [
+          row.company_code,
+          row.tally_owner,
+          row.batch_id
+        ].join("|");
+
+
+        if (!batchMap.has(key)) {
+
+          batchMap.set(
+            key,
+            {
+
+              batch_id:
+                row.batch_id,
+
+              batch_name:
+                row.batch_name,
+
+              batch_type:
+                row.batch_type,
+
+              batch_date:
+                row.batch_date,
+
+              company_code:
+                row.company_code,
+
+              tally_owner:
+                row.tally_owner,
+
+              inv_from:
+                row.inv_from,
+
+              inv_to:
+                row.inv_to,
+
+              created_at:
+                row.created_at,
+
+              steps: []
+
+            }
+          );
+
+        }
+
+
+        batchMap
+          .get(key)
+          .steps
+          .push({
+
+            sequence_no:
+              row.sequence_no,
+
+            step_name:
+              row.step_name,
+
+            status:
+              row.status,
+
+            error_message:
+              row.error_message
+
+          });
+
+      }
+
+
+      // =========================
+      // BUILD BATCH SUMMARIES
+      // =========================
+
+      const batches =
+
+        Array.from(
+          batchMap.values()
+        )
+
+          .map((batch) => {
+
+            const completedSteps =
+
+              batch.steps.filter(
+
+                (step) =>
+
+                  step.status ===
+                  "COMPLETED"
+
+              ).length;
+
+
+            const totalSteps =
+              batch.steps.length;
+
+
+            const status =
+
+              totalSteps > 0 &&
+
+              completedSteps ===
+                totalSteps
+
+                ? "COMPLETED"
+
+                : "IN_PROGRESS";
+
+
+            return {
+
+              ...batch,
+
+              completedSteps,
+
+              totalSteps,
+
+              status
+
+            };
+
+          })
+
+          .sort((a, b) =>
+
+            new Date(
+              b.created_at
+            ).getTime()
+
+            -
+
+            new Date(
+              a.created_at
+            ).getTime()
+
+          );
+
+
+      // =========================
+      // FINAL RESPONSE
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        batches
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.error(
+        "GET BATCH HISTORY ERROR:",
         err
       );
 

@@ -28,9 +28,9 @@
 
         <TALLYMESSAGE xmlns:UDF="TallyUDF">
 
-          <LEDGER NAME="SGST 9%" ACTION="Create">
+          <LEDGER NAME="SGST 7%" ACTION="Create">
 
-            <NAME>SGST 9%</NAME>
+            <NAME>SGST 7%</NAME>
 
             <PARENT>Duties &amp; Taxes</PARENT>
 

@@ -28,9 +28,9 @@
 
         <TALLYMESSAGE xmlns:UDF="TallyUDF">
 
-          <STOCKITEM NAME="39171010-Pkt" ACTION="Create">
+          <STOCKITEM NAME="07134001-Pc" ACTION="Create">
 
-            <NAME>39171010-Pkt</NAME>
+            <NAME>07134001-Pc</NAME>
 
             <PARENT></PARENT>
 
@@ -40,9 +40,9 @@
 
             <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>
 
-            <BASEUNITS>Pkt</BASEUNITS>
+            <BASEUNITS>Pc</BASEUNITS>
 
-            <VATBASEUNIT>Pkt</VATBASEUNIT>
+            <VATBASEUNIT>Pc</VATBASEUNIT>
 
             <GSTDETAILS.LIST>
 
@@ -66,7 +66,7 @@
                     Based on Value
                   </GSTRATEVALUATIONTYPE>
 
-                  <GSTRATE>9</GSTRATE>
+                  <GSTRATE>6</GSTRATE>
 
                 </RATEDETAILS.LIST>
 
@@ -80,7 +80,7 @@
                     Based on Value
                   </GSTRATEVALUATIONTYPE>
 
-                  <GSTRATE>9</GSTRATE>
+                  <GSTRATE>6</GSTRATE>
 
                 </RATEDETAILS.LIST>
 
@@ -92,7 +92,7 @@
                     Based on Value
                   </GSTRATEVALUATIONTYPE>
 
-                  <GSTRATE>18</GSTRATE>
+                  <GSTRATE>12</GSTRATE>
 
                 </RATEDETAILS.LIST>
 
@@ -104,7 +104,7 @@
 
               <APPLICABLEFROM>20260401</APPLICABLEFROM>
 
-              <HSNCODE>39171010</HSNCODE>
+              <HSNCODE>07134001</HSNCODE>
 
               <SRCOFHSNDETAILS>
                 Specify Details Here
@@ -116,7 +116,7 @@
 
               <NAME.LIST TYPE="String">
 
-                <NAME>39171010-Pkt</NAME>
+                <NAME>07134001-Pc</NAME>
 
               </NAME.LIST>
 

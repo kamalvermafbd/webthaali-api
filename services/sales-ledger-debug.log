@@ -28,9 +28,9 @@
 
         <TALLYMESSAGE xmlns:UDF="TallyUDF">
 
-          <LEDGER NAME="Local Sale 18%" ACTION="Create">
+          <LEDGER NAME="Local Sale 14%" ACTION="Create">
 
-            <NAME>Local Sale 18%</NAME>
+            <NAME>Local Sale 14%</NAME>
             <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>
 
             <PARENT>Sales Accounts</PARENT>
