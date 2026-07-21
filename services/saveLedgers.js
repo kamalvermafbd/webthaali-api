@@ -27,7 +27,39 @@ async function saveLedgers({
     const withGuid = [];
    // const withoutGuid = [];
 
+    // ===========================
+// LOAD GROUPS FOR LOOKUP
+// ===========================
+
+const { data: groups, error: groupsError } = await supabase
+    .from("tally_sync_groups")
+    .select("name,guid,master_id,alter_id")
+    .eq("company_code", company_code)
+    .eq("tally_owner", tally_owner);
+
+if (groupsError) {
+    throw new Error("Failed to load groups : " + groupsError.message);
+}
+
+const groupMap = {};
+
+for (const group of groups || []) {
+
+    groupMap[(group.name || "").trim().toUpperCase()] = group;
+
+}
+
+
     for (const ledger of ledgers) {
+
+        const parentGroup =
+    groupMap[(ledger.parent || "").trim().toUpperCase()];
+
+   if (!parentGroup && ledger.parent) {
+    console.warn(
+        `[${company_code}] Parent group not found for Ledger "${ledger.name}". Parent="${ledger.parent}"`
+    );
+}
 
         const row = {
 
@@ -40,6 +72,19 @@ async function saveLedgers({
 
             name: ledger.name?.trim(),
             parent: ledger.parent?.trim() || null,
+
+            parent_group_guid:
+                parentGroup?.guid || null,
+
+            parent_group_master_id:
+                parentGroup?.master_id || null,
+
+            parent_group_alter_id:
+                parentGroup?.alter_id || null,
+
+            root_group:
+                parentGroup?.root_group || null,
+                
             reserved_name: ledger.reservedName?.trim() || null,
 
             gst_applicable: ledger.gstApplicable?.trim() || null,
@@ -63,7 +108,7 @@ async function saveLedgers({
             is_revenue: ledger.isRevenue ?? null,
             is_deemed_positive: ledger.isDeemedPositive ?? null,
 
-            root_group: ledger.rootGroup?.trim() || null,
+          //  root_group: ledger.rootGroup?.trim() || null,
 
             is_deleted: false,
 
@@ -87,6 +132,9 @@ async function saveLedgers({
 }
 
     }
+
+
+   
 
     let success = 0;
 

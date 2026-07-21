@@ -79,6 +79,9 @@ const { saveLedgers } = require("./services/saveLedgers");
 const { saveUnits } = require("./services/saveUnits");
 const { saveGodowns } = require("./services/saveGodowns");
 const { saveCostCentres } = require("./services/saveCostCentres");
+const { saveStockGroups } = require("./services/saveStockGroups");
+const { saveStocks } = require("./services/saveStocks");
+const { saveVouchers } = require("./services/saveVouchers");
 
 //io.on("connection", (socket) => {
 
@@ -34712,14 +34715,59 @@ const costCentreResult = await saveCostCentres({
 
 console.log("COST CENTRE SAVE :", costCentreResult);
 
+// =========================
+// SAVE STOCK GROUPS
+// =========================
+
+const stockGroupResult = await saveStockGroups({
+    company_code,
+    tally_owner,
+    sync_batch_id: "TEST001",
+    stockGroups: result.stockGroups || []
+});
+
+console.log("STOCK GROUP SAVE :", stockGroupResult);
+
+// =========================
+// SAVE STOCKS
+// =========================
+
+const stockResult = await saveStocks({
+    company_code,
+    tally_owner,
+    sync_batch_id: "TEST001",
+    stocks: result.stocks || []
+});
+
+console.log("STOCK SAVE :", stockResult);
+
+
+// =========================
+// SAVE VOUCHERS
+// =========================
+
+const voucherResult = await saveVouchers({
+    company_code,
+    tally_owner,
+    sync_batch_id: "TEST001",
+    vouchers: result.vouchers || []
+});
+
+console.log("VOUCHER SAVE :", voucherResult);
+
+
+
 return res.json({
   ...result,
-  db: {
+db: {
     groups: groupResult,
     ledgers: ledgerResult,
     godowns: godownResult,
+    stockGroups: stockGroupResult,
+    stocks: stockResult,
     costCentres: costCentreResult,
-    units: unitResult
+    units: unitResult,
+    vouchers: voucherResult
 }
 });
 
