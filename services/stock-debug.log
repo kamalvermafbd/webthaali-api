@@ -18,7 +18,7 @@
 
         <STATICVARIABLES>
 
-          <SVCURRENTCOMPANY>Webthaali</SVCURRENTCOMPANY>
+          <SVCURRENTCOMPANY>Sunil Ent (Client</SVCURRENTCOMPANY>
 
         </STATICVARIABLES>
 
@@ -28,9 +28,9 @@
 
         <TALLYMESSAGE xmlns:UDF="TallyUDF">
 
-          <STOCKITEM NAME="39171010-LTH" ACTION="Create">
+          <STOCKITEM NAME="3/4 CPVC Elbow" ACTION="Create">
 
-            <NAME>39171010-LTH</NAME>
+            <NAME>3/4 CPVC Elbow</NAME>
 
             <PARENT></PARENT>
 
@@ -40,9 +40,9 @@
 
             <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>
 
-            <BASEUNITS>LTH</BASEUNITS>
+            <BASEUNITS>Nos</BASEUNITS>
 
-            <VATBASEUNIT>LTH</VATBASEUNIT>
+            <VATBASEUNIT>Nos</VATBASEUNIT>
 
             <GSTDETAILS.LIST>
 
@@ -66,7 +66,7 @@
                     Based on Value
                   </GSTRATEVALUATIONTYPE>
 
-                  <GSTRATE>7.5</GSTRATE>
+                  <GSTRATE>9</GSTRATE>
 
                 </RATEDETAILS.LIST>
 
@@ -80,7 +80,7 @@
                     Based on Value
                   </GSTRATEVALUATIONTYPE>
 
-                  <GSTRATE>7.5</GSTRATE>
+                  <GSTRATE>9</GSTRATE>
 
                 </RATEDETAILS.LIST>
 
@@ -92,7 +92,7 @@
                     Based on Value
                   </GSTRATEVALUATIONTYPE>
 
-                  <GSTRATE>15</GSTRATE>
+                  <GSTRATE>18</GSTRATE>
 
                 </RATEDETAILS.LIST>
 
@@ -104,7 +104,7 @@
 
               <APPLICABLEFROM>20260401</APPLICABLEFROM>
 
-              <HSNCODE>39171010</HSNCODE>
+              <HSNCODE>3918</HSNCODE>
 
               <SRCOFHSNDETAILS>
                 Specify Details Here
@@ -116,7 +116,7 @@
 
               <NAME.LIST TYPE="String">
 
-                <NAME>39171010-LTH</NAME>
+                <NAME>3/4 CPVC Elbow</NAME>
 
               </NAME.LIST>
 

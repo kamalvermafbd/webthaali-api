@@ -20,6 +20,12 @@ const nodemailer =
 
  const { Resend } = require("resend");
 
+
+ const {
+    getSyncMasterData,
+    getTrialBalance
+} = require("./services/syncService");
+
 const {
 
    sendToTally,
@@ -44,6 +50,8 @@ createTaxLedger,
 
 } = require("./services/tallyService");
 
+
+
 const resend = new Resend(
   process.env.RESEND_API_KEY
 ); 
@@ -65,6 +73,12 @@ const server = http.createServer(app);
 const { initializeSocket } = require("./socketio/socketserver");
 
 const io = initializeSocket(server);
+
+const { saveGroups } = require("./services/saveGroups");
+const { saveLedgers } = require("./services/saveLedgers");
+const { saveUnits } = require("./services/saveUnits");
+const { saveGodowns } = require("./services/saveGodowns");
+const { saveCostCentres } = require("./services/saveCostCentres");
 
 //io.on("connection", (socket) => {
 
@@ -28412,6 +28426,9 @@ const billeyMapping =
     tally_owner
   );
 
+  const stockMappingMethod =
+  billeyMapping.stockMappingMethod;
+
 console.log(
   "BILLEY MAPPING",
   billeyMapping
@@ -28701,9 +28718,20 @@ for (const item of items) {
   // RESOLVE STOCK MAPPING
   // HSN + UNIT BASIS
   // =========================
+let stockKey = "";
 
-  const stockKey =
+if (stockMappingMethod === "HSN_CODE") {
+
+  stockKey =
     `STOCK|${String(item.hsn || "").trim()}|${String(item.unit || "").trim()}`;
+
+}
+else {
+
+  stockKey =
+    `STOCK|${String(item.item_name || "").trim()}`;
+
+}
 
 
   const stockMapping =
@@ -29272,6 +29300,32 @@ async function buildBilleyMapping(
       ? "tally_exported"
       : "client_tally_exported";
 
+  const {
+  data: company,
+  error: companyError
+} = await supabase
+  .from("company")
+  .select(`
+    stock_mapping_method,
+    client_stock_mapping_method
+  `)
+  .eq("company_code", company_code)
+  .single();
+
+if (companyError) {
+  throw new Error(companyError.message);
+}
+
+const stockMappingMethod =
+  isCaOwner
+    ? (company?.stock_mapping_method || "HSN_CODE")
+    : (company?.client_stock_mapping_method || "HSN_CODE");
+
+console.log(
+  "STOCK MAPPING METHOD",
+  stockMappingMethod
+);
+
   // =========================
 // GET PENDING INVOICE IDS
 // =========================
@@ -29347,6 +29401,8 @@ if (
 
   return {
 
+    stockMappingMethod,
+
     salesGL: [],
 
     taxGL: [],
@@ -29359,7 +29415,7 @@ if (
 
     debtors: []
 
-  };
+};
 
 }
 
@@ -29378,13 +29434,14 @@ const {
   .from("invoice_items")
 
   .select(`
+    item_name,
     hsn,
     unit,
     gst_percent,
     cgst,
     sgst,
     igst
-  `)
+`)
 
   .in(
 
@@ -29414,13 +29471,14 @@ console.log(
 
 // =========================
 // BUILD STOCK MAPPING
-// HSN + UNIT BASIS
 // =========================
 
 const stockMap = new Map();
 
-
 (gstRows || []).forEach((row) => {
+
+  const itemName =
+    String(row.item_name || "").trim();
 
   const hsn =
     String(row.hsn || "").trim();
@@ -29431,13 +29489,46 @@ const stockMap = new Map();
   const gstRate =
     Number(row.gst_percent || 0);
 
+  let stockKey = "";
+  let stockName = "";
 
-  if (!hsn || !unit) return;
+  // =========================
+  // HSN MAPPING
+  // =========================
 
+  if (stockMappingMethod === "HSN_CODE") {
 
-  const stockKey =
-    `STOCK|${hsn}|${unit}`;
+    if (!hsn || !unit) return;
 
+    stockKey =
+      `STOCK|${hsn}|${unit}`;
+
+    stockName =
+      `${hsn}-${unit}`;
+
+  }
+
+  // =========================
+  // STOCK ITEM MAPPING
+  // =========================
+
+  else if (stockMappingMethod === "STOCK_ITEM") {
+
+    if (!itemName) return;
+
+    stockKey =
+      `STOCK|${itemName}`;
+
+    stockName =
+      itemName;
+
+  }
+
+  else {
+
+    return;
+
+  }
 
   if (!stockMap.has(stockKey)) {
 
@@ -29454,7 +29545,7 @@ const stockMap = new Map();
           stockKey,
 
         billey_name:
-          `${hsn}-${unit}`,
+          stockName,
 
         hsn,
 
@@ -29470,11 +29561,9 @@ const stockMap = new Map();
 
 });
 
-
 const stock =
 
   [...stockMap.values()];
-
 
 console.log(
   "STOCK MAPPING",
@@ -29950,6 +30039,8 @@ console.log(
 
 return {
 
+  stockMappingMethod,
+
   salesGL: mappedSaleGL,
 
   taxGL: mappedTaxGL,
@@ -30024,6 +30115,44 @@ if (!company_code) {
 
 }
 
+
+// =========================
+// GET COMPANY SETTINGS
+// =========================
+
+const {
+  data: company,
+  error: companyError
+} = await supabase
+  .from("company")
+  .select(`
+    stock_mapping_method,
+    client_stock_mapping_method
+  `)
+  .eq("company_code", company_code)
+  .single();
+
+  console.log("COMPANY", company);
+console.log("COMPANY ERROR", companyError);
+
+if (companyError) {
+
+  return res.json({
+    success: false,
+    error: companyError.message
+  });
+
+}
+
+const stockMappingMethod = is_ca
+  ? (company?.stock_mapping_method || "HSN_CODE")
+  : (company?.client_stock_mapping_method || "HSN_CODE");
+
+console.log(
+  "STOCK MAPPING METHOD",
+  stockMappingMethod
+);
+
 // =========================
 // GET BATCH
 // =========================
@@ -30071,6 +30200,9 @@ const {
 .limit(1)
 
 .single();
+
+console.log("BATCH", batch);
+console.log("BATCH ERROR", batchError);
 
 if (batchError) {
 
@@ -30376,10 +30508,11 @@ const {
 } = await supabase
   .from("invoice_items")
   .select(`
+    item_name,
     hsn,
     unit,
     gst_percent
-  `)
+`)
   .in("invoice_id", invoice_ids);
 
 if (stockError) {
@@ -30500,12 +30633,14 @@ console.log(
 
 // =========================
 // BUILD STOCK MAPPING
-// HSN + UNIT BASIS
 // =========================
 
 const stockMap = new Map();
 
 (stockRows || []).forEach((row) => {
+
+  const itemName =
+    String(row.item_name || "").trim();
 
   const hsn =
     String(row.hsn || "").trim();
@@ -30516,10 +30651,34 @@ const stockMap = new Map();
   const gstRate =
     Number(row.gst_percent || 0);
 
-  if (!hsn || !unit) return;
+  let stockKey = "";
+  let stockName = "";
 
-  const stockKey =
-    `STOCK|${hsn}|${unit}`;
+  // -------------------------
+  // HSN BASED
+  // -------------------------
+
+  if (stockMappingMethod === "HSN_CODE") {
+
+    if (!hsn || !unit) return;
+
+    stockKey = `STOCK|${hsn}|${unit}`;
+    stockName = `${hsn}-${unit}`;
+
+  }
+
+  // -------------------------
+  // STOCK ITEM BASED
+  // -------------------------
+
+  else if (stockMappingMethod === "STOCK_ITEM") {
+
+    if (!itemName) return;
+
+    stockKey = `STOCK|${itemName}`;
+    stockName = itemName;
+
+  }
 
   if (!stockMap.has(stockKey)) {
 
@@ -30529,7 +30688,7 @@ const stockMap = new Map();
 
       billey_key: stockKey,
 
-      billey_name: `${hsn}-${unit}`,
+      billey_name: stockName,
 
       hsn,
 
@@ -30549,8 +30708,6 @@ console.log(
   "STOCK MAPPING",
   stock
 );
-
-
       // =========================
       // BUILD HSN MAPPING
       // =========================
@@ -31005,6 +31162,9 @@ app.get(
 
         .single();
 
+        console.log("COMPANY", company);
+console.log("COMPANY ERROR", companyError);
+
       if (companyError) {
 
         return res.json({
@@ -31051,8 +31211,6 @@ const tallyCompany =
   is_ca
 
 );
-
-
 
 console.log(
 
@@ -32865,6 +33023,7 @@ const batchIdColumn =
   }
 );
 
+
   if (batchError) {
 
   return res.json({
@@ -34261,6 +34420,356 @@ app.get(
 
 );
 
+
+
+app.get("/getSyncMasterData", async (req, res) => {
+
+    const { company_code, tally_owner, master_type } = req.query;
+
+    const result = await getSyncMasterData({
+        company_code,
+        tally_owner,
+        master_type
+    });
+
+    res.json(result);
+
+});
+
+
+// =========================
+// GET TRIAL BALANCE
+// =========================
+
+app.get("/getTrialBalance", async (req, res) => {
+
+    try {
+
+        const company_code =
+            String(req.query.company_code || "").trim();
+
+        const tally_owner =
+            String(req.query.tally_owner || "").trim();
+
+            const asOnDate =
+    String(req.query.as_on_date || "").trim();
+
+        if (!company_code) {
+
+            return res.json({
+                success: false,
+                error: "company_code missing"
+            });
+
+        }
+
+        if (!tally_owner) {
+
+            return res.json({
+                success: false,
+                error: "tally_owner missing"
+            });
+
+        }
+
+        const result = await getTrialBalance({
+    company_code,
+    tally_owner,
+    asOnDate
+});
+
+        return res.json(result);
+
+    }
+
+    catch (err) {
+
+        return res.status(500).json({
+
+            success: false,
+
+            error: err.message
+
+        });
+
+    }
+
+});
+
+// =========================
+// GET MASTERS
+// =========================
+
+app.get("/getMasters", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    console.log("================================");
+    console.log("GET MASTERS");
+    console.log("QUERY :", req.query);
+    console.log("COMPANY CODE :", company_code);
+    console.log("TALLY OWNER :", tally_owner);
+    console.log("REGISTERED :", registry.list());
+
+    if (!company_code) {
+
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+
+    }
+
+    // =========================
+    // GET COMPANY
+    // =========================
+
+    const {
+      data: companyData,
+      error: companyError
+    } = await supabase
+
+      .from("company")
+
+      .select("*")
+
+      .eq(
+        "company_code",
+        company_code
+      )
+
+      .single();
+
+    if (companyError || !companyData) {
+
+      return res.json({
+
+        success: false,
+
+        error: "Company not found"
+
+      });
+
+    }
+
+    // =========================
+    // TALLY COMPANY
+    // =========================
+
+    const company =
+
+      tally_owner === "CA"
+
+        ? companyData.ca_tally_company
+
+        : companyData.client_tally_company;
+
+    if (!company) {
+
+      return res.json({
+
+        success: false,
+
+        error: "Tally company not mapped"
+
+      });
+
+    }
+
+    // =========================
+    // CONNECTOR
+    // =========================
+
+    const socket =
+      registry.get(company_code);
+
+    console.log(
+      "SOCKET FOUND :",
+      !!socket
+    );
+
+    if (socket) {
+
+      console.log(
+        "SOCKET ID :",
+        socket.id
+      );
+
+    }
+
+    if (!socket) {
+
+      return res.json({
+
+        success: false,
+
+        error: "Connector offline"
+
+      });
+
+    }
+
+  
+// =========================
+// IMPORT
+// =========================
+
+const result = await sendToConnector(
+  socket,
+  "getMasters",
+  {
+    company
+  }
+);
+
+// =========================
+// SAVE GROUPS
+// =========================
+
+const groupResult = await saveGroups({
+  company_code,
+  tally_owner,
+  sync_batch_id: "TEST001",
+  groups: result.groups || []
+});
+
+console.log("GROUP SAVE :", groupResult);
+
+// =========================
+// SAVE LEDGERS
+// =========================
+
+const ledgerResult = await saveLedgers({
+  company_code,
+  tally_owner,
+  sync_batch_id: "TEST001",
+  ledgers: result.ledgers || []
+});
+
+console.log("LEDGER SAVE :", ledgerResult);
+
+console.log(
+  "GET MASTERS RESULT:",
+  result.summary
+);
+
+// =========================
+// SAVE GODOWNS
+// =========================
+
+const godownResult = await saveGodowns({
+  company_code,
+  tally_owner,
+  sync_batch_id: "TEST001",
+  godowns: result.godowns || []
+});
+
+console.log("GODOWN SAVE :", godownResult);
+
+// =========================
+// SAVE UNITS
+// =========================
+
+const unitResult = await saveUnits({
+    company_code,
+    tally_owner,
+    sync_batch_id: "TEST001",
+    units: result.units || []
+});
+
+console.log("UNIT SAVE :", unitResult);
+
+// =========================
+// SAVE COST CENTRES
+// =========================
+
+const costCentreResult = await saveCostCentres({
+  company_code,
+  tally_owner,
+  sync_batch_id: "TEST001",
+  costCentres: result.costCentres || []
+});
+
+console.log("COST CENTRE SAVE :", costCentreResult);
+
+return res.json({
+  ...result,
+  db: {
+    groups: groupResult,
+    ledgers: ledgerResult,
+    godowns: godownResult,
+    costCentres: costCentreResult,
+    units: unitResult
+}
+});
+
+}catch (err) {
+
+    console.error(err);
+
+    return res.status(500).json({
+
+      success: false,
+
+      error:
+        err.response?.data || err.message
+
+    });
+
+  }
+
+});
+
+
+// =========================
+// TEST SAVE GROUPS
+// =========================
+
+app.post("/testSaveGroups", async (req, res) => {
+
+    try {
+
+        const result = await saveGroups(req.body);
+
+        return res.json({
+            success: true,
+            ...result
+        });
+
+    } catch (err) {
+
+        console.error(err);
+
+        return res.status(500).json({
+
+            success: false,
+            error: err.message
+
+        });
+
+    }
+
+});
 
 server.listen(
   process.env.PORT,
