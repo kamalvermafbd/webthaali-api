@@ -34,6 +34,8 @@ async function saveVouchers({
 
         const header = voucher.header || {};
 
+        
+
        if (!header.guid?.trim()) {
 
             console.warn(
@@ -104,7 +106,7 @@ async function saveVouchers({
 
         });
 
-                for (const ledger of (voucher.ledgers || [])) {
+    for (const ledger of (voucher.ledgers || [])) {
 
             ledgerRows.push({
 
@@ -139,7 +141,7 @@ async function saveVouchers({
                     ledger.isLastDeemedPositive === "Yes",
 
                 remove_zero_entries:
-    ledger.removeZeroEntries === "Yes",
+                    ledger.removeZeroEntries === "Yes",
 
                 bill_allocations:
                     ledger.billAllocations ?? [],
@@ -152,7 +154,29 @@ async function saveVouchers({
         }
 
 
-               for (const item of (voucher.inventory || [])) {
+    for (const item of (voucher.inventory || [])) {
+
+     const gstRates = item.gstRates ?? [];
+
+    const cgstRate =
+        gstRates.find(r => r.dutyHead === "CGST")?.rate ?? null;
+
+    const sgstRate =
+        gstRates.find(r => r.dutyHead === "SGST/UTGST")?.rate ?? null;
+
+    const igstRate =
+        gstRates.find(r => r.dutyHead === "IGST")?.rate ?? null;
+
+        const hsnCode =
+            item.hsnCode || null;
+
+          console.log({
+    stock: item.stockItem,
+    taxable: item.taxableAmount,
+    cgst: item.cgstAmount,
+    sgst: item.sgstAmount,
+    igst: item.igstAmount
+});
 
             inventoryRows.push({
 
@@ -164,9 +188,7 @@ async function saveVouchers({
 
                 stock_item:
                     item.stockItem?.trim() || null,
-
-                stock_masterid:
-                    item.stockMasterId ?? null,
+          
 
                 actual_qty:
                     item.actualQty || null,
@@ -192,10 +214,7 @@ async function saveVouchers({
                 amount:
                     item.amount ?? null,
 
-                hsn_code:
-                item.hsnCode != null
-                    ? String(item.hsnCode).trim()
-                    : null,
+             hsn_code: hsnCode,
 
                 discount:
                     item.discount ?? null,
@@ -209,8 +228,103 @@ async function saveVouchers({
                 accounting:
                     item.accounting ?? [],
 
-                gst_rates:
-                    item.gstRates ?? [],
+                stock_guid:
+    item.stockGuid ?? null,
+
+stock_masterid:
+    item.stockMasterIdResolved ?? null,
+
+stock_alterid:
+    item.stockAlterId ?? null,
+
+voucher_master_id:
+    item.voucherMasterId ?? null,
+
+voucher_alter_id:
+    item.voucherAlterId ?? null,
+
+voucher_date:
+    item.voucherDate ?? null,
+
+voucher_type:
+    item.voucherType ?? null,
+
+transaction_type:
+    item.transactionType ?? null,
+
+ledger_name:
+    item.ledgerName ?? null,
+
+ledger_guid:
+    item.ledgerGuid ?? null,
+
+ledger_master_id:
+    item.ledgerMasterId ?? null,
+
+ledger_alter_id:
+    item.ledgerAlterId ?? null,
+
+ledger_parent_name:
+    item.ledgerParentName ?? null,
+
+ledger_parent_guid:
+    item.ledgerParentGuid ?? null,
+
+ledger_parent_master_id:
+    item.ledgerParentMasterId ?? null,
+
+ledger_parent_alter_id:
+    item.ledgerParentAlterId ?? null,    
+
+party_name:
+    item.partyName ?? null,
+
+party_guid:
+    item.partyGuid ?? null,
+
+party_master_id:
+    item.partyMasterId ?? null,
+
+party_alter_id:
+    item.partyAlterId ?? null,
+
+party_parent_name:
+    item.partyParentName ?? null,
+
+party_parent_guid:
+    item.partyParentGuid ?? null,
+
+party_parent_master_id:
+    item.partyParentMasterId ?? null,
+
+party_parent_alter_id:
+    item.partyParentAlterId ?? null,
+
+                cgst_rate: cgstRate,
+
+                sgst_rate: sgstRate,
+
+                igst_rate: igstRate,
+
+
+                gst_rate:
+                    igstRate ??
+                    ((cgstRate || 0) + (sgstRate || 0)),
+
+
+               cgst_amount:
+                    item.cgstAmount ?? 0,
+
+                sgst_amount:
+                    item.sgstAmount ?? 0,
+
+                igst_amount:
+                    item.igstAmount ?? 0,
+
+                taxable_amount:
+                    item.taxableAmount ?? 0,
+
+              gst_rates: item.gstRates ?? [],
 
                 costcentre_allocations:
                     item.costCentreAllocations ?? []

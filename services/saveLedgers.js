@@ -108,9 +108,18 @@ for (const group of groups || []) {
             is_revenue: ledger.isRevenue ?? null,
             is_deemed_positive: ledger.isDeemedPositive ?? null,
 
+            gst_duty_type: ledger.gstDutyType?.trim() || null,
+
+            gst_tax_type: ledger.gstTaxType?.trim() || null,
+
+            gst_rate: ledger.gstRate ?? null,
           //  root_group: ledger.rootGroup?.trim() || null,
 
+          tax_percentage_of_calculation: ledger.gstRate ?? null,
+
             is_deleted: false,
+
+
 
             last_synced_at: now,
             sync_batch_id,

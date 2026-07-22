@@ -26,7 +26,42 @@ async function saveStocks({
 
     const withGuid = [];
 
+    // ===========================
+    // LOAD STOCK GROUPS
+    // ===========================
+
+    const { data: stockGroups, error: stockGroupError } = await supabase
+    .from("tally_sync_stock_groups")
+    .select("name,guid,master_id,alter_id")
+    .eq("company_code", company_code)
+    .eq("tally_owner", tally_owner)
+    .eq("is_deleted", false);
+
+if (stockGroupError) {
+    throw new Error(
+        "Failed to load Stock Groups: " +
+        stockGroupError.message
+    );
+}
+
+const stockGroupMap = new Map();
+
+for (const group of stockGroups || []) {
+    stockGroupMap.set(
+        group.name.trim().toUpperCase(),
+        group
+    );
+}
+
+// ===========================
+// BUILD ROWS
+// ===========================
+
     for (const stock of stocks) {
+
+        const parentGroup = stockGroupMap.get(
+            (stock.parent || "").trim().toUpperCase()
+        );
 
         const row = {
 
@@ -34,11 +69,21 @@ async function saveStocks({
             tally_owner,
 
             guid: stock.guid?.trim() || null,
-            masterid: stock.masterid ?? null,
-            alterid: stock.alterid ?? null,
+      masterid: stock.masterId ?? null,
+alterid: stock.alterId ?? null,
 
             name: stock.name?.trim() || null,
             parent: stock.parent?.trim() || null,
+
+            parent_group_guid:
+                parentGroup?.guid || null,
+
+            parent_group_master_id:
+                parentGroup?.master_id || null,
+
+            parent_group_alter_id:
+                parentGroup?.alter_id || null,
+                
             base_unit: stock.baseUnit?.trim() || null,
 
             hsn_code: stock.hsnCode?.trim() || null,
@@ -54,6 +99,11 @@ async function saveStocks({
             cgst: stock.cgst === "" ? null : Number(stock.cgst),
             sgst: stock.sgst === "" ? null : Number(stock.sgst),
             igst: stock.igst === "" ? null : Number(stock.igst),
+
+            gst_rate:
+                stock.gstRate === ""
+                    ? null
+                    : Number(stock.gstRate),
 
             is_deleted: false,
 
