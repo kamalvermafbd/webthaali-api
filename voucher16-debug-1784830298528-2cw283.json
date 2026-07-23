@@ -1,0 +1,12 @@
+{
+  "action": "INSERT",
+  "validation": {
+    "valid": true,
+    "requiresRepair": false,
+    "reasons": []
+  },
+  "valid": true,
+  "requiresRepair": false,
+  "reasons": [],
+  "dbData": null
+}

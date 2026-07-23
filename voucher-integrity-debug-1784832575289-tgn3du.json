@@ -1,0 +1,8 @@
+{"generatedAt":"2026-07-23T18:49:35.773Z","guid":"755da616-c913-46c0-9ad0-de5499d071a0-00000005","voucherNumber":1,"action":"SKIP","reasons":[],"parsedLedgerCount":2,"dbLedgerCount":2}
+{"generatedAt":"2026-07-23T18:49:36.112Z","guid":"755da616-c913-46c0-9ad0-de5499d071a0-00000014","voucherNumber":2,"action":"SKIP","reasons":[],"parsedLedgerCount":4,"dbLedgerCount":4}
+{"generatedAt":"2026-07-23T18:49:36.415Z","guid":"755da616-c913-46c0-9ad0-de5499d071a0-00000001","voucherNumber":1,"action":"SKIP","reasons":[],"parsedLedgerCount":3,"dbLedgerCount":3}
+{"generatedAt":"2026-07-23T18:49:36.827Z","guid":"755da616-c913-46c0-9ad0-de5499d071a0-00000002","voucherNumber":2,"action":"SKIP","reasons":[],"parsedLedgerCount":3,"dbLedgerCount":3}
+{"generatedAt":"2026-07-23T18:49:37.133Z","guid":"755da616-c913-46c0-9ad0-de5499d071a0-00000007","voucherNumber":1,"action":"SKIP","reasons":[],"parsedLedgerCount":2,"dbLedgerCount":2}
+{"generatedAt":"2026-07-23T18:49:37.439Z","guid":"755da616-c913-46c0-9ad0-de5499d071a0-00000008","voucherNumber":2,"action":"SKIP","reasons":[],"parsedLedgerCount":2,"dbLedgerCount":2}
+{"generatedAt":"2026-07-23T18:49:37.745Z","guid":"755da616-c913-46c0-9ad0-de5499d071a0-00000010","voucherNumber":5,"action":"FORCE_UPDATE","reasons":["Ledger Parent AlterId Mismatch : 755da616-c913-46c0-9ad0-de5499d071a0-000000d9"],"parsedLedgerCount":4,"dbLedgerCount":4}
+{"generatedAt":"2026-07-23T18:49:38.234Z","guid":"755da616-c913-46c0-9ad0-de5499d071a0-00000016","voucherNumber":3,"action":"FORCE_UPDATE","reasons":["Ledger Parent AlterId Mismatch : 755da616-c913-46c0-9ad0-de5499d071a0-000000f0","Ledger Parent AlterId Mismatch : 755da616-c913-46c0-9ad0-de5499d071a0-000000ed"],"parsedLedgerCount":4,"dbLedgerCount":4}

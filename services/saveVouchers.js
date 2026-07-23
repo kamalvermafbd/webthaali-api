@@ -2,10 +2,14 @@ const { createClient } = require("@supabase/supabase-js");
 const fs = require("fs");
 const path = require("path");
 
+
 const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_SERVICE_KEY
 );
+
+const VoucherIntegrityService = require("./VoucherIntegrityService");
+
 
 async function saveVouchers({
     company_code,
@@ -24,7 +28,10 @@ async function saveVouchers({
 
     }
 
-    const now = new Date().toISOString();
+   const now = new Date().toISOString();
+
+const runId =
+    `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const voucherRows = [];
 
@@ -63,6 +70,18 @@ const unchangedVoucherGuids = [];
 
 const deletedVoucherGuids = [];
 
+fs.writeFileSync(
+    `./incoming-vouchers-${runId}.json`,
+    JSON.stringify(
+        vouchers.map(v => ({
+            guid: v.header?.guid,
+            voucherNumber: v.header?.voucherNumber,
+            runId
+        })),
+        null,
+        2
+    )
+);
 
     for (const voucher of vouchers) {
 
@@ -80,7 +99,78 @@ const deletedVoucherGuids = [];
 
         }
 
+//// new code starts ///
+fs.appendFileSync(
+    `./integrity-entry-${runId}.txt`,
+    `${header.guid} | ${header.voucherNumber}\n`
+);
 
+let integrityResult;
+
+try {
+
+    console.log("BEFORE VALIDATE", header.guid);
+
+integrityResult =
+    await VoucherIntegrityService.validateVoucher({
+        company_code,
+        tally_owner,
+        parsedVoucher: voucher,
+        runId
+    });
+
+console.log("AFTER VALIDATE", header.guid);
+
+} catch (err) {
+
+    fs.appendFileSync(
+        `./integrity-error-${runId}.txt`,
+        `${header.guid} -> ${err.stack}\n\n`
+    );
+
+    throw err;
+}
+
+    fs.appendFileSync(
+    `./integrity-exit-${runId}.txt`,
+    `${header.guid} | ${header.voucherNumber} | ${integrityResult.action}\n`
+);
+console.log(
+    "Integrity Result :",
+    header.voucherNumber,
+    integrityResult.action
+);
+
+if (header.guid.trim().endsWith("00000016")) {
+    fs.writeFileSync(
+        `./voucher16-debug-${runId}.json`,
+        JSON.stringify(integrityResult, null, 2)
+    );
+}
+
+switch (integrityResult.action) {
+
+    case "INSERT":
+        newVoucherRows.push(header.guid.trim());
+        break;
+
+    case "UPDATE":
+        changedVoucherRows.push(header.guid.trim());
+        break;
+
+    case "SKIP":
+        unchangedVoucherGuids.push(header.guid.trim());
+        continue;
+
+    case "FORCE_UPDATE":
+        changedVoucherRows.push(header.guid.trim());
+        break;
+
+}
+
+/// new code ends//
+
+/* remove today 23.07.26
 
 const existingAlterId =
     existingVoucherMap.get(header.guid.trim());
@@ -109,6 +199,7 @@ if (
     continue;
 
 }
+*/
 
         voucherRows.push({
 
@@ -170,6 +261,26 @@ if (
 
         });
 
+
+if (header.guid.trim().endsWith("00000016")) {
+
+    fs.writeFileSync(
+        `./voucher16-ledgers-before-save-${runId}.json`,
+        JSON.stringify(
+            {
+                generatedAt: new Date().toISOString(),
+                guid: header.guid,
+                voucherNumber: header.voucherNumber,
+                ledgerCount: voucher.ledgers?.length || 0,
+                ledgers: voucher.ledgers || []
+            },
+            null,
+            2
+        )
+    );
+
+}
+
     for (const ledger of (voucher.ledgers || [])) {
 
             ledgerRows.push({
@@ -185,6 +296,24 @@ if (
 
                 ledger_masterid:
                     ledger.ledgerMasterId ?? null,
+
+                    ledger_guid:
+             ledger.ledgerGuid ?? null,
+
+            ledger_alterid:
+                ledger.ledgerAlterId ?? null,
+
+            ledger_parent_name:
+                ledger.ledgerParentName ?? null,
+
+            ledger_parent_guid:
+                ledger.ledgerParentGuid ?? null,
+
+            ledger_parent_masterid:
+                ledger.ledgerParentMasterId ?? null,
+
+            ledger_parent_alterid:
+                ledger.ledgerParentAlterId ?? null,
 
                 amount:
                     ledger.amount ?? null,
@@ -217,6 +346,20 @@ if (
 
         }
 
+
+     fs.writeFileSync(
+    `./voucher-ledgers-before-save-${header.voucherNumber}-${runId}.json`,
+    JSON.stringify(
+        {
+            guid: header.guid,
+            voucherNumber: header.voucherNumber,
+            ledgerCount: voucher.ledgers?.length || 0,
+            ledgers: voucher.ledgers || []
+        },
+        null,
+        2
+    )
+);
 
     for (const item of (voucher.inventory || [])) {
 
@@ -426,9 +569,13 @@ let ledgerVoucherGuids = [];
 
 let inventoryVoucherGuids = [];
 
+const debugData = {};
 
 fs.writeFileSync(
-    path.join(__dirname, "voucher-sync-debug.json"),
+    path.join(
+    __dirname,
+    `voucher-sync-debug-before-${runId}.json`
+),
     JSON.stringify(
         {
             generatedAt: new Date().toISOString(),
@@ -469,7 +616,9 @@ fs.writeFileSync(
             inventoryInsert: {
                 totalRows: inventoryRows.length,
                 voucherGuids: inventoryVoucherGuids
-            }
+            },
+
+            debugData: debugData
         },
         null,
         2
@@ -487,6 +636,20 @@ fs.writeFileSync(
      voucherGuids = rowsToSave.map(
             row => row.guid
         );
+
+        debugData.voucherGuids = voucherGuids;
+        debugData.rowsToSave = rowsToSave.length;
+        debugData.totalLedgerRows = ledgerRows.length;
+        debugData.totalInventoryRows = inventoryRows.length;
+
+        debugData.ledgerRowsPerVoucher = {};
+
+for (const row of ledgerRows) {
+
+    debugData.ledgerRowsPerVoucher[row.voucher_guid] =
+        (debugData.ledgerRowsPerVoucher[row.voucher_guid] || 0) + 1;
+
+}
 
      ledgerVoucherGuids = [
             ...new Set(ledgerRows.map(r => r.voucher_guid))
@@ -520,7 +683,52 @@ const { error } = await supabase
 
         success = rowsToSave.length;
 
-   
+   fs.writeFileSync(
+    path.join(
+    __dirname,
+    `voucher-sync-debug-${runId}.json`
+),
+    JSON.stringify(
+        {
+            generatedAt: new Date().toISOString(),
+            debugData
+        },
+        null,
+        2
+    )
+);
+
+fs.writeFileSync(
+    path.join(
+    __dirname,
+    `ledger-delete-debug-${runId}.json`
+),
+    JSON.stringify(
+        {
+            generatedAt: new Date().toISOString(),
+
+            voucherGuids,
+
+            totalVoucherGuids:
+                voucherGuids.length,
+
+            ledgerRowsToInsert:
+                ledgerRows.filter(r =>
+                    voucherGuids.includes(
+                        r.voucher_guid
+                    )
+                ).length,
+
+            rows: ledgerRows.filter(r =>
+                voucherGuids.includes(
+                    r.voucher_guid
+                )
+            )
+        },
+        null,
+        2
+    )
+);
 
         const { error: deleteLedgerError } =
             await supabase
@@ -535,6 +743,36 @@ const { error } = await supabase
 
                 .in("voucher_guid", voucherGuids);
 
+    const { data: remainingRows } =
+    await supabase
+
+        .from("tally_voucher_ledgers")
+
+        .select("voucher_guid, ledger_name")
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner)
+
+        .in("voucher_guid", voucherGuids);
+
+fs.writeFileSync(
+    path.join(
+    __dirname,
+    `ledger-after-delete-${runId}.json`
+),
+    JSON.stringify(
+        {
+            generatedAt:
+                new Date().toISOString(),
+
+            remainingRows
+        },
+        null,
+        2
+    )
+);
+
         if (deleteLedgerError) {
 
             throw new Error(
@@ -547,7 +785,7 @@ const { error } = await supabase
                 if (ledgerRows.length > 0) {
 
                     fs.writeFileSync(
-    "./ledgerRows-before-insert.json",
+    `./ledgerRows-before-insert-${runId}.json`,
     JSON.stringify(
         ledgerRows,
         null,

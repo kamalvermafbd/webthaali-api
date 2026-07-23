@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-07-23T12:59:11.214Z",
-  "processId": 30040,
+  "generatedAt": "2026-07-23T19:03:18.005Z",
+  "processId": 24724,
   "incoming": 8,
   "incomingGuids": [
     {
@@ -37,7 +37,9 @@
     }
   ],
   "new": [],
-  "changed": [],
+  "changed": [
+    "755da616-c913-46c0-9ad0-de5499d071a0-00000016"
+  ],
   "deleted": [],
   "unchanged": [
     "755da616-c913-46c0-9ad0-de5499d071a0-00000005",
@@ -46,8 +48,7 @@
     "755da616-c913-46c0-9ad0-de5499d071a0-00000002",
     "755da616-c913-46c0-9ad0-de5499d071a0-00000007",
     "755da616-c913-46c0-9ad0-de5499d071a0-00000008",
-    "755da616-c913-46c0-9ad0-de5499d071a0-00000010",
-    "755da616-c913-46c0-9ad0-de5499d071a0-00000016"
+    "755da616-c913-46c0-9ad0-de5499d071a0-00000010"
   ],
   "rowsToSave": [],
   "deleteOperation": {
@@ -55,11 +56,12 @@
     "totalVoucherGuids": 0
   },
   "ledgerInsert": {
-    "totalRows": 0,
+    "totalRows": 4,
     "voucherGuids": []
   },
   "inventoryInsert": {
-    "totalRows": 0,
+    "totalRows": 1,
     "voucherGuids": []
-  }
+  },
+  "debugData": {}
 }

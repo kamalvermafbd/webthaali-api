@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-07-23T12:59:11.214Z",
-  "processId": 30040,
+  "generatedAt": "2026-07-23T18:55:33.633Z",
+  "processId": 24724,
   "incoming": 8,
   "incomingGuids": [
     {
@@ -61,5 +61,6 @@
   "inventoryInsert": {
     "totalRows": 0,
     "voucherGuids": []
-  }
+  },
+  "debugData": {}
 }

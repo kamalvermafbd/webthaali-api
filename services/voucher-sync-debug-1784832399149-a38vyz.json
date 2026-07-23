@@ -1,0 +1,16 @@
+{
+  "generatedAt": "2026-07-23T18:46:42.119Z",
+  "debugData": {
+    "voucherGuids": [
+      "755da616-c913-46c0-9ad0-de5499d071a0-00000010",
+      "755da616-c913-46c0-9ad0-de5499d071a0-00000016"
+    ],
+    "rowsToSave": 2,
+    "totalLedgerRows": 8,
+    "totalInventoryRows": 3,
+    "ledgerRowsPerVoucher": {
+      "755da616-c913-46c0-9ad0-de5499d071a0-00000010": 4,
+      "755da616-c913-46c0-9ad0-de5499d071a0-00000016": 4
+    }
+  }
+}
