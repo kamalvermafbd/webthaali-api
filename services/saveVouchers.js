@@ -1,4 +1,6 @@
 const { createClient } = require("@supabase/supabase-js");
+const fs = require("fs");
+const path = require("path");
 
 const supabase = createClient(
     process.env.SUPABASE_URL,
@@ -30,6 +32,38 @@ async function saveVouchers({
 
     const inventoryRows = [];
 
+    const { data: existingVouchers, error: existingError } =
+    await supabase
+        .from("tally_vouchers")
+        .select("guid, alterid")
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner);
+
+if (existingError) {
+
+    throw new Error(
+        "Failed to load existing vouchers: " +
+        existingError.message
+    );
+
+}
+
+const existingVoucherMap = new Map(
+    (existingVouchers || []).map(v => [
+        v.guid,
+        Number(v.alterid)
+    ])
+);
+
+const newVoucherRows = [];
+
+const changedVoucherRows = [];
+
+const unchangedVoucherGuids = [];
+
+const deletedVoucherGuids = [];
+
+
     for (const voucher of vouchers) {
 
         const header = voucher.header || {};
@@ -45,6 +79,36 @@ async function saveVouchers({
             continue;
 
         }
+
+
+
+const existingAlterId =
+    existingVoucherMap.get(header.guid.trim());
+
+if (existingAlterId === undefined) {
+
+    newVoucherRows.push(header.guid.trim());
+
+} else if (
+    existingAlterId === Number(header.alterid)
+) {
+
+    unchangedVoucherGuids.push(header.guid.trim());
+
+} else {
+
+    changedVoucherRows.push(header.guid.trim());
+
+}
+
+if (
+    existingAlterId !== undefined &&
+    existingAlterId === Number(header.alterid)
+) {
+
+    continue;
+
+}
 
         voucherRows.push({
 
@@ -335,21 +399,115 @@ party_parent_alter_id:
 
     }
 
+    const incomingVoucherGuids = new Set(
+    vouchers
+        .map(v => v.header?.guid?.trim())
+        .filter(Boolean)
+);
+
+for (const guid of existingVoucherMap.keys()) {
+
+    if (!incomingVoucherGuids.has(guid)) {
+
+        deletedVoucherGuids.push(guid);
+
+    }
+
+}
+
+
         let success = 0;
+
+        let rowsToSave = [];
+
+let voucherGuids = [];
+
+let ledgerVoucherGuids = [];
+
+let inventoryVoucherGuids = [];
+
+
+fs.writeFileSync(
+    path.join(__dirname, "voucher-sync-debug.json"),
+    JSON.stringify(
+        {
+            generatedAt: new Date().toISOString(),
+
+                processId: process.pid,
+
+            incoming: vouchers.length,
+
+            incomingGuids: vouchers.map(v => ({
+                guid: v.header?.guid?.trim(),
+                voucherNumber: v.header?.voucherNumber
+              })),
+
+            new: newVoucherRows,
+
+            changed: changedVoucherRows,
+
+            deleted: deletedVoucherGuids,
+
+            unchanged: unchangedVoucherGuids,
+
+            rowsToSave: rowsToSave.map(r => ({
+                guid: r.guid,
+                alterid: r.alterid,
+                voucher_number: r.voucher_number
+            })),
+
+            deleteOperation: {
+                voucherGuids: voucherGuids,
+                totalVoucherGuids: voucherGuids.length
+            },
+
+            ledgerInsert: {
+                totalRows: ledgerRows.length,
+                voucherGuids: ledgerVoucherGuids
+            },
+
+            inventoryInsert: {
+                totalRows: inventoryRows.length,
+                voucherGuids: inventoryVoucherGuids
+            }
+        },
+        null,
+        2
+    )
+);
 
     if (voucherRows.length > 0) {
 
-        const { error } = await supabase
+      rowsToSave = voucherRows.filter(
+    row =>
+        newVoucherRows.includes(row.guid) ||
+        changedVoucherRows.includes(row.guid)
+);
 
-            .from("tally_vouchers")
+     voucherGuids = rowsToSave.map(
+            row => row.guid
+        );
 
-            .upsert(
-                voucherRows,
-                {
-                    onConflict:
-                        "company_code,tally_owner,guid"
-                }
-            );
+     ledgerVoucherGuids = [
+            ...new Set(ledgerRows.map(r => r.voucher_guid))
+        ];
+
+        inventoryVoucherGuids = [
+            ...new Set(inventoryRows.map(r => r.voucher_guid))
+        ];
+
+
+const { error } = await supabase
+
+    .from("tally_vouchers")
+
+    .upsert(
+        rowsToSave,
+        {
+            onConflict:
+                "company_code,tally_owner,guid"
+        }
+    );
 
         if (error) {
 
@@ -360,11 +518,9 @@ party_parent_alter_id:
 
         }
 
-        success = voucherRows.length;
+        success = rowsToSave.length;
 
-                const voucherGuids = voucherRows.map(
-            row => row.guid
-        );
+   
 
         const { error: deleteLedgerError } =
             await supabase
@@ -389,6 +545,15 @@ party_parent_alter_id:
         }
 
                 if (ledgerRows.length > 0) {
+
+                    fs.writeFileSync(
+    "./ledgerRows-before-insert.json",
+    JSON.stringify(
+        ledgerRows,
+        null,
+        2
+    )
+);
 
             const { error: insertLedgerError } =
                 await supabase
@@ -451,6 +616,31 @@ party_parent_alter_id:
         }
 
     }
+
+    if (deletedVoucherGuids.length > 0) {
+
+    await supabase
+        .from("tally_voucher_inventory")
+        .delete()
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .in("voucher_guid", deletedVoucherGuids);
+
+    await supabase
+        .from("tally_voucher_ledgers")
+        .delete()
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .in("voucher_guid", deletedVoucherGuids);
+
+    await supabase
+        .from("tally_vouchers")
+        .delete()
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .in("guid", deletedVoucherGuids);
+
+}
 
     return {
 
