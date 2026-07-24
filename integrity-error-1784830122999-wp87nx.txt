@@ -1,6 +1,0 @@
-755da616-c913-46c0-9ad0-de5499d071a0-00000005 -> ReferenceError: Cannot access 'fs' before initialization
-    at VoucherIntegrityService.validateVoucher (C:\Users\15FC0704AU\Downloads\webthaali-api\services\VoucherIntegrityService.js:89:5)
-    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
-    at async saveVouchers (C:\Users\15FC0704AU\Downloads\webthaali-api\services\saveVouchers.js:115:5)
-    at async C:\Users\15FC0704AU\Downloads\webthaali-api\server.js:34749:23
-

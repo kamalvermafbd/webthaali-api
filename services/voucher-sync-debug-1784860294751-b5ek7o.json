@@ -1,0 +1,18 @@
+{
+  "generatedAt": "2026-07-24T02:31:36.328Z",
+  "debugData": {
+    "voucherGuids": [
+      "755da616-c913-46c0-9ad0-de5499d071a0-00000001",
+      "755da616-c913-46c0-9ad0-de5499d071a0-00000002",
+      "755da616-c913-46c0-9ad0-de5499d071a0-00000010"
+    ],
+    "rowsToSave": 3,
+    "totalLedgerRows": 10,
+    "totalInventoryRows": 4,
+    "ledgerRowsPerVoucher": {
+      "755da616-c913-46c0-9ad0-de5499d071a0-00000001": 3,
+      "755da616-c913-46c0-9ad0-de5499d071a0-00000002": 3,
+      "755da616-c913-46c0-9ad0-de5499d071a0-00000010": 4
+    }
+  }
+}

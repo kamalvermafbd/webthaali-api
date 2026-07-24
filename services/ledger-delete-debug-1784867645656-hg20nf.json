@@ -1,0 +1,84 @@
+{
+  "generatedAt": "2026-07-24T04:34:08.629Z",
+  "voucherGuids": [
+    "755da616-c913-46c0-9ad0-de5499d071a0-00000001"
+  ],
+  "totalVoucherGuids": 1,
+  "ledgerRowsToInsert": 3,
+  "rows": [
+    {
+      "voucher_guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000001",
+      "company_code": "C0018",
+      "tally_owner": "USER",
+      "ledger_name": "Rahul Trading",
+      "ledger_masterid": "212",
+      "ledger_guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d4",
+      "ledger_alterid": "235",
+      "ledger_parent_name": "Sundry Debtors",
+      "ledger_parent_guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000014",
+      "ledger_parent_masterid": "20",
+      "ledger_parent_alterid": "21",
+      "amount": -2655,
+      "debit": 2655,
+      "credit": 0,
+      "is_deemed_positive": true,
+      "is_party_ledger": true,
+      "is_last_deemed_positive": true,
+      "remove_zero_entries": false,
+      "bill_allocations": [
+        {
+          "billName": 1,
+          "billType": "New Ref",
+          "amount": -2655,
+          "dueDate": "",
+          "creditDays": 0
+        }
+      ],
+      "costcentre_allocations": []
+    },
+    {
+      "voucher_guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000001",
+      "company_code": "C0018",
+      "tally_owner": "USER",
+      "ledger_name": "IGST Sale 18%",
+      "ledger_masterid": "210",
+      "ledger_guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d2",
+      "ledger_alterid": "213",
+      "ledger_parent_name": "Sales Accounts",
+      "ledger_parent_guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000017",
+      "ledger_parent_masterid": "23",
+      "ledger_parent_alterid": "24",
+      "amount": 2250,
+      "debit": 0,
+      "credit": 2250,
+      "is_deemed_positive": false,
+      "is_party_ledger": false,
+      "is_last_deemed_positive": false,
+      "remove_zero_entries": false,
+      "bill_allocations": [],
+      "costcentre_allocations": []
+    },
+    {
+      "voucher_guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000001",
+      "company_code": "C0018",
+      "tally_owner": "USER",
+      "ledger_name": "IGST 18%",
+      "ledger_masterid": "211",
+      "ledger_guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d3",
+      "ledger_alterid": "221",
+      "ledger_parent_name": "Duties & Taxes",
+      "ledger_parent_guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000000e",
+      "ledger_parent_masterid": "14",
+      "ledger_parent_alterid": "15",
+      "amount": 405,
+      "debit": 0,
+      "credit": 405,
+      "is_deemed_positive": false,
+      "is_party_ledger": false,
+      "is_last_deemed_positive": false,
+      "remove_zero_entries": false,
+      "bill_allocations": [],
+      "costcentre_allocations": []
+    }
+  ]
+}

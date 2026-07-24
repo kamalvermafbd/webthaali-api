@@ -1,0 +1,67 @@
+{
+  "generatedAt": "2026-07-24T03:03:41.901Z",
+  "processId": 28284,
+  "incoming": 8,
+  "incomingGuids": [
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000005",
+      "voucherNumber": 1
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000014",
+      "voucherNumber": 2
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000001",
+      "voucherNumber": 1
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000002",
+      "voucherNumber": 2
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000007",
+      "voucherNumber": 1
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000008",
+      "voucherNumber": 2
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000010",
+      "voucherNumber": 5
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000001a",
+      "voucherNumber": 5
+    }
+  ],
+  "new": [],
+  "changed": [
+    "755da616-c913-46c0-9ad0-de5499d071a0-00000005",
+    "755da616-c913-46c0-9ad0-de5499d071a0-00000014",
+    "755da616-c913-46c0-9ad0-de5499d071a0-00000001",
+    "755da616-c913-46c0-9ad0-de5499d071a0-00000002",
+    "755da616-c913-46c0-9ad0-de5499d071a0-00000010",
+    "755da616-c913-46c0-9ad0-de5499d071a0-0000001a"
+  ],
+  "deleted": [],
+  "unchanged": [
+    "755da616-c913-46c0-9ad0-de5499d071a0-00000007",
+    "755da616-c913-46c0-9ad0-de5499d071a0-00000008"
+  ],
+  "rowsToSave": [],
+  "deleteOperation": {
+    "voucherGuids": [],
+    "totalVoucherGuids": 0
+  },
+  "ledgerInsert": {
+    "totalRows": 20,
+    "voucherGuids": []
+  },
+  "inventoryInsert": {
+    "totalRows": 6,
+    "voucherGuids": []
+  },
+  "debugData": {}
+}
