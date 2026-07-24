@@ -1,8 +1,0 @@
-755da616-c913-46c0-9ad0-de5499d071a0-00000014 -> ReferenceError: debugFile is not defined
-    at VoucherIntegrityService.validateInventory (C:\Users\15FC0704AU\Downloads\webthaali-api\services\VoucherIntegrityService.js:730:5)
-    at VoucherIntegrityService.runValidators (C:\Users\15FC0704AU\Downloads\webthaali-api\services\VoucherIntegrityService.js:386:25)
-    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
-    at async VoucherIntegrityService.validateVoucher (C:\Users\15FC0704AU\Downloads\webthaali-api\services\VoucherIntegrityService.js:140:9)
-    at async saveVouchers (C:\Users\15FC0704AU\Downloads\webthaali-api\services\saveVouchers.js:115:5)
-    at async C:\Users\15FC0704AU\Downloads\webthaali-api\server.js:34749:23
-

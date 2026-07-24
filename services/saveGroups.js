@@ -31,30 +31,42 @@ async function saveGroups({
 
     for (const group of groups) {
 
-        const row = {
+    const row = {
 
-            company_code,
-            tally_owner,
+    company_code,
+    tally_owner,
 
-            guid: group.guid?.trim() || null,
-            alter_id: group.alterId ?? null,
-            master_id: group.masterId?.toString() || null,
+    guid: group.guid?.trim() || null,
+    alter_id: group.alterId ?? null,
+    master_id: group.masterId?.toString() || null,
 
-            name: group.name?.trim(),
-            parent: group.parent?.trim() || null,
-            reserved_name: group.reservedName?.trim() || null,
+    name: group.name?.trim(),
+    parent: group.parent?.trim() || null,
+    reserved_name: group.reservedName?.trim() || null,
 
-            is_revenue: group.isRevenue ?? null,
-            is_deemed_positive: group.isDeemedPositive ?? null,
+    // Parent References
+    parent_guid: group.parentGuid?.trim() || null,
+    parent_master_id: group.parentMasterId?.toString() || null,
+    parent_alter_id: group.parentAlterId ?? null,
 
-            is_deleted: false,
+    // Group Properties
+    is_subledger: group.isSubledger ?? false,
+    is_billwise_on: group.isBillwiseOn ?? false,
+    track_negative_balances: group.trackNegativeBalances ?? false,
+    is_condensed: group.isCondensed ?? false,
 
-            last_synced_at: now,
-            sync_batch_id,
+    // Existing Flags
+    is_revenue: group.isRevenue ?? null,
+    is_deemed_positive: group.isDeemedPositive ?? null,
 
-            updated_at: now
+    is_deleted: false,
 
-        };
+    last_synced_at: now,
+    sync_batch_id,
+
+    updated_at: now
+
+};
 
         if (row.guid) {
 

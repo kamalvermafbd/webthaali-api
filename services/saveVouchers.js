@@ -1,6 +1,5 @@
 const { createClient } = require("@supabase/supabase-js");
-const fs = require("fs");
-const path = require("path");
+
 
 
 const supabase = createClient(
@@ -70,18 +69,61 @@ const unchangedVoucherGuids = [];
 
 const deletedVoucherGuids = [];
 
-fs.writeFileSync(
-    `./incoming-vouchers-${runId}.json`,
-    JSON.stringify(
-        vouchers.map(v => ({
-            guid: v.header?.guid,
-            voucherNumber: v.header?.voucherNumber,
-            runId
-        })),
-        null,
-        2
-    )
+
+
+
+
+    const incomingVoucherGuids = new Set(
+    vouchers
+        .map(v => v.header?.guid?.trim())
+        .filter(Boolean)
 );
+
+for (const guid of existingVoucherMap.keys()) {
+
+    if (!incomingVoucherGuids.has(guid)) {
+
+        deletedVoucherGuids.push(guid);
+
+    }
+
+}
+
+
+
+ if (deletedVoucherGuids.length > 0) {
+
+    await supabase
+        .from("tally_voucher_inventory")
+        .delete()
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .in("voucher_guid", deletedVoucherGuids);
+
+    await supabase
+        .from("tally_voucher_ledgers")
+        .delete()
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .in("voucher_guid", deletedVoucherGuids);
+
+    await supabase
+        .from("tally_vouchers")
+        .delete()
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .in("guid", deletedVoucherGuids);
+
+}
+
+
+await cleanupOrphanVoucherData({
+    company_code,
+    tally_owner
+});
+
+
+
 
     for (const voucher of vouchers) {
 
@@ -99,11 +141,7 @@ fs.writeFileSync(
 
         }
 
-//// new code starts ///
-fs.appendFileSync(
-    `./integrity-entry-${runId}.txt`,
-    `${header.guid} | ${header.voucherNumber}\n`
-);
+
 
 let integrityResult;
 
@@ -123,30 +161,18 @@ console.log("AFTER VALIDATE", header.guid);
 
 } catch (err) {
 
-    fs.appendFileSync(
-        `./integrity-error-${runId}.txt`,
-        `${header.guid} -> ${err.stack}\n\n`
-    );
+   
 
     throw err;
 }
 
-    fs.appendFileSync(
-    `./integrity-exit-${runId}.txt`,
-    `${header.guid} | ${header.voucherNumber} | ${integrityResult.action}\n`
-);
+    
 console.log(
     "Integrity Result :",
     header.voucherNumber,
     integrityResult.action
 );
 
-if (header.guid.trim().endsWith("00000016")) {
-    fs.writeFileSync(
-        `./voucher16-debug-${runId}.json`,
-        JSON.stringify(integrityResult, null, 2)
-    );
-}
 
 switch (integrityResult.action) {
 
@@ -262,24 +288,7 @@ if (
         });
 
 
-if (header.guid.trim().endsWith("00000016")) {
 
-    fs.writeFileSync(
-        `./voucher16-ledgers-before-save-${runId}.json`,
-        JSON.stringify(
-            {
-                generatedAt: new Date().toISOString(),
-                guid: header.guid,
-                voucherNumber: header.voucherNumber,
-                ledgerCount: voucher.ledgers?.length || 0,
-                ledgers: voucher.ledgers || []
-            },
-            null,
-            2
-        )
-    );
-
-}
 
     for (const ledger of (voucher.ledgers || [])) {
 
@@ -302,7 +311,7 @@ if (header.guid.trim().endsWith("00000016")) {
 
             ledger_alterid:
                 ledger.ledgerAlterId ?? null,
-
+/*
             ledger_parent_name:
                 ledger.ledgerParentName ?? null,
 
@@ -314,7 +323,7 @@ if (header.guid.trim().endsWith("00000016")) {
 
             ledger_parent_alterid:
                 ledger.ledgerParentAlterId ?? null,
-
+*/
                 amount:
                     ledger.amount ?? null,
 
@@ -323,7 +332,7 @@ if (header.guid.trim().endsWith("00000016")) {
 
                 credit:
                     ledger.credit ?? null,
-
+/*
                is_deemed_positive:
                     ledger.isDeemedPositive === "Yes",
 
@@ -335,7 +344,7 @@ if (header.guid.trim().endsWith("00000016")) {
 
                 remove_zero_entries:
                     ledger.removeZeroEntries === "Yes",
-
+*/
                 bill_allocations:
                     ledger.billAllocations ?? [],
 
@@ -347,19 +356,6 @@ if (header.guid.trim().endsWith("00000016")) {
         }
 
 
-     fs.writeFileSync(
-    `./voucher-ledgers-before-save-${header.voucherNumber}-${runId}.json`,
-    JSON.stringify(
-        {
-            guid: header.guid,
-            voucherNumber: header.voucherNumber,
-            ledgerCount: voucher.ledgers?.length || 0,
-            ledgers: voucher.ledgers || []
-        },
-        null,
-        2
-    )
-);
 
     for (const item of (voucher.inventory || [])) {
 
@@ -443,7 +439,7 @@ stock_masterid:
 
 stock_alterid:
     item.stockAlterId ?? null,
-
+/*
 voucher_master_id:
     item.voucherMasterId ?? null,
 
@@ -455,6 +451,8 @@ voucher_date:
 
 voucher_type:
     item.voucherType ?? null,
+
+    */
 
 transaction_type:
     item.transactionType ?? null,
@@ -470,7 +468,7 @@ ledger_master_id:
 
 ledger_alter_id:
     item.ledgerAlterId ?? null,
-
+/*
 ledger_parent_name:
     item.ledgerParentName ?? null,
 
@@ -481,7 +479,8 @@ ledger_parent_master_id:
     item.ledgerParentMasterId ?? null,
 
 ledger_parent_alter_id:
-    item.ledgerParentAlterId ?? null,    
+    item.ledgerParentAlterId ?? null,  
+      */
 
 party_name:
     item.partyName ?? null,
@@ -494,7 +493,7 @@ party_master_id:
 
 party_alter_id:
     item.partyAlterId ?? null,
-
+/*
 party_parent_name:
     item.partyParentName ?? null,
 
@@ -506,6 +505,7 @@ party_parent_master_id:
 
 party_parent_alter_id:
     item.partyParentAlterId ?? null,
+    */
 
                 cgst_rate: cgstRate,
 
@@ -542,22 +542,6 @@ party_parent_alter_id:
 
     }
 
-    const incomingVoucherGuids = new Set(
-    vouchers
-        .map(v => v.header?.guid?.trim())
-        .filter(Boolean)
-);
-
-for (const guid of existingVoucherMap.keys()) {
-
-    if (!incomingVoucherGuids.has(guid)) {
-
-        deletedVoucherGuids.push(guid);
-
-    }
-
-}
-
 
         let success = 0;
 
@@ -571,59 +555,7 @@ let inventoryVoucherGuids = [];
 
 const debugData = {};
 
-fs.writeFileSync(
-    path.join(
-    __dirname,
-    `voucher-sync-debug-before-${runId}.json`
-),
-    JSON.stringify(
-        {
-            generatedAt: new Date().toISOString(),
 
-                processId: process.pid,
-
-            incoming: vouchers.length,
-
-            incomingGuids: vouchers.map(v => ({
-                guid: v.header?.guid?.trim(),
-                voucherNumber: v.header?.voucherNumber
-              })),
-
-            new: newVoucherRows,
-
-            changed: changedVoucherRows,
-
-            deleted: deletedVoucherGuids,
-
-            unchanged: unchangedVoucherGuids,
-
-            rowsToSave: rowsToSave.map(r => ({
-                guid: r.guid,
-                alterid: r.alterid,
-                voucher_number: r.voucher_number
-            })),
-
-            deleteOperation: {
-                voucherGuids: voucherGuids,
-                totalVoucherGuids: voucherGuids.length
-            },
-
-            ledgerInsert: {
-                totalRows: ledgerRows.length,
-                voucherGuids: ledgerVoucherGuids
-            },
-
-            inventoryInsert: {
-                totalRows: inventoryRows.length,
-                voucherGuids: inventoryVoucherGuids
-            },
-
-            debugData: debugData
-        },
-        null,
-        2
-    )
-);
 
     if (voucherRows.length > 0) {
 
@@ -637,27 +569,7 @@ fs.writeFileSync(
             row => row.guid
         );
 
-        debugData.voucherGuids = voucherGuids;
-        debugData.rowsToSave = rowsToSave.length;
-        debugData.totalLedgerRows = ledgerRows.length;
-        debugData.totalInventoryRows = inventoryRows.length;
-
-        debugData.ledgerRowsPerVoucher = {};
-
-for (const row of ledgerRows) {
-
-    debugData.ledgerRowsPerVoucher[row.voucher_guid] =
-        (debugData.ledgerRowsPerVoucher[row.voucher_guid] || 0) + 1;
-
-}
-
-     ledgerVoucherGuids = [
-            ...new Set(ledgerRows.map(r => r.voucher_guid))
-        ];
-
-        inventoryVoucherGuids = [
-            ...new Set(inventoryRows.map(r => r.voucher_guid))
-        ];
+        
 
 
 const { error } = await supabase
@@ -683,52 +595,6 @@ const { error } = await supabase
 
         success = rowsToSave.length;
 
-   fs.writeFileSync(
-    path.join(
-    __dirname,
-    `voucher-sync-debug-${runId}.json`
-),
-    JSON.stringify(
-        {
-            generatedAt: new Date().toISOString(),
-            debugData
-        },
-        null,
-        2
-    )
-);
-
-fs.writeFileSync(
-    path.join(
-    __dirname,
-    `ledger-delete-debug-${runId}.json`
-),
-    JSON.stringify(
-        {
-            generatedAt: new Date().toISOString(),
-
-            voucherGuids,
-
-            totalVoucherGuids:
-                voucherGuids.length,
-
-            ledgerRowsToInsert:
-                ledgerRows.filter(r =>
-                    voucherGuids.includes(
-                        r.voucher_guid
-                    )
-                ).length,
-
-            rows: ledgerRows.filter(r =>
-                voucherGuids.includes(
-                    r.voucher_guid
-                )
-            )
-        },
-        null,
-        2
-    )
-);
 
         const { error: deleteLedgerError } =
             await supabase
@@ -743,35 +609,6 @@ fs.writeFileSync(
 
                 .in("voucher_guid", voucherGuids);
 
-    const { data: remainingRows } =
-    await supabase
-
-        .from("tally_voucher_ledgers")
-
-        .select("voucher_guid, ledger_name")
-
-        .eq("company_code", company_code)
-
-        .eq("tally_owner", tally_owner)
-
-        .in("voucher_guid", voucherGuids);
-
-fs.writeFileSync(
-    path.join(
-    __dirname,
-    `ledger-after-delete-${runId}.json`
-),
-    JSON.stringify(
-        {
-            generatedAt:
-                new Date().toISOString(),
-
-            remainingRows
-        },
-        null,
-        2
-    )
-);
 
         if (deleteLedgerError) {
 
@@ -784,15 +621,7 @@ fs.writeFileSync(
 
                 if (ledgerRows.length > 0) {
 
-                    fs.writeFileSync(
-    `./ledgerRows-before-insert-${runId}.json`,
-    JSON.stringify(
-        ledgerRows,
-        null,
-        2
-    )
-);
-
+                    
             const { error: insertLedgerError } =
                 await supabase
 
@@ -855,30 +684,7 @@ fs.writeFileSync(
 
     }
 
-    if (deletedVoucherGuids.length > 0) {
-
-    await supabase
-        .from("tally_voucher_inventory")
-        .delete()
-        .eq("company_code", company_code)
-        .eq("tally_owner", tally_owner)
-        .in("voucher_guid", deletedVoucherGuids);
-
-    await supabase
-        .from("tally_voucher_ledgers")
-        .delete()
-        .eq("company_code", company_code)
-        .eq("tally_owner", tally_owner)
-        .in("voucher_guid", deletedVoucherGuids);
-
-    await supabase
-        .from("tally_vouchers")
-        .delete()
-        .eq("company_code", company_code)
-        .eq("tally_owner", tally_owner)
-        .in("guid", deletedVoucherGuids);
-
-}
+   
 
     return {
 
@@ -889,6 +695,165 @@ fs.writeFileSync(
     failed: vouchers.length - success
 
 };
+
+}
+
+async function cleanupOrphanVoucherData({
+    company_code,
+    tally_owner
+}) {
+
+    //------------------------------------------
+    // Load valid voucher GUIDs
+    //------------------------------------------
+
+    const { data: vouchers, error } =
+        await supabase
+            .from("tally_vouchers")
+            .select("guid")
+            .eq("company_code", company_code)
+            .eq("tally_owner", tally_owner);
+
+    if (error) {
+
+        throw new Error(
+            "Failed to load voucher GUIDs : " +
+            error.message
+        );
+
+    }
+
+   const validVoucherGuids = new Set(
+    (vouchers || []).map(v => v.guid)
+);
+
+    //------------------------------------------
+    // No vouchers left
+    //------------------------------------------
+
+    if (validVoucherGuids.size === 0) {
+
+        await supabase
+            .from("tally_voucher_ledgers")
+            .delete()
+            .eq("company_code", company_code)
+            .eq("tally_owner", tally_owner);
+
+        await supabase
+            .from("tally_voucher_inventory")
+            .delete()
+            .eq("company_code", company_code)
+            .eq("tally_owner", tally_owner);
+
+        return;
+
+    }
+
+//------------------------------------------
+// Load Ledger GUIDs
+//------------------------------------------
+
+const {
+    data: ledgerRows,
+    error: ledgerError
+} = await supabase
+    .from("tally_voucher_ledgers")
+    .select("voucher_guid")
+    .eq("company_code", company_code)
+    .eq("tally_owner", tally_owner);
+
+if (ledgerError) {
+
+    throw new Error(
+        "Failed to load voucher ledgers : " +
+        ledgerError.message
+    );
+
+}
+
+const orphanLedgerGuids =
+    [...new Set(
+        (ledgerRows || [])
+            .map(r => r.voucher_guid)
+            .filter(
+                guid =>
+                    !validVoucherGuids.has(guid)
+            )
+    )];
+
+if (orphanLedgerGuids.length > 0) {
+
+    const { error: deleteLedgerError } =
+        await supabase
+            .from("tally_voucher_ledgers")
+            .delete()
+            .eq("company_code", company_code)
+            .eq("tally_owner", tally_owner)
+            .in("voucher_guid", orphanLedgerGuids);
+
+    if (deleteLedgerError) {
+
+        throw new Error(
+            "Failed to cleanup orphan ledgers : " +
+            deleteLedgerError.message
+        );
+
+    }
+
+}
+
+//------------------------------------------
+// Load Inventory GUIDs
+//------------------------------------------
+
+const {
+    data: inventoryRows,
+    error: inventoryError
+} = await supabase
+    .from("tally_voucher_inventory")
+    .select("voucher_guid")
+    .eq("company_code", company_code)
+    .eq("tally_owner", tally_owner);
+
+if (inventoryError) {
+
+    throw new Error(
+        "Failed to load voucher inventory : " +
+        inventoryError.message
+    );
+
+}
+
+const orphanInventoryGuids =
+    [...new Set(
+        (inventoryRows || [])
+            .map(r => r.voucher_guid)
+            .filter(
+                guid =>
+                   !validVoucherGuids.has(guid)
+            )
+    )];
+
+if (orphanInventoryGuids.length > 0) {
+
+    const { error: deleteInventoryError } =
+        await supabase
+            .from("tally_voucher_inventory")
+            .delete()
+            .eq("company_code", company_code)
+            .eq("tally_owner", tally_owner)
+            .in("voucher_guid", orphanInventoryGuids);
+
+    if (deleteInventoryError) {
+
+        throw new Error(
+            "Failed to cleanup orphan inventory : " +
+            deleteInventoryError.message
+        );
+
+    }
+
+}
 
 }
 

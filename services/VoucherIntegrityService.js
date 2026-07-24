@@ -24,7 +24,6 @@
  * All validation rules should be added only in this file.
  * ============================================================
  */
-const fs = require("fs");
 
 const { createClient } = require("@supabase/supabase-js");
 
@@ -86,10 +85,7 @@ class VoucherIntegrityService {
 
     });
     
-    fs.appendFileSync(
-    `./validator-start-${runId}.txt`,
-    `${parsedVoucher.header.guid}\n`
-);
+    
 
 //--------------------------------------------------
 // Voucher Not Found
@@ -145,10 +141,7 @@ if (
 
         });
 
-        fs.appendFileSync(
-    `./validator-end-${runId}.txt`,
-    `${parsedVoucher.header.guid}\n`
-);
+        
 
     //--------------------------------------------------
     // Decide Action
@@ -166,24 +159,6 @@ if (
         });
 
 
-        
-
-fs.appendFileSync(
-    `./voucher-integrity-debug-${runId}.json`,
-    JSON.stringify(
-        {
-            generatedAt: new Date().toISOString(),
-            guid: parsedVoucher?.header?.guid,
-            voucherNumber: parsedVoucher?.header?.voucherNumber,
-            action,
-            reasons: validation.reasons,
-            parsedLedgerCount:
-                parsedVoucher?.ledgers?.length || 0,
-            dbLedgerCount:
-                dbData?.ledgers?.length || 0
-        }
-    ) + "\n"
-);
 
 
     //--------------------------------------------------
@@ -253,10 +228,7 @@ async loadDbData({
 
     }
 
-    fs.appendFileSync(
-    "./load-header-debug.txt",
-    `${guid} | headerFound=${!!header}\n`
-        );
+    
 
     //--------------------------------------------------
     // Voucher Not Found
@@ -359,27 +331,35 @@ async runValidators({
 
     const reasons = [];
 
-    const validators = [
+   const validators = [
 
-        this.validateHeader,
+   // --------------------------------------------------
+// Stage 1 : Reverse Validation (DB → XML Cleanup)
+// --------------------------------------------------
+this.validateReverseData,
 
-        this.validateLedgers,
+// --------------------------------------------------
+// Stage 2 : Voucher Integrity Validation
+// --------------------------------------------------
+    this.validateHeader,
 
-        this.validateInventory,
+    this.validateLedgers,
 
-        this.validateParty,
+    this.validateInventory,
 
-        this.validateTotals,
+    this.validateParty,
 
-        this.validateCounts,
+    this.validateTotals,
 
-        this.validateNullFields,
+    this.validateCounts,
 
-        this.validateDuplicates,
+    this.validateNullFields,
 
-        this.validateFuture
+    this.validateDuplicates,
 
-    ];
+    this.validateFuture
+
+];
 
     for (const validator of validators) {
 
@@ -546,26 +526,33 @@ inventoryFields = [
     ["discount", "discount", "Discount"],
 
     ["godown", "godown", "Godown"],
-    ["ledgerParentGuid", "ledger_parent_guid", "Ledger Parent GUID"],
-["ledgerParentMasterId", "ledger_parent_master_id", "Ledger Parent MasterId"],
-["ledgerParentAlterId", "ledger_parent_alter_id", "Ledger Parent AlterId"],
+    ["partyName", "party_name", "Party Name"],
 
-["partyGuid", "party_guid", "Party GUID"],
-["partyMasterId", "party_master_id", "Party MasterId"],
-["partyAlterId", "party_alter_id", "Party AlterId"],
+["ledgerName", "ledger_name", "Ledger Name"],
 
-["partyParentName", "party_parent_name", "Party Parent Name"],
-["partyParentGuid", "party_parent_guid", "Party Parent GUID"],
-["partyParentMasterId", "party_parent_master_id", "Party Parent MasterId"],
-["partyParentAlterId", "party_parent_alter_id", "Party Parent AlterId"],
+["transactionType", "transaction_type", "Transaction Type"],
 
+    ["partyGuid", "party_guid", "Party GUID"],
+    ["partyMasterId", "party_master_id", "Party MasterId"],
+    ["partyAlterId", "party_alter_id", "Party AlterId"],
 
-["ledgerGuid", "ledger_guid", "Ledger GUID"],
-["ledgerMasterId", "ledger_master_id", "Ledger MasterId"],
-["ledgerAlterId", "ledger_alter_id", "Ledger AlterId"],
+    ["ledgerGuid", "ledger_guid", "Ledger GUID"],
+    ["ledgerMasterId", "ledger_master_id", "Ledger MasterId"],
+    ["ledgerAlterId", "ledger_alter_id", "Ledger AlterId"],
 
-["voucherMasterId", "voucher_master_id", "Voucher MasterId"],
-["voucherAlterId", "voucher_alter_id", "Voucher AlterId"],
+    ["cgstRate", "cgst_rate", "CGST Rate"],
+
+["sgstRate", "sgst_rate", "SGST Rate"],
+
+["igstRate", "igst_rate", "IGST Rate"],
+
+["cgstAmount", "cgst_amount", "CGST Amount"],
+
+["sgstAmount", "sgst_amount", "SGST Amount"],
+
+["igstAmount", "igst_amount", "IGST Amount"],
+
+["taxableAmount", "taxable_amount", "Taxable Amount"],
 
 ];
 
@@ -595,18 +582,12 @@ compareField(dbValue, parsedValue) {
     );
 
 }
-
 ledgerFields = [
 
     ["ledgerName", "ledger_name", "Ledger Name"],
 
     ["ledgerMasterId", "ledger_masterid", "Ledger MasterId"],
     ["ledgerAlterId", "ledger_alterid", "Ledger AlterId"],
-
-    ["ledgerParentName", "ledger_parent_name", "Ledger Parent Name"],
-    ["ledgerParentGuid", "ledger_parent_guid", "Ledger Parent GUID"],
-    ["ledgerParentMasterId", "ledger_parent_masterid", "Ledger Parent MasterId"],
-    ["ledgerParentAlterId", "ledger_parent_alterid", "Ledger Parent AlterId"],
 
     ["amount", "amount", "Amount"],
     ["debit", "debit", "Debit"],
@@ -755,7 +736,7 @@ async validateLedgers(
     if (!dbItem) {
 
         reasons.push(
-            `Inventory Missing : ${parsedItem.stockName}`
+            `Inventory Missing : ${parsedItem.stockItem}`
         );
 
         continue;
@@ -778,29 +759,129 @@ for (const [parsedField, dbField, label] of this.inventoryFields) {
 
 }
 
- fs.appendFileSync(
-    "./inventory-debug.txt",
-    JSON.stringify({
-        voucherGuid: parsedVoucher.header.guid,
-        stockGuid: parsedItem.stockGuid,
-        parsedName: parsedItem.stockItem,
-        parsedItem,
-        dbName: dbItem.stock_item
-    }, null, 2) + "\n\n"
-);
+ 
   
 
-
-
-
-
-
-
-
 }
 
 }
 
+
+/**
+ * ========================================================
+ * Reverse Validation (DB → XML)
+ * ========================================================
+ *
+ * Validates that every database record still exists in
+ * the latest Tally XML snapshot. Detects orphan Voucher,
+ * Ledger and Inventory records created due to corruption
+ * or deleted vouchers in Tally.
+ */
+async validateReverseData(
+    parsedVoucher,
+    dbData,
+    reasons
+) {
+
+    if (!dbData) {
+        return;
+    }
+
+    //--------------------------------------------------
+    // Reverse Voucher Validation
+    //--------------------------------------------------
+    //
+    // Purpose:
+    // Verify that the voucher still exists in the latest
+    // Tally XML snapshot.
+    //
+    // NOTE:
+    // Voucher level reverse validation is handled by the
+    // Sync Engine before VoucherIntegrityService.
+    //
+    // TODO:
+    // Nothing required here.
+    //
+    //--------------------------------------------------
+
+
+    //--------------------------------------------------
+    // Reverse Ledger Validation
+    //--------------------------------------------------
+    //
+    // Purpose:
+    // Detect ledger records that exist in DB but are no
+    // longer present in the latest Tally XML.
+    //
+    // TODO:
+    // Compare DB Ledgers with Parsed Ledgers.
+    // Add reason for every orphan ledger.
+    //
+    //--------------------------------------------------
+
+    for (const dbLedger of (dbData.ledgers || [])) {
+
+        const parsedLedger = (parsedVoucher.ledgers || []).find(
+            l => l.ledgerGuid === dbLedger.ledger_guid
+        );
+
+        if (!parsedLedger) {
+
+            reasons.push(
+                `Orphan Ledger : ${dbLedger.ledger_name}`
+            );
+
+        }
+
+    }
+
+
+    //--------------------------------------------------
+// Reverse Inventory Validation
+//--------------------------------------------------
+//
+// Purpose:
+// Detect inventory records that exist in DB but are
+// no longer present in the latest Tally XML.
+//
+// TODO:
+// Compare DB Inventory with Parsed Inventory.
+// Add reason for every orphan inventory.
+//
+//--------------------------------------------------
+
+for (const dbItem of (dbData.inventory || [])) {
+
+    const parsedItem = (parsedVoucher.inventory || []).find(
+        i => i.stockGuid === dbItem.stock_guid
+    );
+
+    if (!parsedItem) {
+
+        reasons.push(
+            `Orphan Inventory : ${dbItem.stock_item}`
+        );
+
+    }
+
+}
+
+
+    //--------------------------------------------------
+    // Reverse Future Validation
+    //--------------------------------------------------
+    //
+    // Reserved for future reverse validations:
+    //
+    // - Accounting Allocation
+    // - Cost Centre Allocation
+    // - Bill Allocation
+    // - Batch Allocation
+    // - GST Allocation
+    //
+    //--------------------------------------------------
+
+}
 
     /**
      * ========================================================
@@ -1026,14 +1107,9 @@ const requiredLedgerFields = [
 
     "ledger_guid",
     "ledger_masterid",
-    "ledger_alterid",
-
-    "ledger_parent_guid",
-    "ledger_parent_masterid",
-    "ledger_parent_alterid"
+    "ledger_alterid"
 
 ];
-
 
 for (const ledger of dbData.ledgers || []) {
 
@@ -1067,18 +1143,7 @@ const requiredInventoryFields = [
 
     "party_guid",
     "party_master_id",
-    "party_alter_id",
-
-    "voucher_master_id",
-    "voucher_alter_id",
-
-    "ledger_parent_guid",
-    "ledger_parent_master_id",
-    "ledger_parent_alter_id",
-
-    "party_parent_guid",
-    "party_parent_master_id",
-    "party_parent_alter_id"
+    "party_alter_id"
 
 ];
 
