@@ -6,6 +6,37 @@ const supabase = createClient(
 );
 
 const {
+    buildVoucherRow,
+    buildLedgerRows,
+    buildInventoryRows,
+    buildStockVoucherRows
+} = require("./voucherRowBuilder");
+
+const {
+    importVoucherByGuid
+} = require("../tally/importVoucherByGuid");
+
+const {
+    importCompany
+} = require("../tally/companyImportService");
+
+const {
+    importGroups
+} = require("../tally/groupImportService");
+
+const {
+    importLedgers
+} = require("../tally/ledgerImportService");
+
+const {
+    importStocks
+} = require("../tally/stockImportService");
+
+const {
+    buildTallyLookups
+} = require("../tally/tallyLookups");
+
+const {
 
     deleteVoucherLedgers,
 
@@ -93,33 +124,8 @@ function groupQueueByVoucher(queueRows) {
 
 }
 
-function getVoucherAction(rows) {
 
-    if (!rows || rows.length === 0) {
-
-        return null;
-
-    }
-
-    return rows[0].action;
-
-}
-
-function shouldExecuteAction(action) {
-
-    return [
-
-        "INSERT",
-
-        "UPDATE",
-
-        "FORCE_UPDATE"
-
-    ].includes(action);
-
-}
-
-async function loadVoucher({
+async function loadVoucherDataFromTally({
 
     company_code,
 
@@ -129,163 +135,132 @@ async function loadVoucher({
 
 }) {
 
-    const { data, error } = await supabase
+  const {
+    data: companyData,
+    error: companyError
+} = await supabase
+    .from("company")
+    .select("*")
+    .eq("company_code", company_code)
+    .single();
 
-        .from("tally_vouchers")
-
-        .select("*")
-
-        .eq("company_code", company_code)
-
-        .eq("tally_owner", tally_owner)
-
-        .eq("guid", voucher_guid)
-
-        .maybeSingle();
-
-    if (error) {
-
-        throw new Error(
-
-            "Failed to load voucher : " +
-
-            error.message
-
-        );
-
-    }
-
-    return data;
-
+if (companyError || !companyData) {
+    throw new Error("Company not found");
 }
 
-async function loadVoucherData({
+const company =
+    tally_owner === "CA"
+        ? companyData.ca_tally_company
+        : companyData.client_tally_company;
 
-    company_code,
+if (!company) {
+    throw new Error("Tally company not mapped");
+}
 
-    tally_owner,
+const companyInfo =
+    await importCompany({
+        company
+    });
 
-    voucher_guid
+    const groups =
+    await importGroups({
+        company
+    });
 
-}) {
+const ledgers =
+    await importLedgers({
+        company,
+        booksBeginningFrom:
+            companyInfo.booksBeginningFrom
+    });
 
-    const [
+const stocks =
+    await importStocks({
+        company
+    });
 
-        voucher,
-
+const lookups =
+    buildTallyLookups({
+        groups,
         ledgers,
+        stocks
+    });
 
-        inventory,
+const parsedVoucher =
+    await importVoucherByGuid({
+        company,
+        voucherGuid: voucher_guid,
+        lookups
+    });
 
-        stockVouchers
 
-    ] = await Promise.all([
-
-        loadVoucher({
-
-            company_code,
-
-            tally_owner,
-
-            voucher_guid
-
-        }),
-
-        supabase
-
-            .from("tally_voucher_ledgers")
-
-            .select("*")
-
-            .eq("company_code", company_code)
-
-            .eq("tally_owner", tally_owner)
-
-            .eq("voucher_guid", voucher_guid),
-
-        supabase
-
-            .from("tally_voucher_inventory")
-
-            .select("*")
-
-            .eq("company_code", company_code)
-
-            .eq("tally_owner", tally_owner)
-
-            .eq("voucher_guid", voucher_guid),
-
-        supabase
-
-            .from("tally_stock_vouchers")
-
-            .select("*")
-
-            .eq("company_code", company_code)
-
-            .eq("tally_owner", tally_owner)
-
-            .eq("voucher_guid", voucher_guid)
-
-    ]);
-if (ledgers.error) {
-
+if (!parsedVoucher) {
     throw new Error(
-
-        "Failed to load voucher ledgers : " +
-
-        ledgers.error.message
-
+        `Voucher not found in Tally : ${voucher_guid}`
     );
-
 }
 
-if (inventory.error) {
-
-    throw new Error(
-
-        "Failed to load voucher inventory : " +
-
-        inventory.error.message
-
-    );
-
-}
-
-if (stockVouchers.error) {
-
-    throw new Error(
-
-        "Failed to load stock vouchers : " +
-
-        stockVouchers.error.message
-
-    );
-
-}
+const now = new Date().toISOString();
 
 return {
+    voucher: buildVoucherRow({
 
-    voucher,
+        header: parsedVoucher.header,
 
-    ledgers: ledgers.data || [],
+        company_code,
 
-    inventory: inventory.data || [],
+        tally_owner,
 
-    stockVouchers: stockVouchers.data || []
+        sync_batch_id: null,
+
+        now
+
+    }),
+
+    ledgers: buildLedgerRows({
+
+    voucher: parsedVoucher,
+
+    company_code,
+
+    tally_owner
+
+}),
+
+inventory: buildInventoryRows({
+
+    voucher: parsedVoucher,
+
+    company_code,
+
+    tally_owner
+
+}),
+
+stockVouchers: buildStockVoucherRows({
+
+    voucher: parsedVoucher,
+
+    company_code,
+
+    tally_owner
+
+})
 
 };
 
-}
 
+}
 
 async function updateQueueStage({
 
-    queueId,
+    queueIds,
 
     stage,
 
-    status
+    status,
+
+    extra = {}
 
 }) {
 
@@ -293,13 +268,15 @@ async function updateQueueStage({
 
         .from("sync_exe_queue")
 
-        .update({
+       .update({
 
-            [stage]: status
+    [stage]: status,
 
-        })
+    ...extra
 
-        .eq("id", queueId);
+})
+
+        .in("id", queueIds);
 
     if (error) {
 
@@ -359,6 +336,8 @@ for (const [
 
     const queueRow = rows[0];
 
+const queueIds = rows.map(r => r.id);
+
     try {
 
    
@@ -412,45 +391,33 @@ if (
 
 ) {
 
-    const { error: startError } = await supabase
+    await updateQueueStage({
 
-        .from("sync_exe_queue")
+    queueIds,
 
-        .update({
+    stage: "execution_status",
 
-    execution_status: "STARTED",
+    status: "STARTED",
 
-started_at: new Date().toISOString(),
+    extra: {
 
-completed_at: null,
+        started_at: new Date().toISOString(),
 
-retry_count: 0,
+        completed_at: null,
 
-error_message: null
-
-})
-
-        .eq("id", queueRow.id);
-
-    if (startError) {
-
-        throw new Error(
-
-            "Failed to mark queue STARTED : " +
-
-            startError.message
-
-        );
+        error_message: null
 
     }
 
-    console.log(
+});
 
-        "Marked STARTED :",
+console.log(
 
-        voucherGuid
+    "Marked STARTED :",
 
-    );
+    voucherGuid
+
+);
 
 }
 
@@ -488,38 +455,17 @@ let voucherData = null;
 
 if (queueRow.mark_for_insert) {
 
+    // TODO:
+    // Load fresh voucher data from Tally.
+    // This will be implemented after the
+    // Tally fetch layer is completed.
+
     voucherData =
-        await loadVoucherData({
-
+        await loadVoucherDataFromTally({
             company_code,
-
             tally_owner,
-
             voucher_guid: voucherGuid
-
         });
-
-    if (!voucherData.voucher) {
-
-        throw new Error(
-
-            `Voucher not found : ${voucherGuid}`
-
-        );
-
-    }
-
-    console.log({
-
-        voucher: voucherData.voucher.guid,
-
-        ledgers: voucherData.ledgers.length,
-
-        inventory: voucherData.inventory.length,
-
-        stockVouchers: voucherData.stockVouchers.length
-
-    });
 
 }
 
@@ -580,13 +526,15 @@ if (
 
     await updateQueueStage({
 
-    queueId: queueRow.id,
+    queueIds: queueIds,
 
     stage: "delete_status",
 
     status: "COMPLETED"
 
 });
+
+queueRow.delete_status = "COMPLETED";
 
 }
 
@@ -617,7 +565,7 @@ if (queueRow.mark_for_insert) {
 
         await updateQueueStage({
 
-        queueId: queueRow.id,
+        queueIds: queueIds,
 
         stage: "header_status",
 
@@ -625,14 +573,17 @@ if (queueRow.mark_for_insert) {
 
     });
 
+    queueRow.header_status = "COMPLETED";
+
     }
     if (queueRow.ledger_status !== "COMPLETED") {
 
         await saveVoucherLedgers({
 
-            ledgerRows: voucherData.ledgers
+    ledgerRows: voucherData.ledgers,
+    sync_batch_id
 
-        });
+});
 
        console.log(
 
@@ -644,7 +595,7 @@ if (queueRow.mark_for_insert) {
 
         await updateQueueStage({
 
-        queueId: queueRow.id,
+        queueIds: queueIds,
 
         stage: "ledger_status",
 
@@ -652,15 +603,18 @@ if (queueRow.mark_for_insert) {
 
     });
 
+    queueRow.ledger_status = "COMPLETED";
+
     }
 
        if (queueRow.inventory_status !== "COMPLETED") {
 
         await saveVoucherInventory({
 
-            inventoryRows: voucherData.inventory
+    inventoryRows: voucherData.inventory,
+    sync_batch_id
 
-        });
+});
 
     console.log(
 
@@ -672,13 +626,14 @@ if (queueRow.mark_for_insert) {
 
       await updateQueueStage({
 
-        queueId: queueRow.id,
+        queueIds: queueIds,
 
         stage: "inventory_status",
 
         status: "COMPLETED"
 
     });
+    queueRow.inventory_status = "COMPLETED";
 
     }
 
@@ -686,9 +641,11 @@ if (queueRow.mark_for_insert) {
 
         await saveStockVouchers({
 
-            stockVoucherRows: voucherData.stockVouchers
+    stockVoucherRows: voucherData.stockVouchers,
+    sync_batch_id,
+    STOCK_DEBUG_FILE: "./logs/stock-movement-debug.jsonl"
 
-        });
+});
 
     console.log(
 
@@ -698,9 +655,9 @@ if (queueRow.mark_for_insert) {
 
     );
 
-                  await updateQueueStage({
+    await updateQueueStage({
 
-        queueId: queueRow.id,
+        queueIds: queueIds,
 
         stage: "stock_status",
 
@@ -708,37 +665,29 @@ if (queueRow.mark_for_insert) {
 
     });
 
+    queueRow.stock_status = "COMPLETED";
+
     }
 
 }
 
-const { error: completedError } = await supabase
+await updateQueueStage({
 
-    .from("sync_exe_queue")
+    queueIds,
 
-   .update({
+    stage: "execution_status",
 
-    execution_status: "COMPLETED",
+    status: "COMPLETED",
 
-    completed_at: new Date().toISOString(),
+    extra: {
 
-    error_message: null
+        completed_at: new Date().toISOString(),
 
-})
+        error_message: null
 
-    .eq("id", queueRow.id);
+    }
 
-if (completedError) {
-
-    throw new Error(
-
-        "Failed to mark queue COMPLETED : " +
-
-        completedError.message
-
-    );
-
-}
+});
 
 console.log(
 
@@ -747,39 +696,28 @@ console.log(
     voucherGuid
 
 );
-
 }
 catch (err) {
 
-        const { error: failedError } = await supabase
+    await updateQueueStage({
 
-            .from("sync_exe_queue")
+    queueIds,
 
-            .update({
+    stage: "execution_status",
 
-                execution_status: "FAILED",
+    status: "FAILED",
 
-                retry_count: (queueRow.retry_count || 0) + 1,
+    extra: {
 
-                error_message: err.message
+        retry_count: (queueRow.retry_count || 0) + 1,
 
-            })
+        error_message: err.message
 
-            .eq("id", queueRow.id);
+    }
 
-        if (failedError) {
+});
 
-            throw new Error(
-
-                "Failed to mark queue FAILED : " +
-
-                failedError.message
-
-            );
-
-        }
-
-        throw err;
+throw err;
 
     }
 

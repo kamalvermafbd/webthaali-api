@@ -8,6 +8,13 @@ const supabase = createClient(
 const VoucherIntegrityService = require("./VoucherIntegrityService");
 const fs = require("fs");
 
+const {
+    buildVoucherRow,
+    buildLedgerRows,
+    buildInventoryRows,
+    buildStockVoucherRows
+} = require("./voucherRowBuilder");
+
 async function validateNewVoucher(args) {
 
     const {
@@ -408,6 +415,8 @@ async function deleteStockVouchers({
 
 }
 
+
+
 async function saveVoucher({
 
     voucher,
@@ -511,7 +520,8 @@ async function saveVoucherHeaders({
 
 async function saveVoucherLedgers({
 
-    ledgerRows
+    ledgerRows,
+    sync_batch_id = null
 
 }) {
 
@@ -520,6 +530,18 @@ async function saveVoucherLedgers({
         return;
 
     }
+
+    if (sync_batch_id) {
+
+    ledgerRows = ledgerRows.map(row => ({
+
+        ...row,
+
+        sync_batch_id
+
+    }));
+
+}
 
     const { error } = await supabase
 
@@ -543,7 +565,8 @@ async function saveVoucherLedgers({
 
 async function saveVoucherInventory({
 
-    inventoryRows
+    inventoryRows,
+    sync_batch_id = null
 
 }) {
 
@@ -552,6 +575,18 @@ async function saveVoucherInventory({
         return;
 
     }
+
+    if (sync_batch_id) {
+
+    inventoryRows = inventoryRows.map(row => ({
+
+        ...row,
+
+        sync_batch_id
+
+    }));
+
+}
 
     const { error } = await supabase
 
@@ -576,6 +611,7 @@ async function saveVoucherInventory({
 async function saveStockVouchers({
 
     stockVoucherRows,
+    sync_batch_id = null,
 
     STOCK_DEBUG_FILE
 
@@ -586,6 +622,18 @@ async function saveStockVouchers({
         return;
 
     }
+
+    if (sync_batch_id) {
+
+    stockVoucherRows = stockVoucherRows.map(row => ({
+
+        ...row,
+
+        sync_batch_id
+
+    }));
+
+}
 
     const { error } = await supabase
 
@@ -693,10 +741,10 @@ async function saveVoucherExecutionData({
 
     await saveVoucherLedgers({
 
-        ledgerRows
+    ledgerRows,
+    sync_batch_id
 
-    });
-
+});
     await deleteVoucherInventory({
 
         company_code,
@@ -709,17 +757,18 @@ async function saveVoucherExecutionData({
 
     await saveVoucherInventory({
 
-        inventoryRows
+    inventoryRows,
+    sync_batch_id
 
-    });
+});
 
     await saveStockVouchers({
 
-        stockVoucherRows,
+    stockVoucherRows,
+    sync_batch_id,
+    STOCK_DEBUG_FILE
 
-        STOCK_DEBUG_FILE
-
-    });
+});
 
     return success;
 
@@ -940,7 +989,7 @@ else {
 const STOCK_DEBUG_FILE =
     "./logs/stock-movement-debug.jsonl";
 
-const ENABLE_QUEUE_EXECUTION = false;
+const ENABLE_QUEUE_EXECUTION = true;
 
 console.log("===== SAVEVOUCHERS.JS LOADED =====");
 
@@ -965,7 +1014,7 @@ await supabase
     .delete()
     .eq("company_code", company_code)
     .eq("tally_owner", tally_owner);
-    
+
     if (!Array.isArray(vouchers) || vouchers.length === 0) {
 
         return {
@@ -1084,7 +1133,7 @@ if (ENABLE_QUEUE_EXECUTION) {
 }
 
 
-    for (const voucher of vouchers) {
+for (const voucher of vouchers) {
 
         const header = voucher.header || {};
 
@@ -1181,534 +1230,53 @@ if (shouldSkip) {
 
 }
 
-/// new code ends//
 
-/* remove today 23.07.26
 
-const existingAlterId =
-    existingVoucherMap.get(header.guid.trim());
+voucherRows.push(
 
-if (existingAlterId === undefined) {
+    buildVoucherRow({
 
-    newVoucherRows.push(header.guid.trim());
-
-} else if (
-    existingAlterId === Number(header.alterid)
-) {
-
-    unchangedVoucherGuids.push(header.guid.trim());
-
-} else {
-
-    changedVoucherRows.push(header.guid.trim());
-
-}
-
-if (
-    existingAlterId !== undefined &&
-    existingAlterId === Number(header.alterid)
-) {
-
-    continue;
-
-}
-*/
-
-        voucherRows.push({
-
-            company_code,
-            tally_owner,
-
-            guid: header.guid.trim(),
-
-           masterid: header.masterid ?? null,
-
-            alterid: header.alterid ?? null,
-
-            voucher_type: header.voucherType ?? null,
-
-            voucher_number: header.voucherNumber ?? null,
-
-            voucher_date: header.voucherDate || null,
-
-            effective_date: header.effectiveDate || null,
-
-            reference: header.reference || null,
-
-            reference_date: header.referenceDate || null,
-
-            party_ledger: header.partyLedger || null,
-
-            narration: header.narration || null,
-
-            gstin: header.gstin || null,
-
-            place_of_supply: header.placeOfSupply || null,
-
-            buyer_name: header.buyerName || null,
-
-            buyer_address: header.buyerAddress || null,
-
-            gst_registration_type:
-                header.gstRegistrationType || null,
-
-            persisted_view:
-                header.persistedView || null,
-
-            is_invoice:
-                header.isInvoice === "Yes",
-
-            is_optional:
-                header.isOptional === "Yes",
-
-            is_cancelled:
-                header.isCancelled === "Yes",
-
-            is_deleted: false,
-
-            last_synced_at: now,
-
-            sync_batch_id,
-
-            updated_at: now
-
-        });
-
-
-
-
-    for (const ledger of (voucher.ledgers || [])) {
-
-            ledgerRows.push({
-
-                voucher_guid: header.guid.trim(),
-
-                company_code,
-
-                tally_owner,
-
-                ledger_name:
-                    ledger.ledgerName?.trim() || null,
-
-                ledger_masterid:
-                    ledger.ledgerMasterId ?? null,
-
-                    ledger_guid:
-             ledger.ledgerGuid ?? null,
-
-            ledger_alterid:
-                ledger.ledgerAlterId ?? null,
-/*
-            ledger_parent_name:
-                ledger.ledgerParentName ?? null,
-
-            ledger_parent_guid:
-                ledger.ledgerParentGuid ?? null,
-
-            ledger_parent_masterid:
-                ledger.ledgerParentMasterId ?? null,
-
-            ledger_parent_alterid:
-                ledger.ledgerParentAlterId ?? null,
-*/
-                amount:
-                    ledger.amount ?? null,
-
-                debit:
-                    ledger.debit ?? null,
-
-                credit:
-                    ledger.credit ?? null,
-/*
-               is_deemed_positive:
-                    ledger.isDeemedPositive === "Yes",
-
-                is_party_ledger:
-                    ledger.isPartyLedger === "Yes",
-
-                is_last_deemed_positive:
-                    ledger.isLastDeemedPositive === "Yes",
-
-                remove_zero_entries:
-                    ledger.removeZeroEntries === "Yes",
-*/
-                bill_allocations:
-                    ledger.billAllocations ?? [],
-
-                costcentre_allocations:
-                    ledger.costCentreAllocations ?? []
-
-            });
-
-        }
-
-
-
-    for (const item of (voucher.inventory || [])) {
-
-     const gstRates = item.gstRates ?? [];
-
-    const cgstRate =
-        gstRates.find(r => r.dutyHead === "CGST")?.rate ?? null;
-
-    const sgstRate =
-        gstRates.find(r => r.dutyHead === "SGST/UTGST")?.rate ?? null;
-
-    const igstRate =
-        gstRates.find(r => r.dutyHead === "IGST")?.rate ?? null;
-
-        const hsnCode =
-            item.hsnCode || null;
-
-          console.log({
-    stock: item.stockItem,
-    taxable: item.taxableAmount,
-    cgst: item.cgstAmount,
-    sgst: item.sgstAmount,
-    igst: item.igstAmount
-});
-
-if (
-    item.inventoryNode ===
-    "ALLINVENTORYENTRIES.LIST"
-) {
-
-    inventoryRows.push({
-
-                voucher_guid: header.guid.trim(),
-
-                company_code,
-
-                tally_owner,
-
-                stock_item:
-                    item.stockItem?.trim() || null,
-          
-
-                actual_qty:
-                    item.actualQty || null,
-
-                actual_qty_value:
-                    item.actualQtyValue || null,
-
-                billed_qty:
-                    item.billedQty || null,
-
-                billed_qty_value:
-                    item.billedQtyValue || null,
-
-                unit:
-                    item.unit?.trim() || null,
-
-                rate:
-                    item.rate || null,
-
-                rate_value:
-                    item.rateValue || null,
-
-                amount:
-                    item.amount ?? null,
-
-             hsn_code: hsnCode,
-
-                discount:
-                    item.discount ?? null,
-
-                godown:
-                    item.godown?.trim() || null,
-
-                batch_id:
-                    item.batchId ?? null,
-
-                batches:
-                    item.batches ?? [],
-
-                accounting:
-                    item.accounting ?? [],
-
-                stock_guid:
-                    item.stockGuid ?? null,
-
-                stock_masterid:
-                    item.stockMasterIdResolved ?? null,
-
-                stock_alterid:
-                    item.stockAlterId ?? null,
-                /*
-                voucher_master_id:
-                    item.voucherMasterId ?? null,
-
-                voucher_alter_id:
-                    item.voucherAlterId ?? null,
-
-                voucher_date:
-                    item.voucherDate ?? null,
-
-                voucher_type:
-                    item.voucherType ?? null,
-
-                    */
-
-                transaction_type:
-                    item.transactionType ?? null,
-
-                ledger_name:
-                    item.ledgerName ?? null,
-
-                ledger_guid:
-                    item.ledgerGuid ?? null,
-
-                ledger_master_id:
-                    item.ledgerMasterId ?? null,
-
-                ledger_alter_id:
-                    item.ledgerAlterId ?? null,
-                /*
-                ledger_parent_name:
-                    item.ledgerParentName ?? null,
-
-                ledger_parent_guid:
-                    item.ledgerParentGuid ?? null,
-
-                ledger_parent_master_id:
-                    item.ledgerParentMasterId ?? null,
-
-                ledger_parent_alter_id:
-                    item.ledgerParentAlterId ?? null,  
-                    */
-
-                party_name:
-                    item.partyName ?? null,
-
-                party_guid:
-                    item.partyGuid ?? null,
-
-                party_master_id:
-                    item.partyMasterId ?? null,
-
-                party_alter_id:
-                    item.partyAlterId ?? null,
-                /*
-                party_parent_name:
-                    item.partyParentName ?? null,
-
-                party_parent_guid:
-                    item.partyParentGuid ?? null,
-
-                party_parent_master_id:
-                    item.partyParentMasterId ?? null,
-
-                party_parent_alter_id:
-                    item.partyParentAlterId ?? null,
-                    */
-
-                cgst_rate: cgstRate,
-
-                sgst_rate: sgstRate,
-
-                igst_rate: igstRate,
-
-
-                gst_rate:
-                    igstRate ??
-                    ((cgstRate || 0) + (sgstRate || 0)),
-
-
-               cgst_amount:
-                    item.cgstAmount ?? 0,
-
-                sgst_amount:
-                    item.sgstAmount ?? 0,
-
-                igst_amount:
-                    item.igstAmount ?? 0,
-
-                taxable_amount:
-                    item.taxableAmount ?? 0,
-
-              gst_rates: item.gstRates ?? [],
-
-                costcentre_allocations:
-                    item.costCentreAllocations ?? []
-
-            });
-        }
-
- else {
-
-fs.appendFileSync(
-    "./logs/test.log",
-    JSON.stringify({
-        stage: "ELSE_BLOCK",
-        inventoryNode: item.inventoryNode,
-        movementType: item.movementType,
-        stock: item.stockItem
-    }) + "\n"
-);
-fs.appendFileSync(
-        STOCK_DEBUG_FILE,
-        JSON.stringify({
-            voucher: header.voucherNumber,
-            guid: header.guid,
-            inventoryNode: item.inventoryNode,
-            movementType: item.movementType,
-            stockItem: item.stockItem,
-            godown: item.godown,
-            batchName: item.batchName,
-            batchId: item.batchId,
-            raw: item.raw
-        }) + "\n"
-    );
-
-    fs.appendFileSync(
-    STOCK_DEBUG_FILE,
-    JSON.stringify({
-        stage: "FINAL_ITEM",
-        inventoryNode: item.inventoryNode,
-        movementType: item.movementType,
-        stockItem: item.stockItem,
-        itemGodown: item.godown,
-        itemBatchName: item.batchName,
-        itemBatchId: item.batchId,
-        batches: item.batches
-    }) + "\n"
-);
-
-    stockVoucherRows.push({
-
-        voucher_guid: header.guid.trim(),
+        header,
 
         company_code,
 
         tally_owner,
 
-        stock_guid:
-            item.stockGuid ?? null,
+        sync_batch_id,
 
-        stock_masterid:
-            item.stockMasterIdResolved ?? null,
+        now
 
-        stock_alterid:
-            item.stockAlterId ?? null,
+    })
 
-        stock_item:
-            item.stockItem?.trim() || null,
+);
 
-        movement_type:
-            item.movementType ?? null,
 
-        actual_qty:
-            item.actualQty ?? null,
+ledgerRows.push(
+    ...buildLedgerRows({
+        voucher,
+        company_code,
+        tally_owner
+    })
+);
 
-        actual_qty_value:
-            item.actualQtyValue ?? null,
 
-        billed_qty:
-            item.billedQty ?? null,
-
-        billed_qty_value:
-            item.billedQtyValue ?? null,
-
-        unit:
-            item.unit?.trim() || null,
-
-        rate:
-            item.rate ?? null,
-
-        rate_value:
-            item.rateValue ?? null,
-
-        amount:
-            item.amount ?? null,
-
-        godown:
-            item.godown?.trim() || null,
-
-        batch_name:
-            item.batchName ?? null,
-
-        batch_id:
-            item.batchId ?? null,
-
-        inventory_node:
-            item.inventoryNode ?? null,
-
-        xml_payload:
-            item.raw ?? null,
-
-            voucher_type_name:
-    header.voucherTypeName ?? null,
-
-voucher_type:
-    header.voucherType ?? null,
-
-voucher_number:
-    header.voucherNumber ?? null,
-
-voucher_date:
-    header.voucherDate || null,
-
-effective_date:
-    header.effectiveDate || null,
-
-reference:
-    header.reference || null,
-
-narration:
-    header.narration || null,
-
-party_ledger_name:
-    header.partyLedger || null,
-
-party_gstin:
-    header.gstin || null,
-
-place_of_supply:
-    header.placeOfSupply || null,
-
-gst_registration_type:
-    header.gstRegistrationType || null,
-
-persisted_view:
-    header.persistedView || null,
-
-is_invoice:
-    header.isInvoice === "Yes",
-
-is_cancelled:
-    header.isCancelled === "Yes",
-
-is_optional:
-    header.isOptional === "Yes",
-
-is_deleted:
-    header.isDeleted === "Yes",
-
-ledger_name:
-    item.ledgerName ?? null,
-
-discount:
-    item.discount ?? null,
-
-additional_amount:
-    item.additionalAmount ?? null,
-
-batch_rate:
-    item.batchRate ?? null,
-
-batch_rate_value:
-    item.batchRateValue ?? null,
-
-batch_amount:
-    item.batchAmount ?? null,
-
-    });
-
-}
+    inventoryRows.push(
+    ...buildInventoryRows({
+        voucher,
+        company_code,
+        tally_owner
+    })
+);
+    
+stockVoucherRows.push(
+    ...buildStockVoucherRows({
+        voucher,
+        company_code,
+        tally_owner
+    })
+);
 
         }
-
-    }
 
 
         let success = 0;
@@ -1716,14 +1284,6 @@ batch_amount:
         let rowsToSave = [];
 
 let voucherGuids = [];
-
-let ledgerVoucherGuids = [];
-
-let inventoryVoucherGuids = [];
-
-const debugData = {};
-
-
 
     if (
         ENABLE_QUEUE_EXECUTION &&
@@ -1853,10 +1413,10 @@ fs.appendFileSync(
 
 await saveVoucherLedgers({
 
-    ledgerRows
+    ledgerRows,
+    sync_batch_id
 
 });
-
 
 const { count: inventoryBefore } = await supabase
     .from("tally_voucher_inventory")
@@ -1911,9 +1471,11 @@ fs.appendFileSync(
 
 await saveVoucherInventory({
 
-    inventoryRows
+    inventoryRows,
+    sync_batch_id
 
 });
+
 fs.appendFileSync(
     "./logs/inventory-save-debug.jsonl",
     JSON.stringify({
@@ -1941,11 +1503,10 @@ fs.appendFileSync(
 );
 
         
-
 await saveStockVouchers({
 
     stockVoucherRows,
-
+    sync_batch_id,
     STOCK_DEBUG_FILE
 
 });
@@ -2235,6 +1796,8 @@ if (orphanStockVoucherGuids.length > 0) {
 module.exports = {
 
     saveVouchers,
+
+    saveVoucherExecutionData,
 
     deleteVoucherLedgers,
 

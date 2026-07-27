@@ -72,6 +72,14 @@ class VoucherIntegrityService {
 
 }) {
 
+    fs.appendFileSync(
+    "logs/processed-vouchers.jsonl",
+    JSON.stringify({
+        guid: parsedVoucher.header.guid,
+        voucherNumber: parsedVoucher.header.voucherNumber,
+        voucherType: parsedVoucher.header.voucherType
+    }) + "\n"
+);
     //--------------------------------------------------
     // Load Existing Voucher
     //--------------------------------------------------
@@ -409,7 +417,7 @@ const ledgerMap = new Map(
 );
 
 const inventoryMap = inventoryRows;
-
+/*
 const stockVoucherMap = new Map(
     stockVoucherRows.map(item => [
         [
@@ -420,7 +428,7 @@ const stockVoucherMap = new Map(
         item
     ])
 );
-
+*/
 const ledgerMasterMap = new Map(
 
     (ledgerMasters || []).map(item => [
@@ -462,7 +470,7 @@ return {
 
     inventoryMap,
 
-    stockVoucherMap
+   // stockVoucherMap
 
 };
 
@@ -1291,18 +1299,80 @@ async validateStockVouchers(
 
 for (const parsedItem of parsedStockVouchers) {
 
-  const key = [
+    fs.appendFileSync(
+    "logs/stock-voucher-match.jsonl",
+    JSON.stringify({
 
-    parsedItem.stockGuid,
+        voucher_guid: parsedVoucher.header.guid,
 
-    parsedItem.inventoryNode,
+        parsed: {
+            stock_item: parsedItem.stockItem,
+            stock_guid: parsedItem.stockGuid,
+            inventory_node: parsedItem.inventoryNode,
+            batch_id: parsedItem.batchId || "",
+            amount: parsedItem.amount,
+            godown: parsedItem.godown
+        },
 
-    parsedItem.batchId || ""
+       candidates: dbData.stockVouchers.map(item => ({
+                    id: item.id,
+                    stock_item: item.stock_item,
+                    stock_guid: item.stock_guid,
+                    inventory_node: item.inventory_node,
+                    batch_id: item.batch_id || "",
+                    amount: item.amount,
+                    godown: item.godown,
 
-].join("|");
+                    map_key: [
+                        item.stock_guid,
+                        item.inventory_node,
+                        item.batch_id || ""
+                    ].join("|")
+                }))
+    }) + "\n"
+);
+  const dbItem =
+    dbData.stockVouchers.find(item =>
 
-const dbItem =
-    dbData.stockVoucherMap.get(key);
+        item.stock_guid ===
+            parsedItem.stockGuid &&
+
+        item.inventory_node ===
+            parsedItem.inventoryNode &&
+
+        Number(item.amount) ===
+            Number(parsedItem.amount) &&
+
+        String(item.godown || "").trim() ===
+            String(parsedItem.godown || "").trim()
+
+    );
+
+
+   fs.appendFileSync(
+    "logs/stock-voucher-match.jsonl",
+    JSON.stringify({
+
+       matched: dbItem
+    ? {
+        id: dbItem.id,
+        stock_item: dbItem.stock_item,
+        stock_guid: dbItem.stock_guid,
+        inventory_node: dbItem.inventory_node,
+        batch_id: dbItem.batch_id || "",
+        amount: dbItem.amount,
+        godown: dbItem.godown,
+
+        map_key: [
+            dbItem.stock_guid,
+            dbItem.inventory_node,
+            dbItem.batch_id || ""
+        ].join("|")
+    }
+    : null
+
+    }) + "\n"
+);
 
     if (!dbItem) {
 
