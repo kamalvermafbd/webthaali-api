@@ -26,7 +26,10 @@
  */
 
 const { createClient } = require("@supabase/supabase-js");
-
+const fs = require("fs");
+const investigator = require("../logs/VoucherIntegrityInvestigator");
+const debugFile =
+    "logs/inventory-row-match.jsonl";
 const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_SERVICE_KEY
@@ -106,28 +109,9 @@ if (!dbData) {
 }
 
 //--------------------------------------------------
-// AlterId Changed
-//--------------------------------------------------
-
-if (
-
-    Number(parsedVoucher.header.alterid) !==
-    Number(dbData.header.alterid)
-
-) {
-
-    return this.buildResponse({
-
-        action: "UPDATE",
-
-        validation: this.buildValidValidation(),
-
-        dbData
-
-    });
-
-}
-
+// AlterId validation has been moved to saveVouchers.
+// VoucherIntegrityService now performs only
+// integrity validation.
     //--------------------------------------------------
     // Run Validators
     //--------------------------------------------------
@@ -141,7 +125,13 @@ if (
 
         });
 
-        
+    investigator.investigate({
+
+    parsedVoucher,
+
+    dbData
+
+});    
 
     //--------------------------------------------------
     // Decide Action
@@ -300,21 +290,185 @@ async loadDbData({
 
     }
 
+    const {
+
+    data: stockVouchers,
+
+    error: stockVoucherError
+
+} = await supabase
+
+    .from("tally_stock_vouchers")
+
+    .select("*")
+
+    .eq("company_code", company_code)
+
+    .eq("tally_owner", tally_owner)
+
+    .eq("voucher_guid", guid);
+
+if (stockVoucherError) {
+
+    throw new Error(
+        "Failed to load stock vouchers : " +
+        stockVoucherError.message
+    );
+
+}
+
+//--------------------------------------------------
+// Load Ledger Masters
+//--------------------------------------------------
+
+const {
+
+    data: ledgerMasters,
+
+    error: ledgerMasterError
+
+} = await supabase
+
+    .from("tally_sync_ledgers")
+
+    .select("*")
+
+    .eq("company_code", company_code)
+
+    .eq("tally_owner", tally_owner)
+
+    .eq("is_deleted", false);
+
+if (ledgerMasterError) {
+
+    throw new Error(
+
+        "Failed to load ledger masters : " +
+
+        ledgerMasterError.message
+
+    );
+
+}
+
+//--------------------------------------------------
+// Load Stock Masters
+//--------------------------------------------------
+
+const {
+
+    data: stockMasters,
+
+    error: stockMasterError
+
+} = await supabase
+
+    .from("tally_sync_stocks")
+
+    .select("*")
+
+    .eq("company_code", company_code)
+
+    .eq("tally_owner", tally_owner)
+
+    .eq("is_deleted", false);
+
+if (stockMasterError) {
+
+    throw new Error(
+
+        "Failed to load stock masters : " +
+
+        stockMasterError.message
+
+    );
+
+}
+
     //--------------------------------------------------
     // Return Complete DB Snapshot
     //--------------------------------------------------
 
-    return {
+const inventoryRows =
+    inventory || [];
 
-        header,
+const stockVoucherRows =
+    stockVouchers || [];
 
-        ledgers: ledgers || [],
 
-        inventory: inventory || []
+const ledgerMap = new Map(
 
-    };
+    (ledgers || []).map(item => [
+
+        item.ledger_guid,
+
+        item
+
+    ])
+
+);
+
+const inventoryMap = inventoryRows;
+
+const stockVoucherMap = new Map(
+    stockVoucherRows.map(item => [
+        [
+            item.stock_guid,
+            item.inventory_node,
+            item.batch_id || ""
+        ].join("|"),
+        item
+    ])
+);
+
+const ledgerMasterMap = new Map(
+
+    (ledgerMasters || []).map(item => [
+
+        item.guid,
+
+        item
+
+    ])
+
+);
+
+const stockMasterMap = new Map(
+
+    (stockMasters || []).map(item => [
+
+        item.guid,
+
+        item
+
+    ])
+
+);
+return {
+
+    header,
+
+    ledgers: ledgers || [],
+
+    ledgerMap,
+
+    ledgerMasterMap,
+
+    stockMasterMap,
+
+    inventory: inventoryRows,
+
+    stockVouchers: stockVoucherRows,
+
+    inventoryMap,
+
+    stockVoucherMap
+
+};
+
 
 }
+
 
 /**
  * ============================================
@@ -343,9 +497,13 @@ this.validateReverseData,
 // --------------------------------------------------
     this.validateHeader,
 
+    this.validateMasters,
+
     this.validateLedgers,
 
     this.validateInventory,
+
+    this.validateStockVouchers,
 
     this.validateParty,
 
@@ -363,14 +521,25 @@ this.validateReverseData,
 
     for (const validator of validators) {
 
-        await validator.call(
-            this,
-            parsedVoucher,
-            dbData,
-            reasons
+    const before = reasons.length;
+
+    await validator.call(
+        this,
+        parsedVoucher,
+        dbData,
+        reasons
+    );
+
+    if (reasons.length > before) {
+
+        console.log(
+            validator.name,
+            reasons.slice(before)
         );
 
     }
+
+}
 
     return {
 
@@ -556,6 +725,51 @@ inventoryFields = [
 
 ];
 
+stockVoucherFields = [
+
+    ["stockItem", "stock_item", "Stock Name"],
+
+    ["stockMasterIdResolved", "stock_masterid", "Stock MasterId"],
+
+    ["stockAlterId", "stock_alterid", "Stock AlterId"],
+
+    ["movementType", "movement_type", "Movement Type"],
+
+    ["actualQty", "actual_qty", "Actual Qty"],
+
+    ["actualQtyValue", "actual_qty_value", "Actual Qty Value"],
+
+    ["billedQty", "billed_qty", "Billed Qty"],
+
+    ["billedQtyValue", "billed_qty_value", "Billed Qty Value"],
+
+    ["unit", "unit", "Unit"],
+
+    ["rate", "rate", "Rate"],
+
+    ["rateValue", "rate_value", "Rate Value"],
+
+    ["amount", "amount", "Amount"],
+
+    ["godown", "godown", "Godown"],
+
+    ["batchName", "batch_name", "Batch Name"],
+
+    ["inventoryNode", "inventory_node", "Inventory Node"],
+    ["ledgerName", "ledger_name", "Ledger Name"],
+
+["discount", "discount", "Discount"],
+
+["additionalAmount", "additional_amount", "Additional Amount"],
+
+["batchRate", "batch_rate", "Batch Rate"],
+
+["batchRateValue", "batch_rate_value", "Batch Rate Value"],
+
+["batchAmount", "batch_amount", "Batch Amount"],
+
+];
+
 compareField(dbValue, parsedValue) {
 
     if (dbValue === null || dbValue === undefined) {
@@ -661,6 +875,215 @@ const dbValue =
 
 /**
  * ========================================================
+ * Master Validation
+ * ========================================================
+ *
+ * Validates voucher references against master tables.
+ */
+async validateMasters(
+    parsedVoucher,
+    dbData,
+    reasons
+) {
+
+    if (!dbData) {
+        return;
+    }
+
+ //--------------------------------------------------
+// Voucher Ledger Validation
+//--------------------------------------------------
+
+for (const ledger of (parsedVoucher.ledgers || [])) {
+
+    const master =
+        dbData.ledgerMasterMap.get(
+            ledger.ledgerGuid
+        );
+
+    if (!master) {
+
+        reasons.push(
+            `Ledger Master Missing : ${ledger.ledgerName}`
+        );
+
+        continue;
+
+    }
+
+    if (
+        Number(master.master_id) !==
+        Number(ledger.ledgerMasterId)
+    ) {
+
+        reasons.push(
+            `Ledger MasterId Mismatch : ${ledger.ledgerName}`
+        );
+
+    }
+
+    if (
+        Number(master.alter_id) !==
+        Number(ledger.ledgerAlterId)
+    ) {
+
+        reasons.push(
+            `Ledger AlterId Mismatch : ${ledger.ledgerName}`
+        );
+
+    }
+
+}
+
+
+
+ //--------------------------------------------------
+// Inventory Stock Validation
+//--------------------------------------------------
+
+for (const item of (parsedVoucher.inventory || [])) {
+
+    const master =
+        dbData.stockMasterMap.get(
+            item.stockGuid
+        );
+
+    if (!master) {
+
+        reasons.push(
+            `Stock Master Missing : ${item.stockItem}`
+        );
+
+        continue;
+
+    }
+
+    if (
+        Number(master.masterid) !==
+        Number(item.stockMasterIdResolved)
+    ) {
+
+        reasons.push(
+            `Stock MasterId Mismatch : ${item.stockItem}`
+        );
+
+    }
+
+    if (
+        Number(master.alterid) !==
+        Number(item.stockAlterId)
+    ) {
+
+        reasons.push(
+            `Stock AlterId Mismatch : ${item.stockItem}`
+        );
+
+    }
+
+}
+
+//--------------------------------------------------
+// Party Ledger Validation
+//--------------------------------------------------
+
+for (const item of (parsedVoucher.inventory || [])) {
+
+    if (!item.partyGuid) {
+        continue;
+    }
+
+    const master =
+        dbData.ledgerMasterMap.get(
+            item.partyGuid
+        );
+
+    if (!master) {
+
+        reasons.push(
+            `Party Master Missing : ${item.partyName}`
+        );
+
+        continue;
+
+    }
+
+    if (
+        Number(master.master_id) !==
+        Number(item.partyMasterId)
+    ) {
+
+        reasons.push(
+            `Party MasterId Mismatch : ${item.partyName}`
+        );
+
+    }
+
+    if (
+        Number(master.alter_id) !==
+        Number(item.partyAlterId)
+    ) {
+
+        reasons.push(
+            `Party AlterId Mismatch : ${item.partyName}`
+        );
+
+    }
+
+}
+
+ //--------------------------------------------------
+// Accounting Ledger Validation
+//--------------------------------------------------
+
+for (const item of (parsedVoucher.inventory || [])) {
+
+    if (!item.ledgerGuid) {
+        continue;
+    }
+
+    const master =
+        dbData.ledgerMasterMap.get(
+            item.ledgerGuid
+        );
+
+    if (!master) {
+
+        reasons.push(
+            `Accounting Ledger Missing : ${item.ledgerName}`
+        );
+
+        continue;
+
+    }
+
+    if (
+        Number(master.master_id) !==
+        Number(item.ledgerMasterId)
+    ) {
+
+        reasons.push(
+            `Accounting Ledger MasterId Mismatch : ${item.ledgerName}`
+        );
+
+    }
+
+    if (
+        Number(master.alter_id) !==
+        Number(item.ledgerAlterId)
+    ) {
+
+        reasons.push(
+            `Accounting Ledger AlterId Mismatch : ${item.ledgerName}`
+        );
+
+    }
+
+}
+
+}
+
+/**
+ * ========================================================
  * Ledger Validation
  * ========================================================
  */
@@ -676,9 +1099,9 @@ async validateLedgers(
 
     for (const parsedLedger of (parsedVoucher.ledgers || [])) {
 
-    const dbLedger = (dbData.ledgers || []).find(
-        l =>
-            l.ledger_guid === parsedLedger.ledgerGuid
+    const dbLedger =
+    dbData.ledgerMap.get(
+        parsedLedger.ledgerGuid
     );
 
     if (!dbLedger) {
@@ -726,12 +1149,68 @@ async validateLedgers(
         return;
     }
 
-    for (const parsedItem of (parsedVoucher.inventory || [])) {
+    for (
 
-    const dbItem = (dbData.inventory || []).find(
-        i =>
-            i.stock_guid === parsedItem.stockGuid
+    const parsedItem of
+
+    (parsedVoucher.inventory || []).filter(
+
+        item =>
+
+            item.inventoryNode ===
+
+            "ALLINVENTORYENTRIES.LIST"
+
+    )
+
+) {
+
+const dbItem =
+    dbData.inventoryMap.find(item =>
+
+        item.stock_guid ===
+            parsedItem.stockGuid &&
+
+        Number(item.amount) ===
+            Number(parsedItem.amount) &&
+
+        String(item.godown || "").trim() ===
+            String(parsedItem.godown || "").trim()
+
     );
+fs.appendFileSync(
+    debugFile,
+    JSON.stringify({
+
+        voucher_guid:
+            parsedVoucher.header.guid,
+
+        stock_guid:
+            parsedItem.stockGuid,
+
+        stock_item:
+            parsedItem.stockItem,
+
+        parsed: {
+            amount: parsedItem.amount,
+            godown: parsedItem.godown,
+            cgst_rate: parsedItem.cgstRate,
+            sgst_rate: parsedItem.sgstRate,
+            igst_rate: parsedItem.igstRate
+        },
+
+        matched_db: dbItem
+            ? {
+                amount: dbItem.amount,
+                godown: dbItem.godown,
+                cgst_rate: dbItem.cgst_rate,
+                sgst_rate: dbItem.sgst_rate,
+                igst_rate: dbItem.igst_rate
+            }
+            : null
+
+    }) + "\n"
+);
 
     if (!dbItem) {
 
@@ -743,6 +1222,27 @@ async validateLedgers(
     }
 
 for (const [parsedField, dbField, label] of this.inventoryFields) {
+
+    const skipGSTValidation =
+[
+    "Consumption Voucher View",
+    "Multi Consumption Voucher View"
+].includes(dbItem.persisted_view);
+
+if (
+    skipGSTValidation &&
+    [
+        "cgst_rate",
+        "sgst_rate",
+        "igst_rate",
+        "cgst_amount",
+        "sgst_amount",
+        "igst_amount",
+        "taxable_amount"
+    ].includes(dbField)
+) {
+    continue;
+}
 
     if (
         !this.compareField(
@@ -766,6 +1266,79 @@ for (const [parsedField, dbField, label] of this.inventoryFields) {
 
 }
 
+
+/**
+ * ========================================================
+ * Stock Voucher Validation
+ * ========================================================
+ */
+async validateStockVouchers(
+    parsedVoucher,
+    dbData,
+    reasons
+) {
+
+    if (!dbData) {
+        return;
+    }
+
+    const parsedStockVouchers =
+    (parsedVoucher.inventory || []).filter(
+        item =>
+            item.inventoryNode !==
+            "ALLINVENTORYENTRIES.LIST"
+    );
+
+for (const parsedItem of parsedStockVouchers) {
+
+  const key = [
+
+    parsedItem.stockGuid,
+
+    parsedItem.inventoryNode,
+
+    parsedItem.batchId || ""
+
+].join("|");
+
+const dbItem =
+    dbData.stockVoucherMap.get(key);
+
+    if (!dbItem) {
+
+        reasons.push(
+            `Stock Voucher Missing : ${parsedItem.stockItem}`
+        );
+
+        continue;
+
+    }
+
+    for (const [parsedField, dbField, label] of this.stockVoucherFields) {
+
+    if (
+        !this.compareField(
+            dbItem[dbField],
+            parsedItem[parsedField]
+        )
+    ) {
+
+        reasons.push(
+            `${label} Mismatch : ${parsedItem.stockGuid}`
+        );
+
+    }
+
+}
+
+}
+    // TODO:
+    // Validate INVENTORYENTRIESIN.LIST
+    // Validate INVENTORYENTRIESOUT.LIST
+    // Compare movement type
+    // Compare source/destination godown
+    // Compare batches
+}
 
 /**
  * ========================================================
@@ -819,11 +1392,24 @@ async validateReverseData(
     //
     //--------------------------------------------------
 
+    const parsedLedgerMap = new Map(
+
+    (parsedVoucher.ledgers || []).map(item => [
+
+        item.ledgerGuid,
+
+        item
+
+    ])
+
+);
+
     for (const dbLedger of (dbData.ledgers || [])) {
 
-        const parsedLedger = (parsedVoucher.ledgers || []).find(
-            l => l.ledgerGuid === dbLedger.ledger_guid
-        );
+        const parsedLedger =
+    parsedLedgerMap.get(
+        dbLedger.ledger_guid
+    );
 
         if (!parsedLedger) {
 
@@ -850,16 +1436,87 @@ async validateReverseData(
 //
 //--------------------------------------------------
 
+  const parsedInventoryRows =
+    (parsedVoucher.inventory || []).filter(
+        item =>
+            item.inventoryNode ===
+            "ALLINVENTORYENTRIES.LIST"
+    );
+
 for (const dbItem of (dbData.inventory || [])) {
 
-    const parsedItem = (parsedVoucher.inventory || []).find(
-        i => i.stockGuid === dbItem.stock_guid
+  const parsedItem =
+    parsedInventoryRows.find(item =>
+
+        item.stockGuid ===
+            dbItem.stock_guid &&
+
+        Number(item.amount) ===
+            Number(dbItem.amount) &&
+
+        String(item.godown || "").trim() ===
+            String(dbItem.godown || "").trim()
+
     );
 
     if (!parsedItem) {
 
         reasons.push(
             `Orphan Inventory : ${dbItem.stock_item}`
+        );
+
+    }
+
+}
+
+const parsedStockVouchers =
+    (parsedVoucher.inventory || []).filter(
+        item =>
+            item.inventoryNode !==
+            "ALLINVENTORYENTRIES.LIST"
+    );
+
+const parsedStockVoucherMap = new Map(
+
+    parsedStockVouchers.map(item => [
+
+        [
+
+            item.stockGuid,
+
+            item.inventoryNode,
+
+            item.batchId || ""
+
+        ].join("|"),
+
+        item
+
+    ])
+
+);
+
+  
+for (const dbItem of (dbData.stockVouchers || [])) {
+
+  const key = [
+
+    dbItem.stock_guid,
+
+    dbItem.inventory_node,
+
+    dbItem.batch_id || ""
+
+].join("|");
+
+const parsedItem =
+    parsedStockVoucherMap.get(key);
+
+
+    if (!parsedItem) {
+
+        reasons.push(
+            `Orphan Stock Voucher : ${dbItem.stock_item}`
         );
 
     }
@@ -954,25 +1611,54 @@ if (parsedCredit !== dbCredit) {
 
 }
 
-if (parsedDebit !== parsedCredit) {
+
+const skipLedgerBalanceValidation =
+[
+    "Consumption Voucher View",
+    "Multi Consumption Voucher View"
+].includes(dbData.header.persisted_view);
+
+if (
+    !skipLedgerBalanceValidation &&
+    parsedDebit !== parsedCredit
+) {
 
     reasons.push(
-        `Parsed Voucher Not Balanced`
+        `Parsed Voucher Not Balanced : Debit=${parsedDebit}, Credit=${parsedCredit}, Difference=${parsedDebit - parsedCredit}`
     );
 
 }
 
-if (dbDebit !== dbCredit) {
+if (
+    !skipLedgerBalanceValidation &&
+    dbDebit !== dbCredit
+) {
 
     reasons.push(
-        `Database Voucher Not Balanced`
+        `Database Voucher Not Balanced : Debit=${dbDebit}, Credit=${dbCredit}, Difference=${dbDebit - dbCredit}`
     );
 
 }
+
+
 let parsedInventoryTotal = 0;
 let dbInventoryTotal = 0;
 
-for (const item of (parsedVoucher.inventory || [])) {
+for (
+
+    const item of
+
+    (parsedVoucher.inventory || []).filter(
+
+        item =>
+
+            item.inventoryNode ===
+
+            "ALLINVENTORYENTRIES.LIST"
+
+    )
+
+) {
 
     parsedInventoryTotal += Math.abs(
         Number(item.amount || 0)
@@ -1036,7 +1722,11 @@ async validateCounts(
 
     }
 const parsedInventoryCount =
-    parsedVoucher.inventory?.length || 0;
+    (parsedVoucher.inventory || []).filter(
+        item =>
+            item.inventoryNode ===
+            "ALLINVENTORYENTRIES.LIST"
+    ).length;
 
 const dbInventoryCount =
     dbData.inventory?.length || 0;
@@ -1049,7 +1739,23 @@ if (parsedInventoryCount !== dbInventoryCount) {
 
 }
 
+const parsedStockVoucherCount =
+    (parsedVoucher.inventory || []).filter(
+        item =>
+            item.inventoryNode !==
+            "ALLINVENTORYENTRIES.LIST"
+    ).length;
 
+const dbStockVoucherCount =
+    dbData.stockVouchers?.length || 0;
+
+if (parsedStockVoucherCount !== dbStockVoucherCount) {
+
+    reasons.push(
+        `Stock Voucher Count Mismatch : Parsed=${parsedStockVoucherCount}, DB=${dbStockVoucherCount}`
+    );
+
+}
 
 
 }
@@ -1131,30 +1837,42 @@ for (const ledger of dbData.ledgers || []) {
 
 }
 
-const requiredInventoryFields = [
+for (const item of (dbData.inventory || [])) {
 
-    "stock_guid",
-    "stock_masterid",
-    "stock_alterid",
+    const requiredInventoryFields = [
 
-    "ledger_guid",
-    "ledger_master_id",
-    "ledger_alter_id",
+        "stock_guid",
+        "stock_masterid",
+        "stock_alterid"
 
-    "party_guid",
-    "party_master_id",
-    "party_alter_id"
+    ];
 
-];
+    if (item.transaction_type === "Yes") {
 
-for (const item of dbData.inventory || []) {
+        requiredInventoryFields.push(
+
+            "ledger_guid",
+            "ledger_master_id",
+            "ledger_alter_id",
+
+            "party_guid",
+            "party_master_id",
+            "party_alter_id"
+
+        );
+
+    }
 
     for (const field of requiredInventoryFields) {
 
         if (
+
             item[field] === null ||
+
             item[field] === undefined ||
+
             String(item[field]).trim() === ""
+
         ) {
 
             reasons.push(
@@ -1166,7 +1884,37 @@ for (const item of dbData.inventory || []) {
     }
 
 }
+const requiredStockVoucherFields = [
 
+    "stock_guid",
+    "stock_masterid",
+    "stock_alterid",
+
+    "movement_type",
+
+    "inventory_node"
+
+];
+
+for (const item of (dbData.stockVouchers || [])) {
+
+    for (const field of requiredStockVoucherFields) {
+
+        if (
+            item[field] === null ||
+            item[field] === undefined ||
+            String(item[field]).trim() === ""
+        ) {
+
+            reasons.push(
+                `Stock Voucher Field Missing : ${field}`
+            );
+
+        }
+
+    }
+
+}
 
 
 
@@ -1209,7 +1957,7 @@ for (const item of dbData.inventory || []) {
 
 }
 
-const stockGuids = new Set();
+const stockKeys = new Set();
 
 for (const item of (parsedVoucher.inventory || [])) {
 
@@ -1217,17 +1965,58 @@ for (const item of (parsedVoucher.inventory || [])) {
         continue;
     }
 
-    if (stockGuids.has(item.stockGuid)) {
+    const key = [
+
+    item.stockGuid,
+
+    item.inventoryNode,
+
+    item.batchId || "",
+
+    Number(item.amount || 0)
+
+].join("|");
+
+    if (stockKeys.has(key)) {
 
         reasons.push(
-            `Duplicate Stock GUID : ${item.stockGuid}`
+            `Duplicate Inventory : ${key}`
         );
 
     }
 
-    stockGuids.add(item.stockGuid);
+    stockKeys.add(key);
 
 }
+
+const dbStockVoucherKeys = new Set();
+
+for (const item of (dbData.stockVouchers || [])) {
+
+ const key = [
+
+    item.stock_guid,
+
+    item.inventory_node,
+
+    item.batch_id || "",
+
+    Number(item.amount || 0)
+
+].join("|");
+
+    if (dbStockVoucherKeys.has(key)) {
+
+        reasons.push(
+            `Duplicate Stock Voucher : ${key}`
+        );
+
+    }
+
+    dbStockVoucherKeys.add(key);
+
+}
+
 
 
 }

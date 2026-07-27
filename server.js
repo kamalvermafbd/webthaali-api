@@ -34646,13 +34646,19 @@ const result = await sendToConnector(
 );
 
 // =========================
+// SYNC BATCH ID
+// =========================
+
+const sync_batch_id = crypto.randomUUID();
+
+// =========================
 // SAVE GROUPS
 // =========================
 
 const groupResult = await saveGroups({
   company_code,
   tally_owner,
-  sync_batch_id: "TEST001",
+  sync_batch_id,
   groups: result.groups || []
 });
 
@@ -34665,7 +34671,7 @@ console.log("GROUP SAVE :", groupResult);
 const ledgerResult = await saveLedgers({
   company_code,
   tally_owner,
-  sync_batch_id: "TEST001",
+   sync_batch_id,
   ledgers: result.ledgers || []
 });
 
@@ -34683,7 +34689,7 @@ console.log(
 const godownResult = await saveGodowns({
   company_code,
   tally_owner,
-  sync_batch_id: "TEST001",
+   sync_batch_id,
   godowns: result.godowns || []
 });
 
@@ -34696,7 +34702,7 @@ console.log("GODOWN SAVE :", godownResult);
 const unitResult = await saveUnits({
     company_code,
     tally_owner,
-    sync_batch_id: "TEST001",
+     sync_batch_id,
     units: result.units || []
 });
 
@@ -34709,7 +34715,7 @@ console.log("UNIT SAVE :", unitResult);
 const costCentreResult = await saveCostCentres({
   company_code,
   tally_owner,
-  sync_batch_id: "TEST001",
+   sync_batch_id,
   costCentres: result.costCentres || []
 });
 
@@ -34722,7 +34728,7 @@ console.log("COST CENTRE SAVE :", costCentreResult);
 const stockGroupResult = await saveStockGroups({
     company_code,
     tally_owner,
-    sync_batch_id: "TEST001",
+     sync_batch_id,
     stockGroups: result.stockGroups || []
 });
 
@@ -34735,7 +34741,7 @@ console.log("STOCK GROUP SAVE :", stockGroupResult);
 const stockResult = await saveStocks({
     company_code,
     tally_owner,
-    sync_batch_id: "TEST001",
+     sync_batch_id,
     stocks: result.stocks || []
 });
 
@@ -34749,7 +34755,7 @@ console.log("STOCK SAVE :", stockResult);
 const voucherResult = await saveVouchers({
     company_code,
     tally_owner,
-    sync_batch_id: "TEST001",
+    sync_batch_id,
     vouchers: result.vouchers || []
 });
 
