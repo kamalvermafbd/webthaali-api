@@ -83,6 +83,10 @@ const { saveStockGroups } = require("./services/saveStockGroups");
 const { saveStocks } = require("./services/saveStocks");
 const { saveVouchers } = require("./services/saveVouchers");
 
+const {
+    sendChunkedToConnector
+} = require("./utils/sendChunkedToConnector");
+
 //io.on("connection", (socket) => {
 
   //console.log("================================");
@@ -34522,6 +34526,7 @@ app.get("/getMasters", async (req, res) => {
     console.log("TALLY OWNER :", tally_owner);
     console.log("REGISTERED :", registry.list());
 
+
     if (!company_code) {
 
       return res.json({
@@ -34600,6 +34605,32 @@ app.get("/getMasters", async (req, res) => {
     }
 
     // =========================
+// LAST ALTER ID
+// =========================
+
+const {
+  data: lastVoucher,
+  error: lastVoucherError
+} = await supabase
+  .from("tally_vouchers")
+  .select("alterid")
+  .eq("company_code", company_code)
+  .eq("tally_owner", tally_owner)
+  .order("alterid", { ascending: false })
+  .limit(1)
+  .maybeSingle();
+
+if (lastVoucherError) {
+  throw lastVoucherError;
+}
+
+const lastAlterId = lastVoucher?.alterid ?? null;
+
+console.log(
+  "LAST ALTER ID :",
+  lastAlterId ?? "FULL SYNC"
+);
+    // =========================
     // CONNECTOR
     // =========================
 
@@ -34636,7 +34667,7 @@ app.get("/getMasters", async (req, res) => {
 // =========================
 // IMPORT
 // =========================
-
+/*
 const result = await sendToConnector(
   socket,
   "getMasters",
@@ -34644,7 +34675,27 @@ const result = await sendToConnector(
     company
   }
 );
+*/
 
+const result = await sendChunkedToConnector(
+    socket,
+    "getMasters",
+    {
+        company,
+        lastAlterId
+    }
+);
+
+console.log(
+  "Masters received. Vouchers:",
+  result.vouchers?.length || 0
+);
+
+if (!result.success) {
+
+  return res.json(result);
+
+}
 // =========================
 // SYNC BATCH ID
 // =========================

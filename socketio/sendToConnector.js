@@ -14,6 +14,8 @@ function sendToConnector(socket, event, payload) {
 
     function onResponse(data) {
 
+      console.log("✅ RESPONSE RECEIVED :", responseEvent);
+
       clearTimeout(timeout);
 
       socket.off(responseEvent, onResponse);
@@ -23,6 +25,8 @@ function sendToConnector(socket, event, payload) {
     }
 
     socket.once(responseEvent, onResponse);
+
+    console.log("Waiting for :", responseEvent);
 
     socket.emit(event, payload);
 

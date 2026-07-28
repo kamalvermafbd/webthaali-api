@@ -1,0 +1,5 @@
+EVENT : getMasters
+SOCKET ID : cO47luXoza33ZfVRAAAR
+EMIT : getMasters
+EMIT DONE
+TIMEOUT

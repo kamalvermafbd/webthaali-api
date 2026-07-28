@@ -32,20 +32,20 @@ function registerEvents(io) {
 
 });
 
-        socket.on("disconnect", () => {
+      socket.on("disconnect", (reason) => {
 
-            console.log("================================");
-            console.log("❌ Connector Disconnected");
-            console.log("Socket ID :", socket.id);
+    console.log("================================");
+    console.log("❌ Connector Disconnected");
+    console.log("Socket ID :", socket.id);
+    console.log("Reason :", reason);
 
-            if (socket.companyCode) {
-                registry.remove(socket.companyCode);
-            }
+    if (socket.companyCode) {
+        registry.remove(socket.companyCode);
+    }
 
-            console.log("================================");
+    console.log("================================");
 
-
-        });
+});
 
     });
 
