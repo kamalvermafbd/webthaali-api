@@ -81,7 +81,10 @@ const { saveGodowns } = require("./services/saveGodowns");
 const { saveCostCentres } = require("./services/saveCostCentres");
 const { saveStockGroups } = require("./services/saveStockGroups");
 const { saveStocks } = require("./services/saveStocks");
-const { saveVouchers } = require("./services/saveVouchers");
+const {
+    saveVouchers,
+    saveVoucherGuids
+} = require("./services/saveVouchers");
 
 const {
     sendChunkedToConnector
@@ -34696,6 +34699,39 @@ if (!result.success) {
   return res.json(result);
 
 }
+
+const voucherGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersVoucherGuids",
+        {
+            company
+        }
+    );
+
+if (!voucherGuidResult.success) {
+
+    return res.json(voucherGuidResult);
+
+}
+
+result.voucherGuids =
+    voucherGuidResult.voucherGuids || [];
+
+fs.appendFileSync(
+    "./logs/server-guid-debug.jsonl",
+    JSON.stringify({
+        company_code,
+        tally_owner,
+        voucherCount: result.vouchers?.length || 0,
+        completeGuidCount: result.voucherGuids?.length || 0,
+        voucherGuids: result.voucherGuids || [],
+        incrementalGuids: (result.vouchers || []).map(
+            v => v.header?.guid
+        )
+    }) + "\n"
+);
+
 // =========================
 // SYNC BATCH ID
 // =========================
@@ -34798,7 +34834,9 @@ const stockResult = await saveStocks({
 
 console.log("STOCK SAVE :", stockResult);
 
-
+console.log(
+    JSON.stringify(result.voucherGuids, null, 2)
+);
 // =========================
 // SAVE VOUCHERS
 // =========================
@@ -34807,7 +34845,8 @@ const voucherResult = await saveVouchers({
     company_code,
     tally_owner,
     sync_batch_id,
-    vouchers: result.vouchers || []
+    vouchers: result.vouchers || [],
+    allVoucherGuids: result.voucherGuids || []
 });
 
 console.log("VOUCHER SAVE :", voucherResult);
@@ -34824,7 +34863,8 @@ db: {
     stocks: stockResult,
     costCentres: costCentreResult,
     units: unitResult,
-    vouchers: voucherResult
+    vouchers: voucherResult,
+
 }
 });
 

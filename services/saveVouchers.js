@@ -111,8 +111,6 @@ const VALIDATION_ACTION = {
 
     SKIP: "SKIP",
 
-VOUCHER_SAVED: "VOUCHER_SAVED"
-
 };
 
 function getVoucherGuids(rows) {
@@ -172,6 +170,8 @@ function buildValidationResult({
     };
 
 }
+
+/* 28.07.26 removed
 
 async function processValidationResult({
 
@@ -305,6 +305,7 @@ async function processValidationResult({
     return false;
 
 }
+*/
 
 
 async function deleteVoucherLedgers({
@@ -485,32 +486,6 @@ async function saveVoucherHeaders({
             error.message
 
         );
-
-    }
-
-    for (const row of rowsToSave) {
-
-        await addSyncValidationLog({
-
-            sync_batch_id,
-
-            company_code,
-
-            tally_owner,
-
-            voucher_guid: row.guid,
-
-            voucher_number: row.voucher_number,
-
-            voucher_type: row.voucher_type,
-
-            action: VALIDATION_ACTION.VOUCHER_SAVED,
-
-            validator_name: "saveVouchers",
-
-            reason: "Voucher Header Saved"
-
-        });
 
     }
 
@@ -870,126 +845,166 @@ async function loadExistingVoucherMap({
 
 }
 
-async function addSyncValidationLog({
 
-    sync_batch_id,
+async function loadExistingVoucherGuidMap({
+
+    company_code,
+
+    tally_owner
+
+}) {
+
+    const { data, error } = await supabase
+
+        .from("tally_vouchers")
+
+        .select("guid")
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner);
+
+    if (error) {
+
+        throw new Error(
+            "Failed to load existing voucher GUIDs : " +
+            error.message
+        );
+
+    }
+
+   return new Map(
+    (data || []).map(row => [
+        row.guid,
+        true
+    ])
+);
+
+}
+
+
+async function saveVoucherGuids({
 
     company_code,
 
     tally_owner,
 
-    voucher_guid,
-
-    voucher_number = null,
-
-    voucher_type = null,
-
-    action,
-
-    validator_name,
-
-    reason,
-
-    remarks = null
+    voucherGuids = []
 
 }) {
 
-    const { data: existing } = await supabase
 
-    .from("sync_exe_queue")
-
-    .select("id, reason")
-
-    .eq("sync_id", sync_batch_id)
-
-    .eq("voucher_guid", voucher_guid)
-
-    .maybeSingle();
-
-if (!existing) {
-fs.appendFileSync(
-    "./logs/queue-debug.jsonl",
-    JSON.stringify({
-        stage: "QUEUE_INSERT",
-        sync_batch_id,
-        voucher_guid,
-        action
-    }) + "\n"
-);
-    const { error } = await supabase
-
-        .from("sync_exe_queue")
-
-        .insert({
-
-            sync_id: sync_batch_id,
+     const existingVoucherMap =
+        await loadExistingVoucherGuidMap({
 
             company_code,
 
-            tally_owner,
-
-            voucher_guid,
-
-            voucher_number,
-
-            voucher_type,
-
-            action,
-
-            validator_name,
-
-            reason,
-
-            remarks
+            tally_owner
 
         });
 
-    if (error) {
+    const incomingVoucherGuids =
+    new Set(
+        voucherGuids
+            .map(v =>
+                typeof v === "string"
+                    ? v.trim()
+                    : v.guid?.trim()
+            )
+            .filter(Boolean)
+    );
 
-        console.error(
-            "Failed to write queue:",
-            error.message
-        );
+        fs.writeFileSync(
+    "./logs/incoming-voucher-guids.json",
+    JSON.stringify(
+        {
+            totalIncoming: incomingVoucherGuids.size,
+            guids: [...incomingVoucherGuids].sort()
+        },
+        null,
+        2
+    )
+);
+
+        fs.appendFileSync(
+    "./logs/voucher-guid-debug.jsonl",
+    JSON.stringify({
+        stage: "BEFORE_COMPARE",
+        company_code,
+        tally_owner,
+        dbCount: existingVoucherMap.size,
+        incomingCount: incomingVoucherGuids.size,
+        dbGuids: [...existingVoucherMap.keys()],
+        incomingGuids: [...incomingVoucherGuids]
+    }) + "\n"
+);
+        
+    const guidsToDelete = [];
+    
+
+ for (const [guid] of existingVoucherMap) {
+
+    if (!incomingVoucherGuids.has(guid)) {
+
+        guidsToDelete.push(guid);
 
     }
 
 }
-else {
 
-    const newReason =
-        existing.reason
-            ? existing.reason + "\n" + reason
-            : reason;
+fs.writeFileSync(
+    "./logs/db-voucher-guids.json",
+    JSON.stringify(
+        {
+            totalDb: existingVoucherMap.size,
+            guids: [...existingVoucherMap.keys()].sort()
+        },
+        null,
+        2
+    )
+);
 
-    const { error } = await supabase
 
-        .from("sync_exe_queue")
 
-        .update({
+fs.writeFileSync(
+    "./logs/voucher-guid-compare.json",
+    JSON.stringify({
+        totalIncoming: incomingVoucherGuids.size,
+        totalDb: existingVoucherMap.size,
+        deleteCount: guidsToDelete.length,
+        guidsToDelete: guidsToDelete.sort()
+    }, null, 2)
+);
 
-            reason: newReason
+if (guidsToDelete.length > 0) {
 
-        })
+    fs.appendFileSync(
+        "./logs/voucher-guid-debug.jsonl",
+        JSON.stringify({
+            stage: "DELETE_EXECUTION",
+            company_code,
+            tally_owner,
+            deleteCount: guidsToDelete.length,
+            deletedVoucherGuids: guidsToDelete
+        }) + "\n"
+    );
 
-        .eq("id", existing.id);
-
-    if (error) {
-
-        console.error(
-            "Failed to update queue:",
-            error.message
-        );
-
-    }
+    await deleteMissingVouchers({
+        company_code,
+        tally_owner,
+        deletedVoucherGuids: guidsToDelete
+    });
 
 }
 
+
 }
+
 
 const STOCK_DEBUG_FILE =
     "./logs/stock-movement-debug.jsonl";
 
-const ENABLE_QUEUE_EXECUTION = true;
+
 
 console.log("===== SAVEVOUCHERS.JS LOADED =====");
 
@@ -1002,18 +1017,9 @@ async function saveVouchers({
     company_code,
     tally_owner,
     sync_batch_id,
-    vouchers = []
+    vouchers = [],
+     allVoucherGuids = []
 }) {
-
-    // =========================
-// CLEAR PREVIOUS QUEUE
-// =========================
-
-await supabase
-    .from("sync_exe_queue")
-    .delete()
-    .eq("company_code", company_code)
-    .eq("tally_owner", tally_owner);
 
     if (!Array.isArray(vouchers) || vouchers.length === 0) {
 
@@ -1025,20 +1031,10 @@ await supabase
 
     }
 
-   const now = new Date().toISOString();
+const now = new Date().toISOString();
 
 const runId =
     `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-const VALIDATION_STAGE = {
-
-    NEW_VOUCHER: "NEW_VOUCHER",
-
-    ALTER_ID: "ALTER_ID",
-
-    INTEGRITY: "INTEGRITY"
-
-};
 
 const voucherRows = [];
 
@@ -1078,6 +1074,9 @@ const changedVoucherRows = [];
 
 const unchangedVoucherGuids = [];
 
+const incomingVoucherGuids = [];
+
+/* (28.07.26)
 const deletedVoucherGuids = [];
 
 
@@ -1131,7 +1130,7 @@ if (ENABLE_QUEUE_EXECUTION) {
     });
 
 }
-
+*/
 
 for (const voucher of vouchers) {
 
@@ -1147,7 +1146,9 @@ for (const voucher of vouchers) {
 
         }
 
-
+        incomingVoucherGuids.push(
+                header.guid.trim()
+        );
 
 // Validation pipeline:
 //
@@ -1203,33 +1204,45 @@ console.log(
 // Queue nomination happens here.
 // These arrays are temporary and will be replaced
 // by Queue Executor in the final architecture.
-const shouldSkip =
-    await processValidationResult({
+switch (integrityResult.action) {
 
-        integrityResult,
+    case VALIDATION_ACTION.INSERT:
 
-        header,
+        newVoucherRows.push(
+            header.guid.trim()
+        );
 
-        sync_batch_id,
+        break;
 
-        company_code,
+    case VALIDATION_ACTION.UPDATE:
 
-        tally_owner,
+        changedVoucherRows.push(
+            header.guid.trim()
+        );
 
-        newVoucherRows,
+        break;
 
-        changedVoucherRows,
+    case VALIDATION_ACTION.FORCE_UPDATE:
 
-        unchangedVoucherGuids
+        changedVoucherRows.push(
+            header.guid.trim()
+        );
 
-    });
+        break;
 
-if (shouldSkip) {
+    case VALIDATION_ACTION.SKIP:
 
-    continue;
+        unchangedVoucherGuids.push(
+            header.guid.trim()
+        );
+
+        continue;
+
+    default:
+
+        continue;
 
 }
-
 
 
 voucherRows.push(
@@ -1279,16 +1292,15 @@ stockVoucherRows.push(
         }
 
 
+        
+
         let success = 0;
 
         let rowsToSave = [];
 
 let voucherGuids = [];
 
-    if (
-        ENABLE_QUEUE_EXECUTION &&
-        voucherRows.length > 0
-    ) {
+if (voucherRows.length > 0){
 
       rowsToSave = getRowsToSave({
 
@@ -1319,199 +1331,36 @@ fs.appendFileSync(
     }) + "\n"
 );
 
+
 success =
-    await saveVoucherHeaders({
-
-        rowsToSave,
-
-        sync_batch_id,
+    await saveVoucherExecutionData({
 
         company_code,
 
-        tally_owner
+        tally_owner,
+
+        sync_batch_id,
+
+        rowsToSave,
+
+        voucherGuids,
+
+        ledgerRows,
+
+        inventoryRows,
+
+        stockVoucherRows,
+
+        STOCK_DEBUG_FILE
 
     });
 
-        const { count: ledgerBefore } = await supabase
-    .from("tally_voucher_ledgers")
-    .select("*", { count: "exact", head: true })
-    .eq("company_code", company_code)
-    .eq("tally_owner", tally_owner);
 
-fs.appendFileSync(
-    "./logs/delete-debug.jsonl",
-    JSON.stringify({
-        stage: "BEFORE_LEDGER_DELETE",
-        totalRows: ledgerBefore
-    }) + "\n"
-);
-
-await deleteVoucherLedgers({
-
+await saveVoucherGuids({
     company_code,
-
     tally_owner,
-
-    voucherGuids
-
+    voucherGuids: allVoucherGuids
 });
-
-
-const { count: ledgerAfter } = await supabase
-    .from("tally_voucher_ledgers")
-    .select("*", { count: "exact", head: true })
-    .eq("company_code", company_code)
-    .eq("tally_owner", tally_owner);
-
-fs.appendFileSync(
-    "./logs/delete-debug.jsonl",
-    JSON.stringify({
-        stage: "AFTER_LEDGER_DELETE",
-        remainingRows: ledgerAfter
-    }) + "\n"
-);
-
-
-
-    fs.appendFileSync(
-    "./logs/delete-debug.jsonl",
-    JSON.stringify({
-        stage: "DELETE_STOCK_INPUT",
-        voucherGuidsLength: voucherGuids.length,
-        voucherGuids: voucherGuids
-    }) + "\n"
-);    
-
-
-
-await deleteStockVouchers({
-
-    company_code,
-
-    tally_owner,
-
-    voucherGuids
-
-});
-
-
-
-const { count: stockCount } = await supabase
-    .from("tally_stock_vouchers")
-    .select("*", { count: "exact", head: true })
-    .eq("company_code", company_code)
-    .eq("tally_owner", tally_owner);
-
-fs.appendFileSync(
-    "./logs/delete-debug.jsonl",
-    JSON.stringify({
-        stage: "AFTER_STOCK_DELETE",
-        remainingRows: stockCount
-    }) + "\n"
-);
-
-
-await saveVoucherLedgers({
-
-    ledgerRows,
-    sync_batch_id
-
-});
-
-const { count: inventoryBefore } = await supabase
-    .from("tally_voucher_inventory")
-    .select("*", { count: "exact", head: true })
-    .eq("company_code", company_code)
-    .eq("tally_owner", tally_owner);
-
-fs.appendFileSync(
-    "./logs/delete-debug.jsonl",
-    JSON.stringify({
-        stage: "BEFORE_INVENTORY_DELETE",
-        totalRows: inventoryBefore
-    }) + "\n"
-);
-
-fs.appendFileSync(
-    "./logs/delete-debug.jsonl",
-    JSON.stringify({
-        stage: "DELETE_INPUT",
-        voucherGuidsLength: voucherGuids.length,
-        voucherGuids: voucherGuids
-    }) + "\n"
-);
-
-
-
-await deleteVoucherInventory({
-
-    company_code,
-
-    tally_owner,
-
-    voucherGuids
-
-});
-
-
-const { count: inventoryAfter } = await supabase
-    .from("tally_voucher_inventory")
-    .select("*", { count: "exact", head: true })
-    .eq("company_code", company_code)
-    .eq("tally_owner", tally_owner);
-
-fs.appendFileSync(
-    "./logs/delete-debug.jsonl",
-    JSON.stringify({
-        stage: "AFTER_INVENTORY_DELETE",
-        remainingRows: inventoryAfter
-    }) + "\n"
-);
-
-
-await saveVoucherInventory({
-
-    inventoryRows,
-    sync_batch_id
-
-});
-
-fs.appendFileSync(
-    "./logs/inventory-save-debug.jsonl",
-    JSON.stringify({
-        stage: "BEFORE_SAVE_INVENTORY",
-        totalRows: inventoryRows.length,
-        firstRow: inventoryRows[0]
-    }) + "\n"
-);          
-
-fs.appendFileSync(
-    STOCK_DEBUG_FILE,
-    JSON.stringify({
-        stage: "before_insert",
-        totalRows: stockVoucherRows.length,
-        rows: stockVoucherRows
-    }) + "\n"
-);
-
-fs.appendFileSync(
-    "./logs/delete-debug.jsonl",
-    JSON.stringify({
-        stage: "BEFORE_STOCK_INSERT",
-        stockVoucherRows: stockVoucherRows.length
-    }) + "\n"
-);
-
-        
-await saveStockVouchers({
-
-    stockVoucherRows,
-    sync_batch_id,
-    STOCK_DEBUG_FILE
-
-});
-
-
 
 }
 
@@ -1796,6 +1645,7 @@ if (orphanStockVoucherGuids.length > 0) {
 module.exports = {
 
     saveVouchers,
+     saveVoucherGuids,
 
     saveVoucherExecutionData,
 

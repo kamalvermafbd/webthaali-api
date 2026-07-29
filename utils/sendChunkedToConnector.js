@@ -12,7 +12,7 @@ async function sendChunkedToConnector(
         const requestId = crypto.randomUUID();
 
         let masterResult = null;
-        let voucherList = [];
+        let collectionList = [];
 
         let expectedChunks = null;
         let expectedItems = null;
@@ -97,16 +97,16 @@ async function sendChunkedToConnector(
 
      expectedChunks = data.totalChunks;
 
-voucherList.push(
+collectionList.push(
     ...data.data
 );
 
 console.log(
-    `Received chunk ${data.chunkIndex}/${data.totalChunks} (${data.data.length} vouchers)`
+    `Received chunk ${data.chunkIndex}/${data.totalChunks} (${data.data.length} records)`
 );
 
 console.log(
-    `Total vouchers received so far: ${voucherList.length}`
+    `Total records received so far: ${collectionList.length}`
 );
 
 socket.emit(
@@ -161,14 +161,14 @@ console.log(
 
             if (
                 expectedItems !== null &&
-                voucherList.length !== expectedItems
+                collectionList.length !== expectedItems
             ) {
 
                 cleanup();
 
                 return reject(
                     new Error(
-                        `Voucher count mismatch. Expected ${expectedItems}, Received ${voucherList.length}`
+                       `Record count mismatch. Expected ${expectedItems}, Received ${collectionList.length}`
                     )
                 );
 
@@ -179,16 +179,19 @@ console.log(
             console.log("=================================");
 console.log("Chunk transfer completed");
 console.log(`Total chunks : ${expectedChunks}`);
-console.log(`Total vouchers : ${voucherList.length}`);
+console.log(`Total records : ${collectionList.length}`);
 console.log("=================================");
 
-            resolve({
+           const collectionName =
+    masterResult.collectionName || "vouchers";
 
-                ...masterResult,
+resolve({
 
-                vouchers: voucherList
+    ...masterResult,
 
-            });
+    [collectionName]: collectionList
+
+});
 
         }
 
