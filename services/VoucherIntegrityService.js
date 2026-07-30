@@ -28,6 +28,9 @@
 const { createClient } = require("@supabase/supabase-js");
 const fs = require("fs");
 const investigator = require("../logs/VoucherIntegrityInvestigator");
+
+console.log("INTEGRITY_DEBUG =", process.env.INTEGRITY_DEBUG);
+
 const debugFile =
     "logs/inventory-row-match.jsonl";
 const supabase = createClient(
@@ -36,6 +39,13 @@ const supabase = createClient(
 );
 
 class VoucherIntegrityService {
+
+    constructor(){
+
+    this.ledgerMasterCache = new Map();
+    this.stockMasterCache = new Map();
+
+}
 
     /**
      * ========================================================
@@ -72,14 +82,16 @@ class VoucherIntegrityService {
 
 }) {
 
+    if(process.env.INTEGRITY_DEBUG === "true"){
     fs.appendFileSync(
-    "logs/processed-vouchers.jsonl",
-    JSON.stringify({
-        guid: parsedVoucher.header.guid,
-        voucherNumber: parsedVoucher.header.voucherNumber,
-        voucherType: parsedVoucher.header.voucherType
-    }) + "\n"
-);
+        "logs/processed-vouchers.jsonl",
+        JSON.stringify({
+            guid: parsedVoucher.header.guid,
+            voucherNumber: parsedVoucher.header.voucherNumber,
+            voucherType: parsedVoucher.header.voucherType
+        }) + "\n"
+    );
+}
     //--------------------------------------------------
     // Load Existing Voucher
     //--------------------------------------------------
@@ -133,13 +145,17 @@ if (!dbData) {
 
         });
 
+    if (process.env.INTEGRITY_DEBUG === "true") {
+
     investigator.investigate({
 
-    parsedVoucher,
+        parsedVoucher,
 
-    dbData
+        dbData
 
-});    
+    });
+
+}
 
     //--------------------------------------------------
     // Decide Action
@@ -328,69 +344,55 @@ if (stockVoucherError) {
 //--------------------------------------------------
 // Load Ledger Masters
 //--------------------------------------------------
-
-const {
-
-    data: ledgerMasters,
-
-    error: ledgerMasterError
-
-} = await supabase
-
-    .from("tally_sync_ledgers")
-
-    .select("*")
-
-    .eq("company_code", company_code)
-
-    .eq("tally_owner", tally_owner)
-
-    .eq("is_deleted", false);
-
-if (ledgerMasterError) {
-
-    throw new Error(
-
-        "Failed to load ledger masters : " +
-
-        ledgerMasterError.message
-
+let ledgerMasters =
+    this.ledgerMasterCache.get(
+        `${company_code}_${tally_owner}`
     );
 
+if (!ledgerMasters) {
+
+    const { data, error } = await supabase
+        .from("tally_sync_ledgers")
+        .select("*")
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .eq("is_deleted", false);
+
+    if(error) throw error;
+
+    ledgerMasters = data || [];
+
+    this.ledgerMasterCache.set(
+        `${company_code}_${tally_owner}`,
+        ledgerMasters
+    );
 }
 
 //--------------------------------------------------
 // Load Stock Masters
 //--------------------------------------------------
-
-const {
-
-    data: stockMasters,
-
-    error: stockMasterError
-
-} = await supabase
-
-    .from("tally_sync_stocks")
-
-    .select("*")
-
-    .eq("company_code", company_code)
-
-    .eq("tally_owner", tally_owner)
-
-    .eq("is_deleted", false);
-
-if (stockMasterError) {
-
-    throw new Error(
-
-        "Failed to load stock masters : " +
-
-        stockMasterError.message
-
+let stockMasters =
+    this.stockMasterCache.get(
+        `${company_code}_${tally_owner}`
     );
 
+if (!stockMasters) {
+
+    const { data, error } = await supabase
+        .from("tally_sync_stocks")
+        .select("*")
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .eq("is_deleted", false);
+
+    if(error) throw error;
+
+    stockMasters = data || [];
+
+    this.stockMasterCache.set(
+        `${company_code}_${tally_owner}`,
+        stockMasters
+    );
 }
 
     //--------------------------------------------------
@@ -1186,8 +1188,9 @@ const dbItem =
             String(parsedItem.godown || "").trim()
 
     );
-fs.appendFileSync(
-    debugFile,
+if(process.env.INTEGRITY_DEBUG === "true"){
+    fs.appendFileSync(
+        debugFile,
     JSON.stringify({
 
         voucher_guid:
@@ -1219,6 +1222,7 @@ fs.appendFileSync(
 
     }) + "\n"
 );
+}
 
     if (!dbItem) {
 
@@ -1297,40 +1301,77 @@ async validateStockVouchers(
             "ALLINVENTORYENTRIES.LIST"
     );
 
+
+    const stockVoucherMap = new Map(
+    dbData.stockVouchers.map(item => [
+        [
+            item.stock_guid,
+            item.inventory_node,
+            item.batch_id || "",
+            Number(item.amount || 0),
+            String(item.godown || "").trim()
+        ].join("|"),
+        item
+    ])
+);
+
+
 for (const parsedItem of parsedStockVouchers) {
 
+    if (process.env.INTEGRITY_DEBUG === "true") {
+
     fs.appendFileSync(
-    "logs/stock-voucher-match.jsonl",
-    JSON.stringify({
+        "logs/stock-voucher-match.jsonl",
+        JSON.stringify({
 
-        voucher_guid: parsedVoucher.header.guid,
+            voucher_guid: parsedVoucher.header.guid,
 
-        parsed: {
-            stock_item: parsedItem.stockItem,
-            stock_guid: parsedItem.stockGuid,
-            inventory_node: parsedItem.inventoryNode,
-            batch_id: parsedItem.batchId || "",
-            amount: parsedItem.amount,
-            godown: parsedItem.godown
-        },
+            parsed: {
+                stock_item: parsedItem.stockItem,
+                stock_guid: parsedItem.stockGuid,
+                inventory_node: parsedItem.inventoryNode,
+                batch_id: parsedItem.batchId || "",
+                amount: parsedItem.amount,
+                godown: parsedItem.godown
+            },
 
-       candidates: dbData.stockVouchers.map(item => ({
-                    id: item.id,
-                    stock_item: item.stock_item,
-                    stock_guid: item.stock_guid,
-                    inventory_node: item.inventory_node,
-                    batch_id: item.batch_id || "",
-                    amount: item.amount,
-                    godown: item.godown,
+            candidates: dbData.stockVouchers.map(item => ({
+                id: item.id,
+                stock_item: item.stock_item,
+                stock_guid: item.stock_guid,
+                inventory_node: item.inventory_node,
+                batch_id: item.batch_id || "",
+                amount: item.amount,
+                godown: item.godown,
 
-                    map_key: [
-                        item.stock_guid,
-                        item.inventory_node,
-                        item.batch_id || ""
-                    ].join("|")
-                }))
-    }) + "\n"
+                map_key: [
+                    item.stock_guid,
+                    item.inventory_node,
+                    item.batch_id || ""
+                ].join("|")
+            }))
+
+        }) + "\n"
+    );
+
+}
+
+/* 300726
+const stockVoucherMap = new Map(
+    dbData.stockVouchers.map(item => [
+        [
+            item.stock_guid,
+            item.inventory_node,
+            item.batch_id || "",
+            Number(item.amount || 0),
+            String(item.godown || "").trim()
+        ].join("|"),
+        item
+    ])
 );
+
+*/
+/*
   const dbItem =
     dbData.stockVouchers.find(item =>
 
@@ -1347,8 +1388,21 @@ for (const parsedItem of parsedStockVouchers) {
             String(parsedItem.godown || "").trim()
 
     );
+*/
+
+const dbItem =
+    stockVoucherMap.get(
+        [
+            parsedItem.stockGuid,
+            parsedItem.inventoryNode,
+            parsedItem.batchId || "",
+            Number(parsedItem.amount || 0),
+            String(parsedItem.godown || "").trim()
+        ].join("|")
+    );
 
 
+    if (process.env.INTEGRITY_DEBUG === "true") {
    fs.appendFileSync(
     "logs/stock-voucher-match.jsonl",
     JSON.stringify({
@@ -1373,6 +1427,7 @@ for (const parsedItem of parsedStockVouchers) {
 
     }) + "\n"
 );
+    }
 
     if (!dbItem) {
 
@@ -1513,19 +1568,36 @@ async validateReverseData(
             "ALLINVENTORYENTRIES.LIST"
     );
 
+
+
+const parsedInventoryMap = new Map(
+
+    parsedInventoryRows.map(item => [
+
+        [
+            item.stockGuid,
+            Number(item.amount || 0),
+            String(item.godown || "").trim()
+        ].join("|"),
+
+        item
+
+    ])
+
+);
+
+
 for (const dbItem of (dbData.inventory || [])) {
 
-  const parsedItem =
-    parsedInventoryRows.find(item =>
+const parsedItem =
+    parsedInventoryMap.get(
 
-        item.stockGuid ===
-            dbItem.stock_guid &&
-
-        Number(item.amount) ===
-            Number(dbItem.amount) &&
-
-        String(item.godown || "").trim() ===
+        [
+            dbItem.stock_guid,
+            Number(dbItem.amount || 0),
             String(dbItem.godown || "").trim()
+
+        ].join("|")
 
     );
 
@@ -1553,10 +1625,10 @@ const parsedStockVoucherMap = new Map(
         [
 
             item.stockGuid,
-
             item.inventoryNode,
-
-            item.batchId || ""
+            item.batchId || "",
+            Number(item.amount || 0),
+            String(item.godown || "").trim()
 
         ].join("|"),
 
@@ -1565,17 +1637,16 @@ const parsedStockVoucherMap = new Map(
     ])
 
 );
-
   
 for (const dbItem of (dbData.stockVouchers || [])) {
 
-  const key = [
+ const key = [
 
     dbItem.stock_guid,
-
     dbItem.inventory_node,
-
-    dbItem.batch_id || ""
+    dbItem.batch_id || "",
+    Number(dbItem.amount || 0),
+    String(dbItem.godown || "").trim()
 
 ].join("|");
 
