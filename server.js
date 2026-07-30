@@ -34736,32 +34736,59 @@ fs.appendFileSync(
 // SYNC BATCH ID
 // =========================
 
-const sync_batch_id = crypto.randomUUID();
+let sync_batch_id;
 
-const { error: batchError } = await supabase
+const { data: runningBatch } = await supabase
     .from("sync_batches")
-    .insert({
+    .select("*")
+    .eq("company_code", company_code)
+    .eq("tally_owner", tally_owner)
+   .eq("batch_status", "RUNNING")
+.maybeSingle();
 
-        batch_id: sync_batch_id,
 
-        company_code,
+if (runningBatch) {
 
-        tally_owner,
+    sync_batch_id = runningBatch.batch_id;
 
-        batch_status: "RUNNING",
-
-        current_module: "INIT"
-
-    });
-
-if (batchError) {
-
-    throw new Error(
-        "Failed to create sync batch : " +
-        batchError.message
+    console.log(
+        "Existing RUNNING batch:",
+        sync_batch_id
     );
 
 }
+else {
+
+    sync_batch_id = crypto.randomUUID();
+
+    const { error: batchError } = await supabase
+        .from("sync_batches")
+        .insert({
+
+            batch_id: sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            batch_status: "RUNNING",
+
+            current_module: "INIT"
+
+        });
+
+
+    if (batchError) {
+
+        throw new Error(
+            "Failed to create sync batch : " +
+            batchError.message
+        );
+
+    }
+
+}
+
 // =========================
 // SAVE GROUPS
 // =========================
@@ -34865,13 +34892,67 @@ console.log(
 // SAVE VOUCHERS
 // =========================
 
-const voucherResult = await saveVouchers({
+let voucherResult = await saveVouchers({
     company_code,
     tally_owner,
     sync_batch_id,
     vouchers: result.vouchers || [],
     allVoucherGuids: result.voucherGuids || []
 });
+
+if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
+
+  
+  fs.appendFileSync(
+    "./logs/voucher-guid-debug.jsonl",
+    JSON.stringify({
+        stage: "BEFORE_VOUCHER_BY_GUID_REQUEST",
+        company,
+        totalMissing: voucherResult.missingVoucherGuids.length,
+        missingVoucherGuids: voucherResult.missingVoucherGuids
+    }) + "\n"
+);
+
+    const missingResult =
+        await sendChunkedToConnector(
+            socket,
+            "voucherByGuid",
+            {
+                company,
+                voucherGuids:
+                    voucherResult.missingVoucherGuids
+            }
+        );
+
+
+        fs.appendFileSync(
+    "./logs/voucher-guid-debug.jsonl",
+    JSON.stringify({
+        stage: "AFTER_VOUCHER_BY_GUID_RESPONSE",
+        success: missingResult.success,
+        keys: Object.keys(missingResult || {}),
+        voucherCount: missingResult.vouchers?.length || 0
+    }) + "\n"
+);
+
+
+    if (!missingResult.success) {
+
+        return res.json(missingResult);
+
+    }
+
+    voucherResult = await saveVouchers({
+        company_code,
+        tally_owner,
+        sync_batch_id,
+        vouchers: missingResult.vouchers || [],
+        allVoucherGuids: result.voucherGuids || []
+    });
+
+}
+
+
 
 console.log("VOUCHER SAVE :", voucherResult);
 

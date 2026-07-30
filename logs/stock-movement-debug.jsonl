@@ -1211,3 +1211,4 @@
 {"stage":"before_insert","totalRows":0,"rows":[]}
 {"stage":"insert_success","inserted":4}
 {"stage":"insert_success","inserted":2}
+{"stage":"insert_success","inserted":8}

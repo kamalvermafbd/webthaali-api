@@ -9,10 +9,6 @@ const VoucherIntegrityService = require("./VoucherIntegrityService");
 
 const fs = require("fs");
 
-const {
-    processMissingVoucherGuids
-} = require("../reconciliations/processMissingVoucherGuids");
-
 const ReconciliationEngine =
     require("../reconciliations/ReconciliationEngine");
 
@@ -1039,62 +1035,25 @@ const guidsToDelete =
 //--------------------------------------------------
 // Missing vouchers pipeline
 //--------------------------------------------------
-
 if (reconciliationResult.missingInDB.length > 0) {
 
-/* 29.07.26
-    await processMissingVoucherGuids({
-
-    company_code,
-
-    tally_owner,
-
-    sync_batch_id,
-
-    voucherGuids:
-        reconciliationResult.missingInDB
-
-});
-*/
-
-console.log(
+    console.log(
         "Missing vouchers found :",
         reconciliationResult.missingInDB.length
     );
 
     fs.appendFileSync(
-    "./logs/api-flow.jsonl",
-    JSON.stringify({
-        stage: "REQUEST_MISSING_VOUCHERS",
-        count: reconciliationResult.missingInDB.length
-    }) + "\n"
-);
+        "./logs/api-flow.jsonl",
+        JSON.stringify({
+            stage: "REQUEST_MISSING_VOUCHERS",
+            count: reconciliationResult.missingInDB.length
+        }) + "\n"
+    );
 
-/*
-global.io.to(`${company_code}_${tally_owner}`).emit(
-    "voucherByGuid",
-    {
-        company_code,
-        tally_owner,
-        sync_batch_id,
-        voucherGuids: reconciliationResult.missingInDB
-    }
-);
-
-
-return;
-*/
-    // Next Step:
-    // socket.emit("voucherByGuid", ...)
-
-
-    // TODO
-    // InsertEngine.processMissingVoucherGuids({
-    //     company_code,
-    //     tally_owner,
-    //     sync_batch_id,
-    //     voucherGuids: reconciliationResult.missingInDB
-    // });
+    return {
+    status: "WAITING_FOR_MISSING_VOUCHERS",
+    missingVoucherGuids: reconciliationResult.missingInDB
+};
 
 }
 
@@ -1142,15 +1101,18 @@ if (guidsToDelete.length > 0) {
 
 }
 
-await supabase
-    .from("sync_batches")
-    .update({
-        reconciliation_completed: true
-    })
-    .eq("batch_id", sync_batch_id);
+if (reconciliationResult.missingInDB.length === 0) {
+
+    await supabase
+        .from("sync_batches")
+        .update({
+            reconciliation_completed: true
+        })
+        .eq("batch_id", sync_batch_id);
 
 }
 
+}
 
 const STOCK_DEBUG_FILE =
     "./logs/stock-movement-debug.jsonl";
@@ -1529,14 +1491,26 @@ success =
     });
 
 
-    await supabase
+ 
+
+}
+
+ const { error: postUpdateError } = await supabase
     .from("sync_batches")
     .update({
         incremental_post_completed: true
     })
-    .eq("batch_id", sync_batch_id);
+    .eq("batch_id", sync_batch_id)
+    .select();
 
+if (postUpdateError) {
+    throw postUpdateError;
 }
+
+console.log(
+    "INCREMENTAL POST COMPLETED UPDATED"
+);
+
 
     fs.appendFileSync(
     "./logs/api-flow.jsonl",
@@ -1646,21 +1620,36 @@ fs.appendFileSync(
 );
 
 
-await saveVoucherGuids({
-    company_code,
-    tally_owner,
-    sync_batch_id,
-    voucherGuids: allVoucherGuids
-});
 
 
+const reconciliationStatus =
+    await saveVoucherGuids({
+        company_code,
+        tally_owner,
+        sync_batch_id,
+        voucherGuids: allVoucherGuids
+    });
 
 fs.appendFileSync(
     "./logs/api-flow.jsonl",
     JSON.stringify({
-        stage: "SAVE_VOUCHER_GUIDS_COMPLETED"
+        stage: "SAVE_VOUCHER_GUIDS_COMPLETED",
+        reconciliationStatus
     }) + "\n"
 );
+
+if (
+    reconciliationStatus?.status ===
+    "WAITING_FOR_MISSING_VOUCHERS"
+) {
+
+    console.log(
+        "Waiting for missing vouchers from connector..."
+    );
+
+    return reconciliationStatus;
+
+}
 
 await supabase
     .from("sync_batches")
@@ -1687,9 +1676,6 @@ fs.appendFileSync(
     }) + "\n"
 );
 
-
-
-   
 
     return {
 
