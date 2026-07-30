@@ -1,6 +1,9 @@
 {
   "totalIncoming": 23,
-  "totalDb": 5,
-  "deleteCount": 0,
+  "totalDb": 9,
+  "matched": 9,
+  "missingInDB": 14,
+  "missingInTally": 0,
+  "status": "DIFFERENCE",
   "guidsToDelete": []
 }

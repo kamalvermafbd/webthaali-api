@@ -34738,6 +34738,30 @@ fs.appendFileSync(
 
 const sync_batch_id = crypto.randomUUID();
 
+const { error: batchError } = await supabase
+    .from("sync_batches")
+    .insert({
+
+        batch_id: sync_batch_id,
+
+        company_code,
+
+        tally_owner,
+
+        batch_status: "RUNNING",
+
+        current_module: "INIT"
+
+    });
+
+if (batchError) {
+
+    throw new Error(
+        "Failed to create sync batch : " +
+        batchError.message
+    );
+
+}
 // =========================
 // SAVE GROUPS
 // =========================
