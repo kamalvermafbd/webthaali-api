@@ -18,8 +18,38 @@ const {
     buildVoucherRow,
     buildLedgerRows,
     buildInventoryRows,
-    buildStockVoucherRows
+    buildStockVoucherRows,
+    buildBillAllocationRows
 } = require("./voucherRowBuilder");
+
+async function loadLedgerMap({
+    company_code,
+    tally_owner
+}) {
+
+    const { data, error } =
+        await supabase
+            .from("tally_sync_ledgers")
+            .select("guid,parent,name")
+            .eq("company_code", company_code)
+            .eq("tally_owner", tally_owner);
+
+
+    if(error){
+        throw new Error(
+            "Failed to load ledger master : " + error.message
+        );
+    }
+
+
+    return new Map(
+        (data || []).map(row => [
+            row.guid,
+            row
+        ])
+    );
+
+}
 
 async function validateNewVoucher(args) {
 
@@ -422,7 +452,42 @@ async function deleteStockVouchers({
 
 }
 
+async function deleteBillAllocations({
 
+    company_code,
+
+    tally_owner,
+
+    voucherGuids
+
+}) {
+
+    const { error } = await supabase
+
+        .from("tally_bill_allocations")
+
+        .delete()
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner)
+
+        .in("voucher_guid", voucherGuids);
+
+
+    if (error) {
+
+        throw new Error(
+
+            "Failed to delete Bill Allocations: " +
+
+            error.message
+
+        );
+
+    }
+
+}
 
 async function saveVoucher({
 
@@ -543,6 +608,55 @@ async function saveVoucherLedgers({
         throw new Error(
 
             "Failed to save Voucher Ledgers: " +
+
+            error.message
+
+        );
+
+    }
+
+}
+
+
+async function saveBillAllocations({
+
+    billAllocationRows,
+    sync_batch_id = null
+
+}) {
+
+    if (billAllocationRows.length === 0) {
+
+        return;
+
+    }
+
+
+    if (sync_batch_id) {
+
+        billAllocationRows = billAllocationRows.map(row => ({
+
+            ...row,
+
+            sync_batch_id
+
+        }));
+
+    }
+
+
+    const { error } = await supabase
+
+        .from("tally_bill_allocations")
+
+        .insert(billAllocationRows);
+
+
+    if (error) {
+
+        throw new Error(
+
+            "Failed to save Bill Allocations: " +
 
             error.message
 
@@ -691,6 +805,8 @@ async function saveVoucherExecutionData({
 
     stockVoucherRows,
 
+     billAllocationRows,
+
     STOCK_DEBUG_FILE
 
 }) {
@@ -728,12 +844,30 @@ async function saveVoucherExecutionData({
 
     });
 
+    await deleteBillAllocations({
+
+    company_code,
+
+    tally_owner,
+
+    voucherGuids
+
+});
+
     await saveVoucherLedgers({
 
     ledgerRows,
     sync_batch_id
 
 });
+
+await saveBillAllocations({
+
+    billAllocationRows,
+    sync_batch_id
+
+});
+
     await deleteVoucherInventory({
 
         company_code,
@@ -1130,6 +1264,7 @@ async function saveVouchers({
     company_code,
     tally_owner,
     sync_batch_id,
+    country,
     vouchers = [],
      allVoucherGuids = []
 }) {
@@ -1177,7 +1312,17 @@ const inventoryRows = [];
 
 const stockVoucherRows = [];
 
+const billAllocationRows = [];
+
 let existingVoucherMap = new Map();
+
+let ledgerMap = new Map();
+
+ledgerMap =
+    await loadLedgerMap({
+        company_code,
+        tally_owner
+    });
 
 if (vouchers.length > 0) {
 
@@ -1398,15 +1543,14 @@ voucherRows.push(
 
 );
 
-
 ledgerRows.push(
     ...buildLedgerRows({
         voucher,
         company_code,
-        tally_owner
+        tally_owner,
+        ledgerMap
     })
 );
-
 
     inventoryRows.push(
     ...buildInventoryRows({
@@ -1422,6 +1566,21 @@ stockVoucherRows.push(
         company_code,
         tally_owner
     })
+);
+
+billAllocationRows.push(
+    ...buildBillAllocationRows({
+        voucher,
+        company_code,
+        tally_owner,
+        country,
+        ledgerMap
+    })
+);
+
+console.log(
+    "BILL ALLOCATION ROWS:",
+    billAllocationRows
 );
 
         }
@@ -1485,6 +1644,8 @@ success =
         inventoryRows,
 
         stockVoucherRows,
+
+        billAllocationRows,
 
         STOCK_DEBUG_FILE
 
@@ -1965,6 +2126,8 @@ module.exports = {
     deleteVoucherInventory,
 
     deleteStockVouchers,
+
+    deleteBillAllocations,
 
     saveVoucher,
 
