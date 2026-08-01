@@ -7,6 +7,7 @@
  *
  * This engine ONLY compares incoming GUIDs from Tally with existing
  * GUIDs stored in Supabase.
+ * Incoming GUIDs are loaded from tally_sync_snapshot.
  *
  * It DOES NOT:
  *   - delete records
@@ -29,7 +30,6 @@ const supabase = createClient(
 /***********************************************************************
  * PUBLIC API
  ***********************************************************************/
-
 /**
  * Generic reconciliation.
  *
@@ -38,17 +38,18 @@ const supabase = createClient(
  *  - tally_owner
  *  - table
  *  - guidField
- *  - incomingGuids
+ *  - sync_batch_id
+ *  - module
+ *  - entity_type
  *
  * Output:
- *  {
- *      matched,
- *      missingInDB,
- *      missingInTally,
- *      summary
- *  }
+ * {
+ *     matched,
+ *     missingInDB,
+ *     missingInTally,
+ *     summary
+ * }
  */
-
 
 /***********************************************************************
  * PRIVATE HELPERS
@@ -63,7 +64,11 @@ async function reconcile({
 
     guidField,
 
-    incomingGuids
+    sync_batch_id,
+
+    module,
+
+    entity_type
 
 }) {
 
@@ -86,19 +91,22 @@ async function reconcile({
 
         });
 
- //--------------------------------------------------
-// Validate Incoming GUIDs
-//--------------------------------------------------
+        const incomingGuids =
+    await loadSnapshotGuids({
 
-if (!(incomingGuids instanceof Set)) {
+        sync_batch_id,
 
-    throw new Error(
+        company_code,
 
-        "incomingGuids must be a Set"
+        tally_owner,
 
-    );
+        module,
 
-}
+        entity_type
+
+    });
+
+ 
 
         //--------------------------------------------------
         // STEP 2
@@ -205,7 +213,9 @@ async function loadDbGuids({
 
         .eq("company_code", company_code)
 
-        .eq("tally_owner", tally_owner);
+        .eq("tally_owner", tally_owner)
+
+        .eq("is_deleted", false);
 
     //--------------------------------------------------
     // Validation
@@ -279,6 +289,88 @@ async function loadDbGuids({
  */
 
 
+async function loadSnapshotGuids({
+
+    sync_batch_id,
+
+    company_code,
+
+    tally_owner,
+
+    module,
+
+    entity_type
+
+}) {
+
+    const {
+
+        data,
+
+        error
+
+    } = await supabase
+
+        .from("tally_sync_snapshot")
+
+        .select("guid")
+
+        .eq(
+            "sync_batch_id",
+            sync_batch_id
+        )
+
+        .eq(
+            "company_code",
+            company_code
+        )
+
+        .eq(
+            "tally_owner",
+            tally_owner
+        )
+
+        .eq(
+            "module",
+            module
+        )
+
+        .eq(
+            "entity_type",
+            entity_type
+        );
+
+    if (error) {
+
+        throw new Error(
+
+            `Failed to load snapshot GUIDs: ${error.message}`
+
+        );
+
+    }
+
+    if (!data || data.length === 0) {
+
+    throw new Error(
+
+        "No snapshot GUIDs found"
+
+        );
+
+    }
+
+    return new Set(
+
+        (data || [])
+
+            .map(row => row.guid)
+
+            .filter(Boolean)
+
+    );
+
+}
 
 function compareGuids({
 

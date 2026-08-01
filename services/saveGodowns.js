@@ -12,19 +12,35 @@ async function saveGodowns({
     godowns = []
 }) {
 
-    if (!Array.isArray(godowns) || godowns.length === 0) {
+    if (!sync_batch_id) {
 
-        return {
-            total: 0,
-            success: 0,
-            failed: 0
-        };
+    throw new Error(
+        "sync_batch_id missing in saveGodowns"
+    );
 
-    }
+}
+
+  if (!Array.isArray(godowns) || godowns.length === 0) {
+
+    return {
+
+        total: 0,
+
+        success: 0,
+
+        failed: 0,
+
+        skipped: true
+
+    };
+
+}
 
     const now = new Date().toISOString();
 
     const withGuid = [];
+
+    const withoutGuid = [];
 
     for (const godown of godowns) {
 
@@ -33,26 +49,56 @@ async function saveGodowns({
             company_code,
             tally_owner,
 
-            guid: godown.guid?.trim() || null,
-            masterid: godown.masterid ?? null,
-            alterid: godown.alterid ?? null,
+         guid:
+            godown.guid?.trim() || null,
 
-            name: godown.name?.trim() || null,
-            parent: godown.parent?.trim() || null,
+        masterid:
+            (
+                godown.masterId
+                ??
+                godown.master_id
+                ??
+                godown.masterid
+            )?.toString()
+            ||
+            null,
 
-            updated_at: now
+            alterid:
+                godown.alterId
+                ??
+                godown.alter_id
+                ??
+                godown.alterid
+                ??
+                null,
+
+        name:
+            godown.name?.trim() || null,
+
+        parent:
+            godown.parent?.trim() || null,
+
+        is_deleted:
+            false,
+
+        last_synced_at:
+            now,
+
+        sync_batch_id,
+
+        updated_at:
+            now
 
         };
 
-        if (row.guid) {
+       if (row.guid) {
 
             withGuid.push(row);
 
-        } else {
+        }
+        else {
 
-            console.warn(
-                `[${company_code}] [${tally_owner}] Skipping Godown "${row.name}" because GUID is missing.`
-            );
+            withoutGuid.push(row);
 
         }
 
@@ -86,13 +132,45 @@ async function saveGodowns({
 
     }
 
+    if (withoutGuid.length > 0) {
+
+        const { error } = await supabase
+
+            .from("tally_sync_godowns")
+
+            .upsert(
+                withoutGuid,
+                {
+                    onConflict:
+                    "company_code,tally_owner,name"
+                }
+            );
+
+        if (error) {
+
+            throw new Error(
+                "Failed to save Godowns (NAME Upsert): "
+                +
+                error.message
+            );
+
+        }
+
+        success += withoutGuid.length;
+
+    }
+
     return {
 
-        total: godowns.length,
+        total:
+            godowns.length,
 
         success,
 
-        failed: godowns.length - success
+        failed:
+            godowns.length - success,
+
+        sync_batch_id
 
     };
 

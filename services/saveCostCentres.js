@@ -12,19 +12,35 @@ async function saveCostCentres({
     costCentres = []
 }) {
 
+    if (!sync_batch_id) {
+
+    throw new Error(
+        "sync_batch_id missing in saveCostCentres"
+    );
+
+}
+
     if (!Array.isArray(costCentres) || costCentres.length === 0) {
 
-        return {
-            total: 0,
-            success: 0,
-            failed: 0
-        };
+    return {
 
-    }
+        total: 0,
+
+        success: 0,
+
+        failed: 0,
+
+        skipped: true
+
+    };
+
+}
 
     const now = new Date().toISOString();
 
     const withGuid = [];
+
+    const withoutGuid = [];
 
     for (const costCentre of costCentres) {
 
@@ -33,30 +49,71 @@ async function saveCostCentres({
             company_code,
             tally_owner,
 
-            guid: costCentre.guid?.trim() || null,
-            masterid: costCentre.masterid ?? null,
-            alterid: costCentre.alterid ?? null,
+           guid:
+                costCentre.guid?.trim() || null,
 
-            name: costCentre.name?.trim() || null,
-            parent: costCentre.parent?.trim() || null,
-            category: costCentre.category?.trim() || null,
-            reserved_name: costCentre.reservedName?.trim() || null,
+            masterid:
+            (
+                costCentre.masterId
+                ??
+                costCentre.master_id
+                ??
+                costCentre.masterid
+            )?.toString()
+            ||
+            null,
 
-            updated_at: now
+            alterid:
+                costCentre.alterId
+                ??
+                costCentre.alter_id
+                ??
+                costCentre.alterid
+                ??
+                null,
+
+            name:
+                costCentre.name?.trim() || null,
+
+            parent:
+                costCentre.parent?.trim() || null,
+
+            category:
+                costCentre.category?.trim() || null,
+
+            reserved_name:
+            (
+                costCentre.reservedName
+                ??
+                costCentre.reserved_name
+            )?.trim()
+            ||
+            null,
+
+            is_deleted:
+                false,
+
+            last_synced_at:
+                now,
+
+            sync_batch_id,
+
+            updated_at:
+                now
+                
 
         };
 
-        if (row.guid) {
+       if (row.guid) {
 
-            withGuid.push(row);
+        withGuid.push(row);
 
-        } else {
+    }
+    else {
 
-            console.warn(
-                `[${company_code}] [${tally_owner}] Skipping Cost Centre "${row.name}" because GUID is missing.`
-            );
+        withoutGuid.push(row);
 
-        }
+    }
 
     }
 
@@ -88,13 +145,45 @@ async function saveCostCentres({
 
     }
 
+    if (withoutGuid.length > 0) {
+
+    const { error } = await supabase
+
+        .from("tally_sync_cost_centres")
+
+        .upsert(
+            withoutGuid,
+            {
+                onConflict:
+                "company_code,tally_owner,name"
+            }
+        );
+
+    if (error) {
+
+        throw new Error(
+            "Failed to save Cost Centres (NAME Upsert): "
+            +
+            error.message
+        );
+
+        }
+
+        success += withoutGuid.length;
+
+    }
+
     return {
 
-        total: costCentres.length,
+        total:
+            costCentres.length,
 
         success,
 
-        failed: costCentres.length - success
+        failed:
+            costCentres.length - success,
+
+        sync_batch_id
 
     };
 

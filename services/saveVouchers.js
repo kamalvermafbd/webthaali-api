@@ -1152,8 +1152,7 @@ async function loadExistingVoucherGuidMap({
 async function saveVoucherGuids({
     company_code,
     tally_owner,
-    sync_batch_id,
-    voucherGuids = []
+    sync_batch_id
 }) {
 const { data: batch, error } = await supabase
     .from("sync_batches")
@@ -1191,7 +1190,7 @@ if (
             tally_owner
 
         });
-*/
+
     const incomingVoucherGuids =
     new Set(
         voucherGuids
@@ -1202,33 +1201,38 @@ if (
             )
             .filter(Boolean)
     );
-
+*/
         //--------------------------------------------------
     // Reconcile Voucher GUIDs
     //--------------------------------------------------
 
     const reconciliationResult =
-        await ReconciliationEngine.reconcile({
+    await ReconciliationEngine.reconcile({
 
-            company_code,
+        company_code,
 
-            tally_owner,
+        tally_owner,
 
-            table: "tally_vouchers",
+        table: "tally_vouchers",
 
-            guidField: "guid",
+        guidField: "guid",
 
-            incomingGuids: incomingVoucherGuids
+        sync_batch_id,
 
-        });
+        module: "VOUCHER",
+
+        entity_type: "VOUCHER"
+
+    });
 
 
         fs.writeFileSync(
     "./logs/incoming-voucher-guids.json",
     JSON.stringify(
         {
-            totalIncoming: incomingVoucherGuids.size,
-            guids: [...incomingVoucherGuids].sort()
+            totalIncoming: reconciliationResult.summary.totalIncoming,
+            missingInDB: reconciliationResult.summary.missingInDB,
+            matched: reconciliationResult.summary.matched
         },
         null,
         2
@@ -1814,7 +1818,7 @@ console.log(
 allVoucherGuids = [];
 */
 //temp code
-
+/*
   const validGuids = allVoucherGuids
     .map(v =>
         typeof v === "string"
@@ -1834,6 +1838,7 @@ if (validGuids.length === 0) {
     };
 
 }
+    */
 /* 29.07.26
 await supabase
     .from("sync_batches")
@@ -1894,11 +1899,9 @@ console.log("VERIFY AFTER UPDATE :", verify);
     fs.appendFileSync(
     "./logs/api-flow.jsonl",
     JSON.stringify({
-        stage: "GUID_SCAN_UPDATED",
-        validGuids: validGuids.length
+        stage: "GUID_SCAN_UPDATED"
     }) + "\n"
 );
-
 
 fs.appendFileSync(
     "./logs/api-flow.jsonl",
@@ -1912,11 +1915,10 @@ fs.appendFileSync(
 
 const reconciliationStatus =
     await saveVoucherGuids({
-        company_code,
-        tally_owner,
-        sync_batch_id,
-        voucherGuids: allVoucherGuids
-    });
+    company_code,
+    tally_owner,
+    sync_batch_id
+});
 
 fs.appendFileSync(
     "./logs/api-flow.jsonl",

@@ -49,7 +49,17 @@ async function applyMasterActions({
     const now =
         new Date().toISOString();
 
+    const usesLegacyColumns = [
 
+        "tally_sync_units",
+
+        "tally_sync_godowns",
+
+        "tally_sync_cost_centres",
+
+        "tally_sync_stocks"
+
+    ].includes(table);
 
     // ============================
     // ALTER ID UPDATE
@@ -73,10 +83,17 @@ async function applyMasterActions({
         .from(table)
 
 
-        .update({
+      .update({
 
-            alter_id:
-                item.newAlterId,
+            ...(usesLegacyColumns
+                ? {
+                    alterid:
+                        item.newAlterId
+                }
+                : {
+                    alter_id:
+                        item.newAlterId
+                }),
 
             sync_batch_id,
 

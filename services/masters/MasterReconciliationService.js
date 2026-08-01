@@ -173,7 +173,26 @@ if (
             tallyMap.keys()
         );
 
+    const usesLegacyColumns = [
 
+    "tally_sync_units",
+
+    "tally_sync_godowns",
+
+    "tally_sync_cost_centres",
+
+    "tally_sync_stocks"
+
+].includes(table);
+
+
+    const selectColumns =
+
+        usesLegacyColumns
+
+            ? "guid,alterid,masterid,is_deleted"
+
+            : "guid,alter_id,master_id,is_deleted";
 
     // ============================
     // DB FETCH
@@ -191,9 +210,8 @@ if (
 
     .from(table)
 
-
     .select(
-        "guid,alter_id,master_id,is_deleted"
+        selectColumns
     )
 
 
@@ -244,10 +262,20 @@ if (
             {
 
                 alter_id:
-                    row.alter_id,
+
+                    usesLegacyColumns
+
+                        ? row.alterid
+
+                        : row.alter_id,
 
                 master_id:
-                    row.master_id,
+
+                    usesLegacyColumns
+
+                        ? row.masterid
+
+                        : row.master_id,
 
                 is_deleted:
                     row.is_deleted
@@ -259,14 +287,11 @@ if (
     }
 
 
-
     const missingGuids = [];
 
     const extraGuids = [];
 
     const alterChanged = [];
-
-
 
 
     // ============================

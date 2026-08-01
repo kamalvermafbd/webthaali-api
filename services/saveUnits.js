@@ -12,19 +12,35 @@ async function saveUnits({
     units = []
 }) {
 
-    if (!Array.isArray(units) || units.length === 0) {
+        if (!sync_batch_id) {
 
-        return {
-            total: 0,
-            success: 0,
-            failed: 0
-        };
+        throw new Error(
+            "sync_batch_id missing in saveUnits"
+        );
 
     }
+
+   if (!Array.isArray(units) || units.length === 0) {
+
+    return {
+
+        total: 0,
+
+        success: 0,
+
+        failed: 0,
+
+        skipped: true
+
+    };
+
+}
 
     const now = new Date().toISOString();
 
     const withGuid = [];
+
+    const withoutGuid = [];
 
     for (const unit of units) {
 
@@ -34,14 +50,53 @@ async function saveUnits({
             tally_owner,
 
             guid: unit.guid?.trim() || null,
-            masterid: unit.masterid ?? null,
-            alterid: unit.alterid ?? null,
-         
+
+            masterid:
+            (
+                unit.masterId
+                ??
+                unit.master_id
+                ??
+                unit.masterid
+            )?.toString()
+            ||
+            null,
+
+            alterid:
+                unit.alterId
+                ??
+                unit.alter_id
+                ??
+                unit.alterid
+                ??
+                null,
 
             name: unit.name?.trim() || null,
-            formal_name: unit.formalName?.trim() || null,
-            decimal_places:
-    unit.decimalPlaces === "" ? null : Number(unit.decimalPlaces),
+            formal_name:
+            (
+                unit.formalName
+                ??
+                unit.formal_name
+            )?.trim()
+            ||
+            null,
+
+          decimal_places:
+            (
+                unit.decimalPlaces
+                ??
+                unit.decimal_places
+            )
+            ==
+            null
+            ?
+            null
+            :
+            Number(
+                unit.decimalPlaces
+                ??
+                unit.decimal_places
+            ),
 
             is_deleted: false,
 
@@ -52,15 +107,14 @@ async function saveUnits({
 
         };
 
-        if (row.guid) {
+       if (row.guid) {
 
             withGuid.push(row);
 
-        } else {
+        }
+        else {
 
-            console.warn(
-                `[${company_code}] [${tally_owner}] Skipping Unit "${row.name}" because GUID is missing.`
-            );
+            withoutGuid.push(row);
 
         }
 
@@ -96,15 +150,48 @@ async function saveUnits({
 
     }
 
-    return {
 
-        total: units.length,
+    if (withoutGuid.length > 0) {
 
-        success,
+    const { error } = await supabase
 
-        failed: units.length - success
+        .from("tally_sync_units")
 
-    };
+        .upsert(
+            withoutGuid,
+            {
+                onConflict:
+                "company_code,tally_owner,name"
+            }
+        );
+
+    if (error) {
+
+        throw new Error(
+            "Failed to save Units (NAME Upsert): "
+            +
+            error.message
+        );
+
+    }
+
+    success += withoutGuid.length;
+
+}
+
+   return {
+
+    total:
+        units.length,
+
+    success,
+
+    failed:
+        units.length - success,
+
+    sync_batch_id
+
+};
 
 }
 

@@ -12,19 +12,88 @@ async function saveStocks({
     stocks = []
 }) {
 
+    if (!sync_batch_id) {
+
+    throw new Error(
+        "sync_batch_id missing in saveStocks"
+    );
+
+}
+
     if (!Array.isArray(stocks) || stocks.length === 0) {
 
-        return {
+      return {
+
             total: 0,
+
             success: 0,
-            failed: 0
+
+            failed: 0,
+
+            skipped: true
+
         };
 
     }
 
     const now = new Date().toISOString();
 
+        // ===========================
+    // LOAD LAST ALTER IDS
+    // ===========================
+
+    const {
+
+        data: existingStocks,
+
+        error: existingError
+
+    } = await supabase
+
+        .from("tally_sync_stocks")
+
+        .select("guid,alterid")
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner);
+
+    if (existingError) {
+
+        throw new Error(
+            "Failed to load existing Stocks: "
+            +
+            existingError.message
+        );
+
+    }
+
+    const stockMap = new Map();
+
+    for (const stock of existingStocks || []) {
+
+        if (!stock.guid) {
+
+            continue;
+
+        }
+
+        stockMap.set(
+
+            stock.guid,
+
+            Number(stock.alterid)
+
+        );
+
+    }
+
     const withGuid = [];
+
+    let success = 0;
+
+    let skipped = 0;
+
 
     // ===========================
     // LOAD STOCK GROUPS
@@ -69,8 +138,8 @@ for (const group of stockGroups || []) {
             tally_owner,
 
             guid: stock.guid?.trim() || null,
-      masterid: stock.masterId ?? null,
-alterid: stock.alterId ?? null,
+            masterid: stock.masterId ?? null,
+            alterid: stock.alterId ?? null,
 
             name: stock.name?.trim() || null,
             parent: stock.parent?.trim() || null,
@@ -114,6 +183,28 @@ alterid: stock.alterId ?? null,
 
         };
 
+       const existingAlterId =
+            stockMap.get(row.guid);
+
+        const incomingAlterId =
+            Number(row.alterid ?? 0);
+
+       if (
+
+            existingAlterId != null
+
+            &&
+
+            incomingAlterId <= existingAlterId
+
+        ) {
+
+            skipped++;
+
+            continue;
+
+        }
+
         if (row.guid) {
 
             withGuid.push(row);
@@ -128,8 +219,7 @@ alterid: stock.alterId ?? null,
 
     }
 
-    let success = 0;
-
+   
     if (withGuid.length > 0) {
 
         const { error } = await supabase
@@ -156,13 +246,16 @@ alterid: stock.alterId ?? null,
 
     }
 
-    return {
+  return {
 
-        total: stocks.length,
+        total:
+            stocks.length,
 
         success,
 
-        failed: stocks.length - success
+        skipped,
+
+        failed: 0
 
     };
 
