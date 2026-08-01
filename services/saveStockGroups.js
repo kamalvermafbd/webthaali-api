@@ -12,13 +12,23 @@ async function saveStockGroups({
     stockGroups = []
 }) {
 
+    if (!sync_batch_id) {
+
+    throw new Error(
+        "sync_batch_id missing in saveStockGroups"
+    );
+
+    }
+
+
     if (!Array.isArray(stockGroups) || stockGroups.length === 0) {
 
-        return {
-            total: 0,
-            success: 0,
-            failed: 0
-        };
+       return {
+    total: 0,
+    success: 0,
+    failed: 0,
+    skipped:true
+};
 
     }
 
@@ -50,6 +60,8 @@ async function saveStockGroups({
     */
 
     const withGuid = [];
+
+    let success = 0;
 
 const withoutGuid = [];
 
@@ -129,27 +141,68 @@ for (const group of stockGroups) {
 
 }
 
+if (withGuid.length > 0) {
+
     const { error } = await supabase
 
         .from("tally_sync_stock_groups")
 
         .upsert(
-            rows,
+            withGuid,
             {
-                onConflict: "company_code,tally_owner,guid"
+                onConflict:
+                "company_code,tally_owner,guid"
             }
         );
+
 
     if (error) {
 
         throw new Error(
-            "Failed to save Stock Groups: " +
+            "Stock Groups GUID save failed : "
+            +
             error.message
         );
 
     }
 
-    return {
+
+    success += withGuid.length;
+
+}
+
+
+    if (withoutGuid.length > 0) {
+
+    const { error } = await supabase
+
+        .from("tally_sync_stock_groups")
+
+        .upsert(
+            withoutGuid,
+            {
+                onConflict:
+                "company_code,tally_owner,name"
+            }
+        );
+
+
+    if (error) {
+
+        throw new Error(
+            "Stock Groups NAME save failed : "
+            +
+            error.message
+        );
+
+    }
+
+
+    success += withoutGuid.length;
+
+}
+
+   return {
 
     total:
         stockGroups.length,
@@ -165,33 +218,6 @@ for (const group of stockGroups) {
 
 }
 
-if (!sync_batch_id) {
-
-    throw new Error(
-        "sync_batch_id missing in saveStockGroups"
-    );
-
-}
-
-
-if (
-    !Array.isArray(stockGroups) ||
-    stockGroups.length === 0
-) {
-
-    return {
-
-        total:0,
-
-        success:0,
-
-        failed:0,
-
-        skipped:true
-
-    };
-
-}
 
 module.exports = {
 
