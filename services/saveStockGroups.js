@@ -24,6 +24,7 @@ async function saveStockGroups({
 
     const now = new Date().toISOString();
 
+    /* remove 01.08.26
     const rows = stockGroups.map(group => ({
 
         company_code,
@@ -45,6 +46,88 @@ async function saveStockGroups({
         updated_at: now
 
     }));
+
+    */
+
+    const withGuid = [];
+
+const withoutGuid = [];
+
+
+for (const group of stockGroups) {
+
+
+    const row = {
+
+        company_code,
+
+        tally_owner,
+
+
+        guid:
+            group.guid?.trim() || null,
+
+
+        alter_id:
+            group.alterId
+            ??
+            group.alter_id
+            ??
+            null,
+
+
+        master_id:
+            (
+                group.masterId
+                ??
+                group.master_id
+            )?.toString()
+            ||
+            null,
+
+
+        name:
+            group.name?.trim(),
+
+
+        parent:
+            group.parent?.trim()
+            ||
+            null,
+
+
+        reserved_name:
+            group.reservedName
+            ??
+            group.reserved_name
+            ??
+            null,
+
+
+        is_deleted:false,
+
+
+        last_synced_at:now,
+
+        sync_batch_id,
+
+        updated_at:now
+
+    };
+
+
+    if (row.guid) {
+
+        withGuid.push(row);
+
+    }
+    else {
+
+        withoutGuid.push(row);
+
+    }
+
+}
 
     const { error } = await supabase
 
@@ -68,11 +151,43 @@ async function saveStockGroups({
 
     return {
 
-        total: stockGroups.length,
+    total:
+        stockGroups.length,
 
-        success: stockGroups.length,
+    success,
 
-        failed: 0
+    failed:
+        stockGroups.length - success,
+
+    sync_batch_id
+
+};
+
+}
+
+if (!sync_batch_id) {
+
+    throw new Error(
+        "sync_batch_id missing in saveStockGroups"
+    );
+
+}
+
+
+if (
+    !Array.isArray(stockGroups) ||
+    stockGroups.length === 0
+) {
+
+    return {
+
+        total:0,
+
+        success:0,
+
+        failed:0,
+
+        skipped:true
 
     };
 

@@ -27,7 +27,7 @@
 
 const { createClient } = require("@supabase/supabase-js");
 const fs = require("fs");
-const investigator = require("../logs/VoucherIntegrityInvestigator");
+const investigator = require("../logs/voucherIntegrityInvestigator");
 
 console.log("INTEGRITY_DEBUG =", process.env.INTEGRITY_DEBUG);
 
