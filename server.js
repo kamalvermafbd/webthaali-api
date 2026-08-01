@@ -15,25 +15,25 @@ const path = require("path");
 const nodemailer =
   require("nodemailer");
 
-  const rateLimit =
+const rateLimit =
   require("express-rate-limit");
 
- const { Resend } = require("resend");
+const { Resend } = require("resend");
 
 
- const {
+const {
     getSyncMasterData,
     getTrialBalance
 } = require("./services/syncService");
 
 const {
 
-   sendToTally,
+  sendToTally,
   createUnit,
   createStockItem,
- createSalesLedger,
+  createSalesLedger,
   createLedger,
-createTaxLedger,
+  createTaxLedger,
   createSale,
 
   getTallyCompanies,
@@ -81,6 +81,27 @@ const { saveGodowns } = require("./services/saveGodowns");
 const { saveCostCentres } = require("./services/saveCostCentres");
 const { saveStockGroups } = require("./services/saveStockGroups");
 const { saveStocks } = require("./services/saveStocks");
+const {
+    saveSyncSnapshotChunk
+} = require("./services/sync/SyncSnapshotService");
+const {
+  reconcileMasters
+} = require("./services/masters/MasterReconciliationService");
+
+const {
+  applyMasterActions
+} = require("./services/masters/MasterActionService");
+
+/*
+const {
+  validateMasters
+} = require("./services/masters/MasterValidationService");
+*/
+
+const {
+    updateMasterStatus
+} = require("./services/masters/MasterStatusService");
+
 const {
     saveVouchers,
     saveVoucherGuids
@@ -34666,72 +34687,6 @@ console.log(
 
     }
 
-  
-// =========================
-// IMPORT
-// =========================
-/*
-const result = await sendToConnector(
-  socket,
-  "getMasters",
-  {
-    company
-  }
-);
-*/
-
-const result = await sendChunkedToConnector(
-    socket,
-    "getMasters",
-    {
-        company,
-        lastAlterId
-    }
-);
-
-console.log(
-  "Masters received. Vouchers:",
-  result.vouchers?.length || 0
-);
-
-if (!result.success) {
-
-  return res.json(result);
-
-}
-
-const voucherGuidResult =
-    await sendChunkedToConnector(
-        socket,
-        "getMastersVoucherGuids",
-        {
-            company
-        }
-    );
-
-if (!voucherGuidResult.success) {
-
-    return res.json(voucherGuidResult);
-
-}
-
-result.voucherGuids =
-    voucherGuidResult.voucherGuids || [];
-
-fs.appendFileSync(
-    "./logs/server-guid-debug.jsonl",
-    JSON.stringify({
-        company_code,
-        tally_owner,
-        voucherCount: result.vouchers?.length || 0,
-        completeGuidCount: result.voucherGuids?.length || 0,
-        voucherGuids: result.voucherGuids || [],
-        incrementalGuids: (result.vouchers || []).map(
-            v => v.header?.guid
-        )
-    }) + "\n"
-);
-
 // =========================
 // SYNC BATCH ID
 // =========================
@@ -34745,7 +34700,6 @@ const { data: runningBatch } = await supabase
     .eq("tally_owner", tally_owner)
    .eq("batch_status", "RUNNING")
 .maybeSingle();
-
 
 if (runningBatch) {
 
@@ -34788,19 +34742,409 @@ else {
     }
 
 }
+  
 
+const result = await sendChunkedToConnector(
+    socket,
+    "getMasters",
+    {
+        company,
+        lastAlterId
+    }
+);
+
+console.log(
+  "Masters received. Vouchers:",
+  result.vouchers?.length || 0
+);
+
+if (!result.success) {
+
+  return res.json(result);
+
+}
+
+const voucherGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersVoucherGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"VOUCHER",
+
+            entity_type:"VOUCHER"
+        }
+    );
+
+    const groupGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersGroupGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"MASTER",
+
+            entity_type:"GROUP"
+        }
+    );
+
+
+console.log(
+    "GROUP GUID SNAPSHOT :",
+    groupGuidResult
+);
+
+const ledgerGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersLedgerGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"MASTER",
+
+            entity_type:"LEDGER"
+        }
+    );
+
+
+console.log(
+    "LEDGER GUID SNAPSHOT :",
+    ledgerGuidResult
+);
+
+
+const stockGroupGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersStockGroupGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"MASTER",
+
+            entity_type:"STOCK_GROUP"
+        }
+    );
+
+
+console.log(
+    "STOCK GROUP GUID SNAPSHOT :",
+    stockGroupGuidResult
+);
+
+
+const stockGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersStockGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"MASTER",
+
+            entity_type:"STOCK"
+        }
+    );
+
+
+console.log(
+    "STOCK GUID SNAPSHOT :",
+    stockGuidResult
+);
+
+
+const unitGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersUnitGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"MASTER",
+
+            entity_type:"UNIT"
+        }
+    );
+
+
+console.log(
+    "UNIT GUID SNAPSHOT :",
+    unitGuidResult
+);
+
+
+const godownGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersGodownGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"MASTER",
+
+            entity_type:"GODOWN"
+        }
+    );
+
+
+console.log(
+    "GODOWN GUID SNAPSHOT :",
+    godownGuidResult
+);
+
+
+const costCentreGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersCostCentreGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"MASTER",
+
+            entity_type:"COST_CENTRE"
+        }
+    );
+
+
+console.log(
+    "COST CENTRE GUID SNAPSHOT :",
+    costCentreGuidResult
+);
+
+if (!voucherGuidResult.success) {
+
+    return res.json(voucherGuidResult);
+
+}
+
+if (!groupGuidResult.success) {
+    return res.json(groupGuidResult);
+}
+
+if (!ledgerGuidResult.success) {
+    return res.json(ledgerGuidResult);
+}
+
+if (!stockGroupGuidResult.success) {
+    return res.json(stockGroupGuidResult);
+}
+
+if (!stockGuidResult.success) {
+    return res.json(stockGuidResult);
+}
+
+if (!unitGuidResult.success) {
+    return res.json(unitGuidResult);
+}
+
+if (!godownGuidResult.success) {
+    return res.json(godownGuidResult);
+}
+
+if (!costCentreGuidResult.success) {
+    return res.json(costCentreGuidResult);
+}
+
+
+
+fs.appendFileSync(
+"./logs/server-guid-debug.jsonl",
+JSON.stringify({
+
+ company_code,
+
+ tally_owner,
+
+ voucherGuid:
+    voucherGuidResult.totalItems,
+
+ groupGuid:
+    groupGuidResult.totalItems,
+
+ ledgerGuid:
+    ledgerGuidResult.totalItems,
+
+ stockGroupGuid:
+    stockGroupGuidResult.totalItems,
+
+ stockGuid:
+    stockGuidResult.totalItems,
+
+ unitGuid:
+    unitGuidResult.totalItems,
+
+ godownGuid:
+    godownGuidResult.totalItems,
+
+ costCentreGuid:
+    costCentreGuidResult.totalItems
+
+}) + "\n"
+);
+
+// =========================
+// VALIDATE GROUPS
+// =========================
+/* remove 01.08.26 evening
+const groupValidation =
+    await validateMasters({
+
+        table: "tally_sync_groups",
+
+        company_code,
+
+        tally_owner,
+
+        rows: result.groups || []
+
+    });
+
+
+console.log(
+    "GROUP VALIDATION :",
+    groupValidation
+);
+
+*/
 // =========================
 // SAVE GROUPS
 // =========================
-
 const groupResult = await saveGroups({
-  company_code,
-  tally_owner,
-  sync_batch_id,
-  groups: result.groups || []
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    groups: result.groups || []
+
 });
 
-console.log("GROUP SAVE :", groupResult);
+
+console.log(
+    "GROUP SAVE :",
+    groupResult
+);
+
+
+// =========================
+// GROUP RECONCILIATION
+// =========================
+const groupReconciliation =
+    await reconcileMasters({
+
+        table: "tally_sync_groups",
+
+        entity_type:"GROUP",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+
+
+console.log(
+    "GROUP RECONCILIATION :",
+    groupReconciliation
+);
+
+// =========================
+// GROUP ACTIONS
+// =========================
+
+const groupActionResult =
+await applyMasterActions({
+
+    table:"tally_sync_groups",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    reconciliationResult:
+        groupReconciliation
+
+});
+
+
+console.log(
+    "GROUP ACTION RESULT :",
+    groupActionResult
+);
 
 // =========================
 // SAVE LEDGERS
@@ -34885,9 +35229,27 @@ const stockResult = await saveStocks({
 
 console.log("STOCK SAVE :", stockResult);
 
+// =========================
+// MASTER STATUS COMPLETE
+// =========================
+
+const masterStatusResult =
+    await updateMasterStatus({
+
+        sync_batch_id,
+
+        module:"MASTERS",
+
+        action:"COMPLETED"
+
+    });
+
+
 console.log(
-    JSON.stringify(result.voucherGuids, null, 2)
+    "MASTER STATUS :",
+    masterStatusResult
 );
+
 // =========================
 // SAVE VOUCHERS
 // =========================
@@ -34897,7 +35259,7 @@ let voucherResult = await saveVouchers({
     tally_owner,
     sync_batch_id,
     vouchers: result.vouchers || [],
-    allVoucherGuids: result.voucherGuids || []
+    allVoucherGuids: []
 });
 
 if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
@@ -34962,6 +35324,8 @@ return res.json({
   ...result,
 db: {
     groups: groupResult,
+    groupReconciliation: groupReconciliation,
+    groupAction: groupActionResult,
     ledgers: ledgerResult,
     godowns: godownResult,
     stockGroups: stockGroupResult,

@@ -19,7 +19,8 @@ const {
     buildLedgerRows,
     buildInventoryRows,
     buildStockVoucherRows,
-    buildBillAllocationRows
+    buildBillAllocationRows,
+    buildCostCentreRows,
 } = require("./voucherRowBuilder");
 
 async function loadLedgerMap({
@@ -489,6 +490,43 @@ async function deleteBillAllocations({
 
 }
 
+
+
+async function deleteCostCentres({
+
+    company_code,
+
+    tally_owner,
+
+    voucherGuids
+
+}) {
+
+    const { error } = await supabase
+
+        .from("tally_costcentre_allocations")
+
+        .delete()
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner)
+
+        .in("voucher_guid", voucherGuids);
+
+
+    if (error) {
+
+        throw new Error(
+            "Failed to delete Cost Centres: " +
+            error.message
+        );
+
+    }
+
+}
+
+
 async function saveVoucher({
 
     voucher,
@@ -666,6 +704,52 @@ async function saveBillAllocations({
 
 }
 
+
+async function saveCostCentres({
+
+    costCentreRows,
+
+    sync_batch_id = null
+
+}) {
+
+    if (costCentreRows.length === 0) {
+        return;
+    }
+
+
+    if (sync_batch_id) {
+
+        costCentreRows =
+            costCentreRows.map(row => ({
+
+                ...row,
+
+                sync_batch_id
+
+            }));
+
+    }
+
+
+    const { error } = await supabase
+
+        .from("tally_costcentre_allocations")
+
+        .insert(costCentreRows);
+
+
+    if (error) {
+
+        throw new Error(
+            "Failed to save Cost Centres: " +
+            error.message
+        );
+
+    }
+
+}
+
 async function saveVoucherInventory({
 
     inventoryRows,
@@ -807,6 +891,8 @@ async function saveVoucherExecutionData({
 
      billAllocationRows,
 
+     costCentreRows,
+
     STOCK_DEBUG_FILE
 
 }) {
@@ -854,6 +940,16 @@ async function saveVoucherExecutionData({
 
 });
 
+await deleteCostCentres({
+
+    company_code,
+
+    tally_owner,
+
+    voucherGuids
+
+});
+
     await saveVoucherLedgers({
 
     ledgerRows,
@@ -864,6 +960,14 @@ async function saveVoucherExecutionData({
 await saveBillAllocations({
 
     billAllocationRows,
+    sync_batch_id
+
+});
+
+await saveCostCentres({
+
+    costCentreRows,
+
     sync_batch_id
 
 });
@@ -940,6 +1044,20 @@ async function deleteMissingVouchers({
         .eq("company_code", company_code)
         .eq("tally_owner", tally_owner)
         .in("guid", deletedVoucherGuids);
+
+    await supabase
+    .from("tally_bill_allocations")
+    .delete()
+    .eq("company_code", company_code)
+    .eq("tally_owner", tally_owner)
+    .in("voucher_guid", deletedVoucherGuids);
+
+    await supabase
+    .from("tally_costcentre_allocations")
+    .delete()
+    .eq("company_code", company_code)
+    .eq("tally_owner", tally_owner)
+    .in("voucher_guid", deletedVoucherGuids);
 
 }
 
@@ -1314,6 +1432,8 @@ const stockVoucherRows = [];
 
 const billAllocationRows = [];
 
+const costCentreRows = [];
+
 let existingVoucherMap = new Map();
 
 let ledgerMap = new Map();
@@ -1578,6 +1698,14 @@ billAllocationRows.push(
     })
 );
 
+costCentreRows.push(
+    ...buildCostCentreRows({
+        voucher,
+        company_code,
+        tally_owner
+    })
+);
+
 console.log(
     "BILL ALLOCATION ROWS:",
     billAllocationRows
@@ -1647,12 +1775,11 @@ success =
 
         billAllocationRows,
 
+         costCentreRows,
+
         STOCK_DEBUG_FILE
 
     });
-
-
- 
 
 }
 
@@ -2130,6 +2257,10 @@ module.exports = {
     deleteBillAllocations,
 
     saveVoucher,
+
+    deleteCostCentres,
+
+    saveCostCentres,
 
     saveVoucherHeaders,
 

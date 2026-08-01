@@ -1,5 +1,10 @@
 const crypto = require("crypto");
 
+const {
+    saveSyncSnapshotChunk,
+    clearSyncSnapshot
+} = require("../services/sync/SyncSnapshotService");
+
 async function sendChunkedToConnector(
     socket,
     event,
@@ -16,8 +21,10 @@ async function sendChunkedToConnector(
 
         let expectedChunks = null;
         let expectedItems = null;
+        let receivedItems = 0;
 
         let completed = false;
+        let snapshotCleared = false;
 
         const resultEvent = `${event}Result`;
         const chunkEvent = `${event}Chunk`;
@@ -72,7 +79,7 @@ async function sendChunkedToConnector(
 
         }
 
-        function onChunk(data) {
+        async function onChunk(data) {
 
             if (!data) {
                 return;
@@ -80,8 +87,8 @@ async function sendChunkedToConnector(
 
             if (!Array.isArray(data.data)) {
                 console.error(
-    `Invalid chunk received: ${data.chunkIndex}`
-);
+                `Invalid chunk received: ${data.chunkIndex}`
+            );
                 socket.emit(
                     ackEvent,
                     {
@@ -97,16 +104,79 @@ async function sendChunkedToConnector(
 
      expectedChunks = data.totalChunks;
 
-collectionList.push(
-    ...data.data
-);
+
+if (
+    payload.snapshot === true &&
+    snapshotCleared === false
+) {
+
+    await clearSyncSnapshot({
+
+        company_code:
+            payload.company_code,
+
+        tally_owner:
+            payload.tally_owner,
+
+        module:
+            payload.module,
+
+        entity_type:
+            payload.entity_type
+
+    });
+
+
+    snapshotCleared = true;
+
+}
+
+
+if (payload.snapshot === true) {
+
+    await saveSyncSnapshotChunk({
+
+        sync_batch_id:
+            payload.sync_batch_id,
+
+        company_code:
+            payload.company_code,
+
+        tally_owner:
+            payload.tally_owner,
+
+        module:
+            payload.module,
+
+        entity_type:
+            payload.entity_type,
+
+        rows:
+            data.data
+
+    });
+
+
+    receivedItems += data.data.length;
+
+}
+else {
+
+    collectionList.push(
+        ...data.data
+    );
+
+
+    receivedItems += data.data.length;
+
+}
 
 console.log(
     `Received chunk ${data.chunkIndex}/${data.totalChunks} (${data.data.length} records)`
 );
 
 console.log(
-    `Total records received so far: ${collectionList.length}`
+    `Total records received so far: ${receivedItems}`
 );
 
 socket.emit(
@@ -159,40 +229,65 @@ console.log(
 
             }
 
-            if (
-                expectedItems !== null &&
-                collectionList.length !== expectedItems
-            ) {
+          const actualReceived =
+    payload.snapshot === true
+    ? receivedItems
+    : collectionList.length;
 
-                cleanup();
 
-                return reject(
-                    new Error(
-                       `Record count mismatch. Expected ${expectedItems}, Received ${collectionList.length}`
-                    )
-                );
+if (
+    expectedItems !== null &&
+    actualReceived !== expectedItems
+) {
 
-            }
+    cleanup();
+
+    return reject(
+        new Error(
+            `Record count mismatch. Expected ${expectedItems}, Received ${actualReceived}`
+        )
+    );
+
+}
 
             cleanup();
 
             console.log("=================================");
 console.log("Chunk transfer completed");
 console.log(`Total chunks : ${expectedChunks}`);
-console.log(`Total records : ${collectionList.length}`);
+console.log(
+    `Total records : ${actualReceived}`
+);
 console.log("=================================");
 
            const collectionName =
     masterResult.collectionName || "vouchers";
 
-resolve({
 
-    ...masterResult,
+if (payload.snapshot === true) {
 
-    [collectionName]: collectionList
+    resolve({
 
-});
+        ...masterResult,
 
+        snapshotSaved: true,
+
+        totalItems: receivedItems
+
+    });
+
+}
+else {
+
+    resolve({
+
+        ...masterResult,
+
+        [collectionName]: collectionList
+
+    });
+
+}
         }
 
         socket.on(

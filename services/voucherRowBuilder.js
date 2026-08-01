@@ -486,30 +486,6 @@ function buildBillAllocationRows({
                     ledgerMap?.get(l.ledgerGuid)?.parent || null
             }));
 
-/*
-
-    const baseDate =
-    (
-        transaction_type === "SALE"
-    )
-    ?
-    header.referenceDate ||
-    header.voucherDate
-    :
-    header.referenceDate ||
-    header.voucherDate;
-
-
-const {
-    dueDate,
-    creditDays
-} =
-calculateDueDate({
-    baseDate,
-    creditPeriod: bill.creditPeriod
-});
-
-*/
 
  const transactionType =
     getTransactionType({
@@ -520,10 +496,7 @@ calculateDueDate({
     
     for (const ledger of enrichedLedgers) {
 
-      
-
-        
-
+     
     for (const bill of (ledger.billAllocations || [])) {
 
      const baseDate =
@@ -595,13 +568,6 @@ calculateDueDate({
             credit_period:
                 bill.creditPeriod ?? null,
 
-         /*   transaction_type:
-                getTransactionType({
-                    header,
-                    ledgers: enrichedLedgers
-                }),
-                */
-
             transaction_type:
                 transactionType,
                 
@@ -617,6 +583,79 @@ calculateDueDate({
 return rows;
 
 }
+
+function buildCostCentreRows({
+
+    voucher,
+
+    company_code,
+
+    tally_owner
+
+}) {
+
+    const rows = [];
+
+    const header = voucher.header || {};
+
+
+    for (const ledger of (voucher.ledgers || [])) {
+
+
+        for (const cost of (ledger.costCentreAllocations || [])) {
+
+
+            rows.push({
+
+                voucher_guid:
+                    header.guid.trim(),
+
+                ledger_guid:
+                    ledger.ledgerGuid ?? null,
+
+                company_code,
+
+                tally_owner,
+
+                  ledger_name:
+                    ledger.ledgerName?.trim() || null,
+
+                voucher_date:
+                    header.voucherDate || null,
+
+                voucher_number:
+                    header.voucherNumber ?? null,
+
+                voucher_type:
+                    header.voucherType ?? null,
+
+                debit_credit:
+                    ledger.isDeemedPositive === "Yes"
+                        ? "DR"
+                        : "CR",
+
+
+                cost_category:
+                    cost.costCategory ?? null,
+
+                cost_centre:
+                    cost.costCentre ?? null,
+
+                amount:
+                    cost.amount ?? 0
+
+            });
+
+
+        }
+
+    }
+
+
+    return rows;
+
+}
+
 
 function buildInventoryRows({
 
@@ -968,6 +1007,8 @@ module.exports = {
     buildLedgerRows,
 
     buildBillAllocationRows,
+
+    buildCostCentreRows,
 
     buildInventoryRows,
 
