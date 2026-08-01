@@ -34679,6 +34679,33 @@ console.log(
   "LAST STOCK ALTER ID :",
   lastStockAlterId ?? "FULL SYNC"
 );
+
+
+const {
+  data: lastLedger,
+  error: lastLedgerError
+} = await supabase
+  .from("tally_sync_ledgers")
+  .select("alter_id")
+  .eq("company_code", company_code)
+  .eq("tally_owner", tally_owner)
+  .order("alter_id", { ascending: false })
+  .limit(1)
+  .maybeSingle();
+
+if (lastLedgerError) {
+  throw lastLedgerError;
+}
+
+const lastLedgerAlterId =
+  lastLedger?.alter_id ?? null;
+
+console.log(
+  "LAST LEDGER ALTER ID :",
+  lastLedgerAlterId ?? "FULL SYNC"
+);
+
+
     // =========================
     // CONNECTOR
     // =========================
@@ -34768,14 +34795,14 @@ else {
 
 }
   
-
 const result = await sendChunkedToConnector(
     socket,
     "getMasters",
     {
         company,
         lastAlterId,
-        lastStockAlterId
+        lastStockAlterId,
+        lastLedgerAlterId
     }
 );
 
@@ -35238,10 +35265,136 @@ const ledgerResult = await saveLedgers({
 
 console.log("LEDGER SAVE :", ledgerResult);
 
+// =========================
+// LEDGER RECONCILIATION
+// =========================
+
+const ledgerReconciliation =
+    await reconcileMasters({
+
+        table: "tally_sync_ledgers",
+
+        entity_type: "LEDGER",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+
+console.log(
+    "LEDGER RECONCILIATION :",
+    ledgerReconciliation
+);
+
+
+// =========================
+// LEDGER ACTIONS
+// =========================
+
+const ledgerActionResult =
+    await applyMasterActions({
+
+        table: "tally_sync_ledgers",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id,
+
+        reconciliationResult:
+            ledgerReconciliation
+
+    });
+
+console.log(
+    "LEDGER ACTION RESULT :",
+    ledgerActionResult
+);
+
+
+// =========================
+// MISSING LEDGER BY GUID
+// =========================
+
+if(ledgerReconciliation.missingGuids?.length){
+
+    const missingResult =
+        await sendChunkedToConnector(
+            socket,
+            "ledgerByGuid",
+            {
+                company,
+
+                ledgerGuids:
+                    ledgerReconciliation.missingGuids.map(
+                        item => item.guid
+                    )
+            }
+        );
+
+
+    if(!missingResult.success){
+        return res.json(missingResult);
+    }
+
+
+    await saveLedgers({
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id,
+
+        ledgers:
+            missingResult.ledgers || []
+
+    });
+
+    const ledgerReconciliationAfterMissing =
+    await reconcileMasters({
+
+        table:"tally_sync_ledgers",
+
+        entity_type:"LEDGER",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+
+
+await applyMasterActions({
+
+    table:"tally_sync_ledgers",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    reconciliationResult:
+        ledgerReconciliationAfterMissing
+
+});
+
+}
+
+
 console.log(
   "GET MASTERS RESULT:",
   result.summary
 );
+
+
 
 // =========================
 // SAVE GODOWNS
@@ -35565,8 +35718,6 @@ await applyMasterActions({
 
 }
 
-
-
 // =========================
 // SAVE VOUCHERS
 // =========================
@@ -35591,7 +35742,7 @@ if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
         totalMissing: voucherResult.missingVoucherGuids.length,
         missingVoucherGuids: voucherResult.missingVoucherGuids
     }) + "\n"
-);
+    );
 
     const missingResult =
         await sendChunkedToConnector(
@@ -35606,14 +35757,14 @@ if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
 
 
         fs.appendFileSync(
-      "./logs/voucher-guid-debug.jsonl",
-      JSON.stringify({
-        stage: "AFTER_VOUCHER_BY_GUID_RESPONSE",
-        success: missingResult.success,
-        keys: Object.keys(missingResult || {}),
-        voucherCount: missingResult.vouchers?.length || 0
-    }) + "\n"
-);
+          "./logs/voucher-guid-debug.jsonl",
+          JSON.stringify({
+            stage: "AFTER_VOUCHER_BY_GUID_RESPONSE",
+            success: missingResult.success,
+            keys: Object.keys(missingResult || {}),
+            voucherCount: missingResult.vouchers?.length || 0
+        }) + "\n"
+       );
 
 
     if (!missingResult.success) {

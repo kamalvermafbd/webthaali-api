@@ -59,6 +59,11 @@ async function sendChunkedToConnector(
                 return;
             }
 
+            console.log(
+                "RESULT DEBUG :",
+                JSON.stringify(data, null, 2)
+            );
+
             if (data.success === false) {
 
                 cleanup();
