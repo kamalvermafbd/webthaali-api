@@ -6,10 +6,6 @@ const supabase = createClient(
     process.env.SUPABASE_SERVICE_KEY
 );
 
-
-
-
-
 // ======================================================
 // SAVE SYNC SNAPSHOT CHUNK
 // ======================================================
@@ -95,6 +91,9 @@ async function saveSyncSnapshotChunk({
 
         sync_batch_id,
 
+        last_sync_batch_id:
+            sync_batch_id,
+
         company_code,
 
         tally_owner,
@@ -145,35 +144,99 @@ async function saveSyncSnapshotChunk({
 
     }
 
-
-    
-
+/*
     // =========================
-    // INSERT CHUNK
-    // =========================
+// CHECK EXISTING SNAPSHOT
+// =========================
+
+const {
+    data: existingSnapshot,
+    error: snapshotCheckError
+} = await supabase
+
+    .from("tally_sync_snapshot")
+
+    .select("id")
+
+    .eq(
+        "sync_batch_id",
+        sync_batch_id
+    )
+
+    .eq(
+        "module",
+        module
+    )
+
+    .eq(
+        "entity_type",
+        entity_type
+    )
+
+    .limit(1);
 
 
-    const {
+if (snapshotCheckError) {
 
-        error
+    throw new Error(
+        "Snapshot check failed : "
+        +
+        snapshotCheckError.message
+    );
 
-    } = await supabase
+}
 
-        .from(
-            "tally_sync_snapshot"
-        )
 
-        .insert(
-            snapshotRows
-        );
+if (
+    existingSnapshot &&
+    existingSnapshot.length > 0
+) {
 
+    return {
+
+        success:true,
+
+        inserted:0,
+
+        skipped:true,
+
+        reason:
+        "Snapshot already exists"
+
+    };
+
+}
+*/
+
+ // =========================
+// UPSERT CHUNK
+// =========================
+
+
+const {
+
+    error
+
+} = await supabase
+
+    .from(
+        "tally_sync_snapshot"
+    )
+
+    .upsert(
+        snapshotRows,
+        {
+            onConflict:
+            "company_code,tally_owner,module,entity_type,guid"
+        }
+    );
 
 
     if (error) {
 
         throw new Error(
 
-            "Snapshot insert failed : "
+            "Snapshot upsert failed : "
 
             +
 
@@ -201,6 +264,68 @@ async function saveSyncSnapshotChunk({
 
 
 }
+
+// ======================================================
+// REMOVE MISSING SNAPSHOT GUIDS
+// ======================================================
+async function removeMissingSnapshotGuids({
+
+    sync_batch_id,
+
+    company_code,
+
+    tally_owner,
+
+    module,
+
+    entity_type
+
+}) {
+
+
+    const {
+        error
+    } = await supabase
+
+        .from("tally_sync_snapshot")
+
+        .delete()
+
+        .eq(
+            "company_code",
+            company_code
+        )
+        .eq(
+            "tally_owner",
+            tally_owner
+        )
+        .eq(
+            "module",
+            module
+        )
+        .eq(
+            "entity_type",
+            entity_type
+        )
+        .neq(
+            "last_sync_batch_id",
+            sync_batch_id
+        );
+
+
+    if (error) {
+
+        throw new Error(
+            "Snapshot cleanup failed : "
+            +
+            error.message
+        );
+
+    }
+
+
+}
+
 
 // ======================================================
 // CLEAR OLD SYNC SNAPSHOT
@@ -274,10 +399,10 @@ async function clearSyncSnapshot({
 
 module.exports = {
 
-
     saveSyncSnapshotChunk,
 
-    clearSyncSnapshot
+    clearSyncSnapshot,
 
+    removeMissingSnapshotGuids
 
 };

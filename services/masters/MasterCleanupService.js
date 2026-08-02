@@ -24,9 +24,22 @@ const MASTER_TABLES = [
 
     "tally_sync_cost_centres",
 
-   // "tally_sync_stock_groups",
+   "tally_sync_stock_groups",
 
-    //"tally_sync_stocks"
+    "tally_sync_stocks",
+
+        "tally_vouchers",
+
+    "tally_voucher_ledgers",
+
+    "tally_voucher_inventory",
+
+    "tally_stock_vouchers",
+
+    "tally_costcentre_allocations",
+
+    "tally_bill_allocations"
+
 
 ];
 
@@ -224,16 +237,6 @@ async function cleanupDeletedMasters({
                 tally_owner
 
             )
-
-
-            .eq(
-
-                "sync_batch_id",
-
-                sync_batch_id
-
-            )
-
 
             .eq(
 

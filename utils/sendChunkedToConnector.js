@@ -1,8 +1,9 @@
 const crypto = require("crypto");
 
+
 const {
     saveSyncSnapshotChunk,
-    clearSyncSnapshot
+    removeMissingSnapshotGuids
 } = require("../services/sync/SyncSnapshotService");
 
 async function sendChunkedToConnector(
@@ -24,7 +25,7 @@ async function sendChunkedToConnector(
         let receivedItems = 0;
 
         let completed = false;
-        let snapshotCleared = false;
+        
 
         const resultEvent = `${event}Result`;
         const chunkEvent = `${event}Chunk`;
@@ -106,38 +107,11 @@ async function sendChunkedToConnector(
 
                 return;
             }
-
-     expectedChunks = data.totalChunks;
-
-
-if (
-    payload.snapshot === true &&
-    snapshotCleared === false
-) {
-
-    await clearSyncSnapshot({
-
-        company_code:
-            payload.company_code,
-
-        tally_owner:
-            payload.tally_owner,
-
-        module:
-            payload.module,
-
-        entity_type:
-            payload.entity_type
-
-    });
-
-
-    snapshotCleared = true;
-
-}
-
+expectedChunks = data.totalChunks;
+     
 
 if (payload.snapshot === true) {
+
 
     await saveSyncSnapshotChunk({
 
@@ -198,7 +172,7 @@ console.log(
 );
         }
 
-        function onComplete(data) {
+        async function onComplete(data) {
 
             if (completed) {
                 return;
@@ -255,21 +229,54 @@ if (
 
 }
 
-            cleanup();
+        
 
             console.log("=================================");
-console.log("Chunk transfer completed");
-console.log(`Total chunks : ${expectedChunks}`);
-console.log(
-    `Total records : ${actualReceived}`
-);
-console.log("=================================");
+        console.log("Chunk transfer completed");
+        console.log(`Total chunks : ${expectedChunks}`);
+        console.log(
+            `Total records : ${actualReceived}`
+        );
+        console.log("=================================");
 
            const collectionName =
     masterResult.collectionName || "vouchers";
 
+if (payload.snapshot === true) {
+
+try{
+    await removeMissingSnapshotGuids({
+
+        sync_batch_id:
+            payload.sync_batch_id,
+
+        company_code:
+            payload.company_code,
+
+        tally_owner:
+            payload.tally_owner,
+
+        module:
+            payload.module,
+
+        entity_type:
+            payload.entity_type
+
+    });
+    }
+    catch(error) {
+
+        cleanup();
+
+        return reject(error);
+
+    }
+
+}
 
 if (payload.snapshot === true) {
+
+    cleanup();
 
     resolve({
 
@@ -283,6 +290,8 @@ if (payload.snapshot === true) {
 
 }
 else {
+
+ cleanup();
 
     resolve({
 

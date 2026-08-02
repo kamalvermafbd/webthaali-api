@@ -342,7 +342,6 @@ async function processValidationResult({
     return false;
 
 }
-*/
 
 
 async function deleteVoucherLedgers({
@@ -525,6 +524,236 @@ async function deleteCostCentres({
     }
 
 }
+
+*/
+
+/// new logic is_deleted =true code  add 02.08.26
+async function deleteVoucherLedgers({
+
+    company_code,
+
+    tally_owner,
+
+    voucherGuids
+
+}) {
+
+    const { error } = await supabase
+
+        .from("tally_voucher_ledgers")
+
+        .update({
+
+            is_deleted:true,
+
+            updated_at:new Date().toISOString()
+
+        })
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner)
+
+        .in("voucher_guid", voucherGuids);
+
+
+    if (error) {
+
+        throw new Error(
+
+            "Failed to soft delete Voucher Ledgers: " +
+
+            error.message
+
+        );
+
+    }
+
+}
+
+
+
+async function deleteVoucherInventory({
+
+    company_code,
+
+    tally_owner,
+
+    voucherGuids
+
+}) {
+
+    const { error } = await supabase
+
+        .from("tally_voucher_inventory")
+
+        .update({
+
+            is_deleted:true,
+
+            updated_at:new Date().toISOString()
+
+        })
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner)
+
+        .in("voucher_guid", voucherGuids);
+
+
+    if (error) {
+
+        throw new Error(
+
+            "Failed to soft delete Voucher Inventory: " +
+
+            error.message
+
+        );
+
+    }
+
+}
+
+
+
+async function deleteStockVouchers({
+
+    company_code,
+
+    tally_owner,
+
+    voucherGuids
+
+}) {
+
+    const { error } = await supabase
+
+        .from("tally_stock_vouchers")
+
+        .update({
+
+            is_deleted:true,
+
+            updated_at:new Date().toISOString()
+
+        })
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner)
+
+        .in("voucher_guid", voucherGuids);
+
+
+    if (error) {
+
+        throw new Error(
+
+            "Failed to soft delete Stock Vouchers: " +
+
+            error.message
+
+        );
+
+    }
+
+}
+
+
+
+async function deleteBillAllocations({
+
+    company_code,
+
+    tally_owner,
+
+    voucherGuids
+
+}) {
+
+    const { error } = await supabase
+
+        .from("tally_bill_allocations")
+
+        .update({
+
+            is_deleted:true,
+
+            updated_at:new Date().toISOString()
+
+        })
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner)
+
+        .in("voucher_guid", voucherGuids);
+
+
+
+    if (error) {
+
+        throw new Error(
+
+            "Failed to soft delete Bill Allocations: " +
+
+            error.message
+
+        );
+
+    }
+
+}
+
+
+
+async function deleteCostCentres({
+
+    company_code,
+
+    tally_owner,
+
+    voucherGuids
+
+}) {
+
+    const { error } = await supabase
+
+        .from("tally_costcentre_allocations")
+
+        .update({
+
+            is_deleted:true,
+
+            updated_at:new Date().toISOString()
+
+        })
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner)
+
+        .in("voucher_guid", voucherGuids);
+
+
+
+    if (error) {
+
+        throw new Error(
+
+            "Failed to soft delete Cost Centres: " +
+
+            error.message
+
+        );
+
+    }
+
+}
+
+
 
 
 async function saveVoucher({
@@ -1001,6 +1230,7 @@ await saveCostCentres({
 
 }
 
+/* 02.08.26
 async function deleteMissingVouchers({
 
     company_code,
@@ -1058,6 +1288,155 @@ async function deleteMissingVouchers({
     .eq("company_code", company_code)
     .eq("tally_owner", tally_owner)
     .in("voucher_guid", deletedVoucherGuids);
+
+}
+
+*/
+
+async function deleteMissingVouchers({
+
+    company_code,
+
+    tally_owner,
+
+    deletedVoucherGuids
+
+}) {
+
+    if (deletedVoucherGuids.length === 0) {
+
+        return;
+
+    }
+
+
+    const now = new Date().toISOString();
+
+
+
+    await supabase
+
+        .from("tally_voucher_inventory")
+
+        .update({
+
+            is_deleted:true,
+
+            updated_at:now
+
+        })
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner)
+
+        .in("voucher_guid", deletedVoucherGuids);
+
+
+
+
+    await supabase
+
+        .from("tally_voucher_ledgers")
+
+        .update({
+
+            is_deleted:true,
+
+            updated_at:now
+
+        })
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner)
+
+        .in("voucher_guid", deletedVoucherGuids);
+
+
+
+
+    await supabase
+
+        .from("tally_stock_vouchers")
+
+        .update({
+
+            is_deleted:true,
+
+            updated_at:now
+
+        })
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner)
+
+        .in("voucher_guid", deletedVoucherGuids);
+
+
+
+
+    await supabase
+
+        .from("tally_bill_allocations")
+
+        .update({
+
+            is_deleted:true,
+
+            updated_at:now
+
+        })
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner)
+
+        .in("voucher_guid", deletedVoucherGuids);
+
+
+
+
+    await supabase
+
+        .from("tally_costcentre_allocations")
+
+        .update({
+
+            is_deleted:true,
+
+            updated_at:now
+
+        })
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner)
+
+        .in("voucher_guid", deletedVoucherGuids);
+
+
+
+
+    await supabase
+
+        .from("tally_vouchers")
+
+        .update({
+
+            is_deleted:true,
+
+            updated_at:now
+
+        })
+
+        .eq("company_code", company_code)
+
+        .eq("tally_owner", tally_owner)
+
+        .in("guid", deletedVoucherGuids);
+
 
 }
 

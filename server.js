@@ -10,6 +10,35 @@ const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 
 const fs = require("fs");
+
+function masterFlowDebug(data){
+
+    fs.appendFileSync(
+        "./logs/master-flow-debug.jsonl",
+        JSON.stringify({
+
+            time:
+            new Date().toISOString(),
+
+            ...data
+
+        }) + "\n"
+    );
+
+}
+
+function syncDebug(data){
+
+    fs.appendFileSync(
+        "./logs/master-flow-debug.jsonl",
+        JSON.stringify({
+            time:new Date().toISOString(),
+            ...data
+        }) + "\n"
+    );
+
+}
+
 const path = require("path");
 
 const nodemailer =
@@ -91,6 +120,14 @@ const {
 const {
   applyMasterActions
 } = require("./services/masters/MasterActionService");
+
+const {
+    getResumePoint
+} = require("./services/sync/SyncResumeService");
+
+const {
+    cleanupDeletedMasters
+} = require("./services/masters/MasterCleanupService");
 
 /*
 const {
@@ -34739,6 +34776,7 @@ console.log(
 
     }
 
+
 // =========================
 // SYNC BATCH ID
 // =========================
@@ -34763,6 +34801,9 @@ if (runningBatch) {
     );
 
 }
+
+
+
 else {
 
     sync_batch_id = crypto.randomUUID();
@@ -34779,7 +34820,11 @@ else {
 
             batch_status: "RUNNING",
 
-            current_module: "INIT"
+            current_module: "MASTERS",
+
+            current_action:"PROCESSING"
+
+            //current_module: "INIT"
 
         });
 
@@ -34794,6 +34839,70 @@ else {
     }
 
 }
+
+
+    const resumePoint =
+    runningBatch
+    ? getResumePoint(runningBatch)
+    : "START";
+
+console.log(
+    "RESUME FROM:",
+    resumePoint
+);
+
+
+syncDebug({
+
+    stage:"START",
+
+    sync_batch_id,
+
+    resumePoint,
+
+    company_code,
+
+    tally_owner
+
+});
+
+
+let groupResult = null;
+let groupReconciliation = null;
+let groupActionResult = null;
+
+let stockGroupResult = null;
+let stockGroupReconciliation = null;
+let stockGroupActionResult = null;
+
+let ledgerResult = null;
+
+let godownResult = null;
+let godownReconciliation = null;
+let godownActionResult = null;
+
+let unitResult = null;
+let unitReconciliation = null;
+let unitActionResult = null;
+
+let costCentreResult = null;
+let costCentreReconciliation = null;
+let costCentreActionResult = null;
+
+let stockResult = null;
+let stockReconciliation = null;
+let stockActionResult = null;
+
+let voucherResult = null;
+
+let voucherGuidResult = null;
+let groupGuidResult = null;
+let ledgerGuidResult = null;
+let stockGroupGuidResult = null;
+let stockGuidResult = null;
+let unitGuidResult = null;
+let godownGuidResult = null;
+let costCentreGuidResult = null;
   
 const result = await sendChunkedToConnector(
     socket,
@@ -34806,6 +34915,16 @@ const result = await sendChunkedToConnector(
     }
 );
 
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"GUID_SCAN",
+
+    action:"COMPLETED"
+
+});
+
 console.log(
   "Masters received. Vouchers:",
   result.vouchers?.length || 0
@@ -34817,7 +34936,14 @@ if (!result.success) {
 
 }
 
-const voucherGuidResult =
+
+// =========================
+// GUID SNAPSHOT START
+// =========================
+
+if (resumePoint === "START") {
+
+voucherGuidResult =
     await sendChunkedToConnector(
         socket,
         "getMastersVoucherGuids",
@@ -34838,7 +34964,7 @@ const voucherGuidResult =
         }
     );
 
-    const groupGuidResult =
+    groupGuidResult =
     await sendChunkedToConnector(
         socket,
         "getMastersGroupGuids",
@@ -34865,7 +34991,7 @@ console.log(
     groupGuidResult
 );
 
-const ledgerGuidResult =
+ledgerGuidResult =
     await sendChunkedToConnector(
         socket,
         "getMastersLedgerGuids",
@@ -34893,7 +35019,7 @@ console.log(
 );
 
 
-const stockGroupGuidResult =
+stockGroupGuidResult =
     await sendChunkedToConnector(
         socket,
         "getMastersStockGroupGuids",
@@ -34921,7 +35047,7 @@ console.log(
 );
 
 
-const stockGuidResult =
+stockGuidResult =
     await sendChunkedToConnector(
         socket,
         "getMastersStockGuids",
@@ -34949,7 +35075,7 @@ console.log(
 );
 
 
-const unitGuidResult =
+unitGuidResult =
     await sendChunkedToConnector(
         socket,
         "getMastersUnitGuids",
@@ -34977,7 +35103,7 @@ console.log(
 );
 
 
-const godownGuidResult =
+godownGuidResult =
     await sendChunkedToConnector(
         socket,
         "getMastersGodownGuids",
@@ -35005,7 +35131,7 @@ console.log(
 );
 
 
-const costCentreGuidResult =
+costCentreGuidResult =
     await sendChunkedToConnector(
         socket,
         "getMastersCostCentreGuids",
@@ -35032,6 +35158,9 @@ console.log(
     costCentreGuidResult
 );
 
+}
+
+if (resumePoint === "START") {
 if (!voucherGuidResult.success) {
 
     return res.json(voucherGuidResult);
@@ -35066,7 +35195,7 @@ if (!costCentreGuidResult.success) {
     return res.json(costCentreGuidResult);
 }
 
-
+}
 
 fs.appendFileSync(
 "./logs/server-guid-debug.jsonl",
@@ -35077,28 +35206,28 @@ JSON.stringify({
  tally_owner,
 
  voucherGuid:
-    voucherGuidResult.totalItems,
+    voucherGuidResult?.totalItems || 0,
 
  groupGuid:
-    groupGuidResult.totalItems,
+   groupGuidResult?.totalItems || 0,
 
  ledgerGuid:
-    ledgerGuidResult.totalItems,
+    ledgerGuidResult?.totalItems || 0,
 
  stockGroupGuid:
-    stockGroupGuidResult.totalItems,
+    stockGroupGuidResult?.totalItems || 0,
 
  stockGuid:
-    stockGuidResult.totalItems,
+    stockGuidResult?.totalItems || 0,
 
  unitGuid:
-    unitGuidResult.totalItems,
+    unitGuidResult?.totalItems || 0,
 
  godownGuid:
-    godownGuidResult.totalItems,
+    godownGuidResult?.totalItems || 0,
 
  costCentreGuid:
-    costCentreGuidResult.totalItems
+    costCentreGuidResult?.totalItems || 0
 
 }) + "\n"
 );
@@ -35127,10 +35256,34 @@ console.log(
 );
 
 */
+
+if (
+    resumePoint === "START" ||
+    resumePoint === "GROUP"
+) {
+
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"GROUP",
+
+    action:"PROCESSING"
+
+});
+
+syncDebug({
+
+    stage:"GROUP_PROCESSING",
+
+    sync_batch_id
+
+});
+
 // =========================
 // SAVE GROUPS
 // =========================
-const groupResult = await saveGroups({
+groupResult = await saveGroups({
 
     company_code,
 
@@ -35152,7 +35305,7 @@ console.log(
 // =========================
 // GROUP RECONCILIATION
 // =========================
-const groupReconciliation =
+groupReconciliation =
     await reconcileMasters({
 
         table: "tally_sync_groups",
@@ -35177,7 +35330,7 @@ console.log(
 // GROUP ACTIONS
 // =========================
 
-const groupActionResult =
+groupActionResult =
 await applyMasterActions({
 
     table:"tally_sync_groups",
@@ -35200,12 +35353,74 @@ console.log(
 );
 
 
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"GROUP",
+
+    action:"COMPLETED"
+
+});
+
+syncDebug({
+
+    stage:"GROUP_COMPLETED",
+
+    sync_batch_id
+
+});
+
+}
+
+if (
+    resumePoint === "START" ||
+    resumePoint === "GROUP" ||
+    resumePoint === "STOCK_GROUP"
+) {
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"STOCK_GROUP",
+
+    action:"PROCESSING"
+
+});
+
+masterFlowDebug({
+    stage:"STOCK_GROUP_PROCESSING",
+    sync_batch_id
+});
+
+// =========================
+// SAVE STOCK GROUPS
+// =========================
+
+stockGroupResult = await saveStockGroups({
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    stockGroups:
+        result.stockGroups || []
+
+});
+
+
+console.log(
+    "STOCK GROUP SAVE :",
+    stockGroupResult
+);
 
 // =========================
 // STOCK GROUP RECONCILIATION
 // =========================
 
-const stockGroupReconciliation =
+stockGroupReconciliation =
     await reconcileMasters({
 
         table: "tally_sync_stock_groups",
@@ -35230,7 +35445,7 @@ console.log(
 // STOCK GROUP ACTIONS
 // =========================
 
-const stockGroupActionResult =
+stockGroupActionResult =
     await applyMasterActions({
 
         table: "tally_sync_stock_groups",
@@ -35251,12 +35466,50 @@ console.log(
     stockGroupActionResult
 );
 
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"STOCK_GROUP",
+
+    action:"COMPLETED"
+
+});
+
+masterFlowDebug({
+    stage:"STOCK_GROUP_COMPLETED",
+    sync_batch_id
+});
+
+  }
+
+if (
+    resumePoint === "START" ||
+    resumePoint === "GROUP" ||
+    resumePoint === "STOCK_GROUP" ||
+    resumePoint === "LEDGER"
+) {
+
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"LEDGER",
+
+    action:"PROCESSING"
+
+});
+
+masterFlowDebug({
+    stage:"LEDGER_PROCESSING",
+    sync_batch_id
+});
 
 // =========================
 // SAVE LEDGERS
 // =========================
 
-const ledgerResult = await saveLedgers({
+ledgerResult = await saveLedgers({
   company_code,
   tally_owner,
    sync_batch_id,
@@ -35269,7 +35522,7 @@ console.log("LEDGER SAVE :", ledgerResult);
 // LEDGER RECONCILIATION
 // =========================
 
-const ledgerReconciliation =
+ledgerReconciliation =
     await reconcileMasters({
 
         table: "tally_sync_ledgers",
@@ -35294,7 +35547,7 @@ console.log(
 // LEDGER ACTIONS
 // =========================
 
-const ledgerActionResult =
+ledgerActionResult =
     await applyMasterActions({
 
         table: "tally_sync_ledgers",
@@ -35315,12 +35568,26 @@ console.log(
     ledgerActionResult
 );
 
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"LEDGER",
+
+    action:"COMPLETED"
+
+});
+
+masterFlowDebug({
+    stage:"LEDGER_COMPLETED",
+    sync_batch_id
+});
 
 // =========================
 // MISSING LEDGER BY GUID
 // =========================
 
-if(ledgerReconciliation.missingGuids?.length){
+if(ledgerReconciliation?.missingGuids?.length){
 
     const missingResult =
         await sendChunkedToConnector(
@@ -35387,6 +35654,7 @@ await applyMasterActions({
 });
 
 }
+}
 
 
 console.log(
@@ -35394,13 +35662,32 @@ console.log(
   result.summary
 );
 
+if (
+    resumePoint === "START" ||
+    resumePoint === "GROUP" ||
+    resumePoint === "STOCK_GROUP" ||
+    resumePoint === "LEDGER" ||
+    resumePoint === "GODOWN"
+) {
+await updateMasterStatus({
 
+    sync_batch_id,
 
+    module:"GODOWN",
+
+    action:"PROCESSING"
+
+});
+
+masterFlowDebug({
+    stage:"GODOWN_PROCESSING",
+    sync_batch_id
+});
 // =========================
 // SAVE GODOWNS
 // =========================
 
-const godownResult = await saveGodowns({
+godownResult = await saveGodowns({
   company_code,
   tally_owner,
    sync_batch_id,
@@ -35414,7 +35701,7 @@ console.log("GODOWN SAVE :", godownResult);
 // GODOWN RECONCILIATION
 // =========================
 
-const godownReconciliation =
+godownReconciliation =
     await reconcileMasters({
 
         table: "tally_sync_godowns",
@@ -35439,7 +35726,7 @@ console.log(
 // GODOWN ACTIONS
 // =========================
 
-const godownActionResult =
+godownActionResult =
     await applyMasterActions({
 
         table: "tally_sync_godowns",
@@ -35460,11 +35747,52 @@ console.log(
     godownActionResult
 );
 
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"GODOWN",
+
+    action:"COMPLETED"
+
+});
+
+masterFlowDebug({
+    stage:"GODOWN_COMPLETED",
+    sync_batch_id
+});
+
+}
+
+
+if (
+    resumePoint === "START" ||
+    resumePoint === "GROUP" ||
+    resumePoint === "STOCK_GROUP" ||
+    resumePoint === "LEDGER" ||
+    resumePoint === "GODOWN" ||
+    resumePoint === "UNIT"
+) {
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"UNIT",
+
+    action:"PROCESSING"
+
+});
+
+masterFlowDebug({
+    stage:"UNIT_PROCESSING",
+    sync_batch_id
+});
+
 // =========================
 // SAVE UNITS
 // =========================
 
-const unitResult = await saveUnits({
+unitResult = await saveUnits({
     company_code,
     tally_owner,
      sync_batch_id,
@@ -35478,7 +35806,7 @@ console.log("UNIT SAVE :", unitResult);
 // UNIT RECONCILIATION
 // =========================
 
-const unitReconciliation =
+unitReconciliation =
     await reconcileMasters({
 
         table: "tally_sync_units",
@@ -35503,7 +35831,7 @@ console.log(
 // UNIT ACTIONS
 // =========================
 
-const unitActionResult =
+unitActionResult =
     await applyMasterActions({
 
         table: "tally_sync_units",
@@ -35524,11 +35852,53 @@ console.log(
     unitActionResult
 );
 
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"UNIT",
+
+    action:"COMPLETED"
+
+});
+
+masterFlowDebug({
+    stage:"UNIT_COMPLETED",
+    sync_batch_id
+});
+
+}
+
+if (
+    resumePoint === "START" ||
+    resumePoint === "GROUP" ||
+    resumePoint === "STOCK_GROUP" ||
+    resumePoint === "LEDGER" ||
+    resumePoint === "GODOWN" ||
+    resumePoint === "UNIT" ||
+    resumePoint === "COST_CENTRE"
+) {
+
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"COST_CENTRE",
+
+    action:"PROCESSING"
+
+});
+
+masterFlowDebug({
+    stage:"COST_CENTRE_PROCESSING",
+    sync_batch_id
+});
+
 // =========================
 // SAVE COST CENTRES
 // =========================
 
-const costCentreResult = await saveCostCentres({
+costCentreResult = await saveCostCentres({
   company_code,
   tally_owner,
    sync_batch_id,
@@ -35541,7 +35911,7 @@ console.log("COST CENTRE SAVE :", costCentreResult);
 // COST CENTRE RECONCILIATION
 // =========================
 
-const costCentreReconciliation =
+costCentreReconciliation =
     await reconcileMasters({
 
         table: "tally_sync_cost_centres",
@@ -35566,7 +35936,7 @@ console.log(
 // COST CENTRE ACTIONS
 // =========================
 
-const costCentreActionResult =
+costCentreActionResult =
     await applyMasterActions({
 
         table: "tally_sync_cost_centres",
@@ -35587,24 +35957,55 @@ console.log(
     costCentreActionResult
 );
 
-// =========================
-// SAVE STOCK GROUPS
-// =========================
 
-const stockGroupResult = await saveStockGroups({
-    company_code,
-    tally_owner,
-     sync_batch_id,
-    stockGroups: result.stockGroups || []
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"COST_CENTRE",
+
+    action:"COMPLETED"
+
 });
 
-console.log("STOCK GROUP SAVE :", stockGroupResult);
+masterFlowDebug({
+    stage:"COST_CENTRE_COMPLETED",
+    sync_batch_id
+});
 
+
+}
+
+
+if (
+    resumePoint === "START" ||
+    resumePoint === "GROUP" ||
+    resumePoint === "STOCK_GROUP" ||
+    resumePoint === "LEDGER" ||
+    resumePoint === "GODOWN" ||
+    resumePoint === "UNIT" ||
+    resumePoint === "COST_CENTRE" ||
+    resumePoint === "STOCK"
+) {
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"STOCK",
+
+    action:"PROCESSING"
+
+});
+
+masterFlowDebug({
+    stage:"STOCK_PROCESSING",
+    sync_batch_id
+});
 // =========================
 // SAVE STOCKS
 // =========================
 
-const stockResult = await saveStocks({
+stockResult = await saveStocks({
     company_code,
     tally_owner,
      sync_batch_id,
@@ -35613,7 +36014,7 @@ const stockResult = await saveStocks({
 
 console.log("STOCK SAVE :", stockResult);
 
-const stockReconciliation =
+stockReconciliation =
     await reconcileMasters({
 
         table: "tally_sync_stocks",
@@ -35633,7 +36034,7 @@ console.log(
     stockReconciliation
 );
 
-const stockActionResult =
+stockActionResult =
     await applyMasterActions({
 
         table: "tally_sync_stocks",
@@ -35654,9 +36055,25 @@ console.log(
     stockActionResult
 );
 
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"STOCK",
+
+    action:"COMPLETED"
+
+});
+masterFlowDebug({
+
+    stage:"STOCK_COMPLETED",
+
+    sync_batch_id
+
+});
 
 
-if(stockReconciliation.missingGuids?.length){
+if(stockReconciliation?.missingGuids?.length){
 
     const missingResult =
         await sendChunkedToConnector(
@@ -35717,18 +36134,48 @@ await applyMasterActions({
 });
 
 }
+}
+
+if (
+    resumePoint === "START" ||
+    resumePoint === "GROUP" ||
+    resumePoint === "STOCK_GROUP" ||
+    resumePoint === "LEDGER" ||
+    resumePoint === "GODOWN" ||
+    resumePoint === "UNIT" ||
+    resumePoint === "COST_CENTRE" ||
+    resumePoint === "STOCK" ||
+    resumePoint === "VOUCHER"
+) {
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"VOUCHER",
+
+    action:"PROCESSING"
+
+});
+
+masterFlowDebug({
+
+    stage:"VOUCHER_PROCESSING",
+
+    sync_batch_id
+
+});
 
 // =========================
 // SAVE VOUCHERS
 // =========================
 
-let voucherResult = await saveVouchers({
+voucherResult = await saveVouchers({
     company_code,
     tally_owner,
     sync_batch_id,
     vouchers: result.vouchers || [],
     allVoucherGuids:
-    voucherGuidResult.items || []
+    voucherGuidResult?.items || []
 });
 
 if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
@@ -35779,7 +36226,7 @@ if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
         sync_batch_id,
         vouchers: missingResult.vouchers || [],
         allVoucherGuids:
-          voucherGuidResult.items || []
+          voucherGuidResult?.items || []
     });
 
 }
@@ -35787,6 +36234,26 @@ if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
 
 console.log("VOUCHER SAVE :", voucherResult);
 
+
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"VOUCHER",
+
+    action:"COMPLETED"
+
+});
+masterFlowDebug({
+
+    stage:"VOUCHER_COMPLETED",
+
+    sync_batch_id
+
+});
+
+
+}
 // =========================
 // MASTER STATUS COMPLETE
 // =========================
@@ -35802,10 +36269,34 @@ const masterStatusResult =
 
     });
 
+masterFlowDebug({
+
+    stage:"MASTERS_COMPLETED",
+
+    sync_batch_id
+
+});
 
 console.log(
     "MASTER STATUS :",
     masterStatusResult
+);
+
+const cleanupResult =
+    await cleanupDeletedMasters({
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+
+
+console.log(
+    "MASTER CLEANUP RESULT :",
+    cleanupResult
 );
 
 return res.json({

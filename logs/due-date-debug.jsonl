@@ -290,3 +290,78 @@
   }
 }
 
+{
+  "step": "INPUT",
+  "baseDate": 20260702,
+  "creditPeriod": "15 Days",
+  "parsedDate": "2026-07-01T18:30:00.000Z"
+}
+
+{
+  "step": "FINAL_OUTPUT",
+  "result": {
+    "dueDate": "2026-07-17",
+    "creditDays": 15
+  }
+}
+
+{
+  "step": "INPUT",
+  "baseDate": 20260702,
+  "creditPeriod": "15 Days",
+  "parsedDate": "2026-07-01T18:30:00.000Z"
+}
+
+{
+  "step": "FINAL_OUTPUT",
+  "result": {
+    "dueDate": "2026-07-17",
+    "creditDays": 15
+  }
+}
+
+{
+  "step": "INPUT",
+  "baseDate": 20260702,
+  "creditPeriod": "15 Days",
+  "parsedDate": "2026-07-01T18:30:00.000Z"
+}
+
+{
+  "step": "FINAL_OUTPUT",
+  "result": {
+    "dueDate": "2026-07-17",
+    "creditDays": 15
+  }
+}
+
+{
+  "step": "INPUT",
+  "baseDate": 20260702,
+  "creditPeriod": "15 Days",
+  "parsedDate": "2026-07-01T18:30:00.000Z"
+}
+
+{
+  "step": "FINAL_OUTPUT",
+  "result": {
+    "dueDate": "2026-07-17",
+    "creditDays": 15
+  }
+}
+
+{
+  "step": "INPUT",
+  "baseDate": 20260702,
+  "creditPeriod": "15 Days",
+  "parsedDate": "2026-07-01T18:30:00.000Z"
+}
+
+{
+  "step": "FINAL_OUTPUT",
+  "result": {
+    "dueDate": "2026-07-17",
+    "creditDays": 15
+  }
+}
+
