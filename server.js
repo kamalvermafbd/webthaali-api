@@ -35280,6 +35280,7 @@ syncDebug({
 
 });
 
+
 // =========================
 // SAVE GROUPS
 // =========================
@@ -35589,19 +35590,21 @@ masterFlowDebug({
 
 if(ledgerReconciliation?.missingGuids?.length){
 
-    const missingResult =
-        await sendChunkedToConnector(
-            socket,
-            "ledgerByGuid",
-            {
-                company,
+  const missingResult =
+    await sendChunkedToConnector(
+        socket,
+        "ledgerByGuid",
+        {
+            company,
+            sync_batch_id,
+            tally_owner,
 
-                ledgerGuids:
-                    ledgerReconciliation.missingGuids.map(
-                        item => item.guid
-                    )
-            }
-        );
+            requestItems:
+                ledgerReconciliation.missingGuids.map(
+                    item => item.guid
+                )
+        }
+    );
 
 
     if(!missingResult.success){
@@ -36075,19 +36078,21 @@ masterFlowDebug({
 
 if(stockReconciliation?.missingGuids?.length){
 
-    const missingResult =
-        await sendChunkedToConnector(
-            socket,
-            "stockByGuid",
-            {
-                company,
-                stockGuids:
-                  stockReconciliation.missingGuids.map(
-                      item => item.guid
-                  )
-            }
-        );
+   const missingResult =
+    await sendChunkedToConnector(
+        socket,
+        "stockByGuid",
+        {
+            company,
+            sync_batch_id,
+            tally_owner,
 
+            requestItems:
+                stockReconciliation.missingGuids.map(
+                    item => item.guid
+                )
+        }
+    );
 
     if(!missingResult.success){
         return res.json(missingResult);
@@ -36191,16 +36196,19 @@ if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
     }) + "\n"
     );
 
-    const missingResult =
-        await sendChunkedToConnector(
-            socket,
-            "voucherByGuid",
-            {
-                company,
-                voucherGuids:
-                    voucherResult.missingVoucherGuids
-            }
-        );
+   const missingResult =
+    await sendChunkedToConnector(
+        socket,
+        "voucherByGuid",
+        {
+            company,
+            sync_batch_id,
+            tally_owner,
+
+            requestItems:
+                voucherResult.missingVoucherGuids
+        }
+    );
 
 
         fs.appendFileSync(

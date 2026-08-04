@@ -5,6 +5,7 @@ const supabase = createClient(
     process.env.SUPABASE_SERVICE_KEY
 );
 
+console.log("✅ saveGroups.js LOADED");
 
 async function saveGroups({
 
@@ -18,6 +19,13 @@ async function saveGroups({
 
 }) {
 
+     console.log("🚀 saveGroups() CALLED");
+    console.log({
+        company_code,
+        tally_owner,
+        sync_batch_id,
+        totalGroups: groups.length
+    });
 
     if (!sync_batch_id) {
 
@@ -182,7 +190,7 @@ async function saveGroups({
 
     if (withGuid.length > 0) {
 
-
+console.log("Saving GUID groups:", withGuid.length);
         const {
 
             error
@@ -208,7 +216,7 @@ async function saveGroups({
 
         );
 
-
+console.log("GUID UPSERT ERROR:", error);
 
         if (error) {
 
@@ -237,7 +245,7 @@ async function saveGroups({
 
     if (withoutGuid.length > 0) {
 
-
+console.log("Saving NAME groups:", withoutGuid.length);
         const {
 
             error
@@ -263,7 +271,7 @@ async function saveGroups({
 
         );
 
-
+console.log("NAME UPSERT ERROR:", error);
 
         if (error) {
 

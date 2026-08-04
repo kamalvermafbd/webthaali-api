@@ -806,3 +806,4 @@
 {"stage":"CALLING_SAVE_VOUCHER_GUIDS"}
 {"stage":"SAVE_VOUCHER_GUIDS_COMPLETED"}
 {"stage":"BATCH_COMPLETED"}
+{"stage":"SAVE_VOUCHERS_START","company_code":"C0035","tally_owner":"USER","sync_batch_id":"f5fb26a8-f471-401d-b7dc-7d9ec61db781","vouchers":1332,"allVoucherGuids":0}

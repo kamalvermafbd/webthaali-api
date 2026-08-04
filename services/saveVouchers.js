@@ -542,13 +542,7 @@ async function deleteVoucherLedgers({
 
         .from("tally_voucher_ledgers")
 
-        .update({
-
-            is_deleted:true,
-
-            updated_at:new Date().toISOString()
-
-        })
+       .delete()
 
         .eq("company_code", company_code)
 
@@ -587,13 +581,7 @@ async function deleteVoucherInventory({
 
         .from("tally_voucher_inventory")
 
-        .update({
-
-            is_deleted:true,
-
-            updated_at:new Date().toISOString()
-
-        })
+       .delete()
 
         .eq("company_code", company_code)
 
@@ -632,13 +620,7 @@ async function deleteStockVouchers({
 
         .from("tally_stock_vouchers")
 
-        .update({
-
-            is_deleted:true,
-
-            updated_at:new Date().toISOString()
-
-        })
+       .delete()
 
         .eq("company_code", company_code)
 
@@ -677,13 +659,7 @@ async function deleteBillAllocations({
 
         .from("tally_bill_allocations")
 
-        .update({
-
-            is_deleted:true,
-
-            updated_at:new Date().toISOString()
-
-        })
+       .delete()
 
         .eq("company_code", company_code)
 
@@ -723,13 +699,7 @@ async function deleteCostCentres({
 
         .from("tally_costcentre_allocations")
 
-        .update({
-
-            is_deleted:true,
-
-            updated_at:new Date().toISOString()
-
-        })
+       .delete()
 
         .eq("company_code", company_code)
 
@@ -1099,7 +1069,6 @@ async function saveStockVouchers({
 
 }
 
-
 async function saveVoucherExecutionData({
 
     company_code,
@@ -1118,13 +1087,62 @@ async function saveVoucherExecutionData({
 
     stockVoucherRows,
 
-     billAllocationRows,
+    billAllocationRows,
 
-     costCentreRows,
+    costCentreRows,
 
     STOCK_DEBUG_FILE
 
 }) {
+
+    // -------------------------
+    // DELETE OLD CHILD RECORDS
+    // -------------------------
+
+    await deleteVoucherLedgers({
+
+        company_code,
+        tally_owner,
+        voucherGuids
+
+    });
+
+    await deleteVoucherInventory({
+
+        company_code,
+        tally_owner,
+        voucherGuids
+
+    });
+
+    await deleteStockVouchers({
+
+        company_code,
+        tally_owner,
+        voucherGuids
+
+    });
+
+    await deleteBillAllocations({
+
+        company_code,
+        tally_owner,
+        voucherGuids
+
+    });
+
+    await deleteCostCentres({
+
+        company_code,
+        tally_owner,
+        voucherGuids
+
+    });
+
+
+    // -------------------------
+    // SAVE NEW DATA
+    // -------------------------
 
     const success =
         await saveVoucherHeaders({
@@ -1139,92 +1157,41 @@ async function saveVoucherExecutionData({
 
         });
 
-    await deleteVoucherLedgers({
-
-        company_code,
-
-        tally_owner,
-
-        voucherGuids
-
-    });
-
-    await deleteStockVouchers({
-
-        company_code,
-
-        tally_owner,
-
-        voucherGuids
-
-    });
-
-    await deleteBillAllocations({
-
-    company_code,
-
-    tally_owner,
-
-    voucherGuids
-
-});
-
-await deleteCostCentres({
-
-    company_code,
-
-    tally_owner,
-
-    voucherGuids
-
-});
-
     await saveVoucherLedgers({
 
-    ledgerRows,
-    sync_batch_id
-
-});
-
-await saveBillAllocations({
-
-    billAllocationRows,
-    sync_batch_id
-
-});
-
-await saveCostCentres({
-
-    costCentreRows,
-
-    sync_batch_id
-
-});
-
-    await deleteVoucherInventory({
-
-        company_code,
-
-        tally_owner,
-
-        voucherGuids
+        ledgerRows,
+        sync_batch_id
 
     });
 
     await saveVoucherInventory({
 
-    inventoryRows,
-    sync_batch_id
+        inventoryRows,
+        sync_batch_id
 
-});
+    });
+
+    await saveBillAllocations({
+
+        billAllocationRows,
+        sync_batch_id
+
+    });
+
+    await saveCostCentres({
+
+        costCentreRows,
+        sync_batch_id
+
+    });
 
     await saveStockVouchers({
 
-    stockVoucherRows,
-    sync_batch_id,
-    STOCK_DEBUG_FILE
+        stockVoucherRows,
+        sync_batch_id,
+        STOCK_DEBUG_FILE
 
-});
+    });
 
     return success;
 

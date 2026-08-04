@@ -1,5 +1,8 @@
 const registry = require("./connectorRegistry");
 
+const ServerProtocolReceiver =
+    require("../utils/protocol/ServerProtocolReceiver");
+
 function registerEvents(io) {
 
     io.on("connection", (socket) => {
@@ -8,6 +11,13 @@ function registerEvents(io) {
         console.log("✅ Connector Connected");
         console.log("Socket ID :", socket.id);
         console.log("================================");
+
+        socket.protocolReceiver =
+            new ServerProtocolReceiver(
+                socket
+            );
+
+        socket.protocolReceiver.start();
 
         // Connector Register
         socket.on("register", (data) => {
@@ -21,35 +31,46 @@ function registerEvents(io) {
 
         socket.on("testExport", () => {
 
-    console.log("================================");
-    console.log("📦 Test Export Request");
-    console.log("Sending XML to Connector...");
-    console.log("================================");
+            console.log("================================");
+            console.log("📦 Test Export Request");
+            console.log("Sending XML to Connector...");
+            console.log("================================");
 
-    socket.emit("export", {
-        xml: "<TEST>HELLO TALLY</TEST>"
-    });
+            socket.emit("export", {
+                xml: "<TEST>HELLO TALLY</TEST>"
+            });
 
-});
+        });
 
-      socket.on("disconnect", (reason) => {
+        socket.on("getMastersProgress", (data) => {
 
-    console.log("================================");
-    console.log("❌ Connector Disconnected");
-    console.log("Socket ID :", socket.id);
-    console.log("Reason :", reason);
+            socket.lastHeartbeat = Date.now();
 
-    if (socket.companyCode) {
-        registry.remove(socket.companyCode);
-    }
+            console.log(
+                "💓 Heartbeat :",
+                data.batchId
+            );
 
-    console.log("================================");
+        });
 
-});
+        socket.on("disconnect", (reason) => {
 
-    });
+            console.log("================================");
+            console.log("❌ Connector Disconnected");
+            console.log("Socket ID :", socket.id);
+            console.log("Reason :", reason);
 
-}
+            if (socket.companyCode) {
+                registry.remove(socket.companyCode);
+            }
+
+            console.log("================================");
+
+        });
+
+            });
+
+        }
 
 module.exports = {
     registerEvents
