@@ -1,10 +1,5 @@
-const { createClient } = require("@supabase/supabase-js");
-
-
-const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY
-);
+const SnapshotManager =
+    require("../../sync-engine/SnapshotManager");
 
 // ======================================================
 // SAVE SYNC SNAPSHOT CHUNK
@@ -53,8 +48,6 @@ async function saveSyncSnapshotChunk({
         );
 
     }
-
-
 
     if (
         !Array.isArray(rows) ||
@@ -144,75 +137,11 @@ async function saveSyncSnapshotChunk({
 
     }
 
-/*
-    // =========================
-// CHECK EXISTING SNAPSHOT
-// =========================
-
-const {
-    data: existingSnapshot,
-    error: snapshotCheckError
-} = await supabase
-
-    .from("tally_sync_snapshot")
-
-    .select("id")
-
-    .eq(
-        "sync_batch_id",
-        sync_batch_id
-    )
-
-    .eq(
-        "module",
-        module
-    )
-
-    .eq(
-        "entity_type",
-        entity_type
-    )
-
-    .limit(1);
-
-
-if (snapshotCheckError) {
-
-    throw new Error(
-        "Snapshot check failed : "
-        +
-        snapshotCheckError.message
-    );
-
-}
-
-
-if (
-    existingSnapshot &&
-    existingSnapshot.length > 0
-) {
-
-    return {
-
-        success:true,
-
-        inserted:0,
-
-        skipped:true,
-
-        reason:
-        "Snapshot already exists"
-
-    };
-
-}
-*/
-
  // =========================
 // UPSERT CHUNK
 // =========================
 
-
+/* 04.08.26
 const {
 
     error
@@ -245,8 +174,12 @@ const {
         );
 
     }
+*/
+await SnapshotManager.saveSnapshotRows({
 
+    rows: snapshotRows
 
+});
 
 
     return {
@@ -282,7 +215,7 @@ async function removeMissingSnapshotGuids({
 
 }) {
 
-
+/*
     const {
         error
     } = await supabase
@@ -322,7 +255,22 @@ async function removeMissingSnapshotGuids({
         );
 
     }
+*/
 
+
+    await SnapshotManager.removeMissingGuids({
+
+        company_code,
+
+        tally_owner,
+
+        module,
+
+        entity_type,
+
+        sync_batch_id
+
+    });
 
 }
 
@@ -343,7 +291,7 @@ async function clearSyncSnapshot({
 
 }) {
 
-
+/*
     const {
 
         error
@@ -393,7 +341,19 @@ async function clearSyncSnapshot({
         module,
         entity_type
     );
+*/
 
+    await SnapshotManager.clearSnapshot({
+
+        company_code,
+
+        tally_owner,
+
+        module,
+
+        entity_type
+
+    });
 
 }
 

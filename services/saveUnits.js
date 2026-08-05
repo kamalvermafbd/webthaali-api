@@ -1,10 +1,9 @@
-const { createClient } = require("@supabase/supabase-js");
-
-const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY
-);
-
+const BatchManager =
+    require("../sync-engine/BatchManager");
+    
+const UnitRowBuilder =
+    require("./UnitRowBuilder");
+    
 async function saveUnits({
     company_code,
     tally_owner,
@@ -37,161 +36,71 @@ async function saveUnits({
 }
 
     const now = new Date().toISOString();
-
-    const withGuid = [];
-
-    const withoutGuid = [];
+    
+    const rows = [];
 
     for (const unit of units) {
 
-        const row = {
+        const row =
 
-            company_code,
-            tally_owner,
+    UnitRowBuilder.build({
 
-            guid: unit.guid?.trim() || null,
+        unit,
 
-            masterid:
-            (
-                unit.masterId
-                ??
-                unit.master_id
-                ??
-                unit.masterid
-            )?.toString()
-            ||
-            null,
+        company_code,
 
-            alterid:
-                unit.alterId
-                ??
-                unit.alter_id
-                ??
-                unit.alterid
-                ??
-                null,
+        tally_owner,
 
-            name: unit.name?.trim() || null,
-            formal_name:
-            (
-                unit.formalName
-                ??
-                unit.formal_name
-            )?.trim()
-            ||
-            null,
+        sync_batch_id,
 
-          decimal_places:
-            (
-                unit.decimalPlaces
-                ??
-                unit.decimal_places
-            )
-            ==
-            null
-            ?
-            null
-            :
-            Number(
-                unit.decimalPlaces
-                ??
-                unit.decimal_places
-            ),
+        now
 
-            is_deleted: false,
+    });
 
-            last_synced_at: now,
+      if (row.guid) {
+
+            rows.push(row);
+
+        } else {
+
+            console.warn(
+
+                `[${company_code}] [${tally_owner}] Skipping Unit "${row.name}" because GUID is missing.`
+
+            );
+
+        }
+
+    }
+
+   return await BatchManager.run({
+
+        batch_id:
+
             sync_batch_id,
 
-            updated_at: now
+        module:
 
-        };
+            "MASTER",
 
-       if (row.guid) {
+        entity:
 
-            withGuid.push(row);
+            "UNIT",
 
-        }
-        else {
+        table:
 
-            withoutGuid.push(row);
+            "tally_sync_units",
 
-        }
+        company_code,
 
-    }
+        tally_owner,
 
-    let success = 0;
+        sync_batch_id,
 
-        if (withGuid.length > 0) {
+        rows
 
-           // console.log(JSON.stringify(withGuid, null, 2));
+    });
 
-        const { error } = await supabase
-
-            .from("tally_sync_units")
-
-            .upsert(
-                withGuid,
-                {
-                    onConflict: "company_code,tally_owner,guid"
-                }
-            );
-
-        if (error) {
-
-            throw new Error(
-                "Failed to save Units (GUID Upsert): " +
-                error.message
-            );
-
-        }
-
-        success += withGuid.length;
-
-    }
-
-
-    if (withoutGuid.length > 0) {
-
-    const { error } = await supabase
-
-        .from("tally_sync_units")
-
-        .upsert(
-            withoutGuid,
-            {
-                onConflict:
-                "company_code,tally_owner,name"
-            }
-        );
-
-    if (error) {
-
-        throw new Error(
-            "Failed to save Units (NAME Upsert): "
-            +
-            error.message
-        );
-
-    }
-
-    success += withoutGuid.length;
-
-}
-
-   return {
-
-    total:
-        units.length,
-
-    success,
-
-    failed:
-        units.length - success,
-
-    sync_batch_id
-
-};
 
 }
 

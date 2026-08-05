@@ -5,7 +5,6 @@ const {
     TABLES,
     OPERATION_TYPE
 } = require("./constants");
-
 function buildDeleteOperations({
 
     company_code,
@@ -28,7 +27,19 @@ function buildDeleteOperations({
 
             operation: OPERATION_TYPE.DELETE,
 
-            rows: voucherGuids,
+            filters: [
+
+                {
+
+                    type: "in",
+
+                    column: "voucher_guid",
+
+                    value: voucherGuids
+
+                }
+
+            ],
 
             company_code,
 
@@ -46,7 +57,19 @@ function buildDeleteOperations({
 
             operation: OPERATION_TYPE.DELETE,
 
-            rows: voucherGuids,
+            filters: [
+
+                {
+
+                    type: "in",
+
+                    column: "voucher_guid",
+
+                    value: voucherGuids
+
+                }
+
+            ],
 
             company_code,
 
@@ -64,7 +87,19 @@ function buildDeleteOperations({
 
             operation: OPERATION_TYPE.DELETE,
 
-            rows: voucherGuids,
+            filters: [
+
+                {
+
+                    type: "in",
+
+                    column: "voucher_guid",
+
+                    value: voucherGuids
+
+                }
+
+            ],
 
             company_code,
 
@@ -82,7 +117,19 @@ function buildDeleteOperations({
 
             operation: OPERATION_TYPE.DELETE,
 
-            rows: voucherGuids,
+            filters: [
+
+                {
+
+                    type: "in",
+
+                    column: "voucher_guid",
+
+                    value: voucherGuids
+
+                }
+
+            ],
 
             company_code,
 
@@ -100,7 +147,19 @@ function buildDeleteOperations({
 
             operation: OPERATION_TYPE.DELETE,
 
-            rows: voucherGuids,
+            filters: [
+
+                {
+
+                    type: "in",
+
+                    column: "voucher_guid",
+
+                    value: voucherGuids
+
+                }
+
+            ],
 
             company_code,
 
@@ -147,6 +206,14 @@ function buildSaveOperations({
             operation: OPERATION_TYPE.UPSERT,
 
             rows: voucherRows,
+
+            options: {
+
+                onConflict:
+                    "company_code,tally_owner,guid"
+
+                  },
+
 
             company_code,
 

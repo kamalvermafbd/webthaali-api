@@ -10,6 +10,12 @@ function build({
 
     rows = [],
 
+    values = {},
+
+    filters = [],
+
+    options = {},
+
     company_code,
 
     tally_owner,
@@ -30,6 +36,12 @@ function build({
         operation,
 
         rows,
+
+        values,
+
+        filters,
+
+        options,
 
         total_rows:
             rows.length,

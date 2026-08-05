@@ -82,6 +82,48 @@ const TABLES = {
 
 };
 
+
+const VALIDATION_SELECT_COLUMNS = {
+
+    [TABLES.GROUPS]: "guid,alter_id",
+
+    [TABLES.STOCK_GROUPS]: "guid,alter_id",
+
+    [TABLES.LEDGERS]: "guid,alter_id",
+
+    [TABLES.STOCKS]: "guid,alterid",
+
+    [TABLES.UNITS]: "guid,alterid",
+
+    [TABLES.GODOWNS]: "guid,alterid",
+
+    [TABLES.COST_CENTRES]: "guid,alterid",
+
+    [TABLES.VOUCHERS]: "guid,alterid"
+
+};
+
+
+const ALTER_ID_COLUMN = {
+
+    [TABLES.GROUPS]: "alter_id",
+
+    [TABLES.STOCK_GROUPS]: "alter_id",
+
+    [TABLES.LEDGERS]: "alter_id",
+
+    [TABLES.STOCKS]: "alterid",
+
+    [TABLES.UNITS]: "alterid",
+
+    [TABLES.GODOWNS]: "alterid",
+
+    [TABLES.COST_CENTRES]: "alterid",
+
+    [TABLES.VOUCHERS]: "alterid"
+
+};
+
 // ------------------------------------------------------
 // Batch Status
 // ------------------------------------------------------
@@ -126,7 +168,9 @@ const SNAPSHOT_STATUS = {
 
     PENDING: "PENDING",
 
-    COMPLETED: "COMPLETED"
+    COMPLETED: "COMPLETED",
+
+    DELETED: "DELETED"
 
 };
 
@@ -166,7 +210,6 @@ const RETRY = {
 // ------------------------------------------------------
 // Exports
 // ------------------------------------------------------
-
 module.exports = {
 
     OPERATION_TYPE,
@@ -174,6 +217,10 @@ module.exports = {
     ENTITY_TYPE,
 
     TABLES,
+
+    VALIDATION_SELECT_COLUMNS,
+
+    ALTER_ID_COLUMN,
 
     BATCH_STATUS,
 

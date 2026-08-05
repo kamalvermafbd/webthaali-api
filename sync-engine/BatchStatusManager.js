@@ -1,3 +1,14 @@
+// ======================================
+// TODO (Resume Engine)
+// ======================================
+//
+// 1. Merge payload.connector instead of overwrite.
+// 2. Auto increment retry_count.
+// 3. Add loadBatch() helper for Resume Engine.
+//
+
+
+
 const { createClient } =
     require("@supabase/supabase-js");
 
@@ -218,6 +229,8 @@ class BatchStatusManager {
 
         batch_id,
 
+        module,
+
         processed = 0,
 
         failed = 0
@@ -244,7 +257,9 @@ class BatchStatusManager {
 
                 completed_at:
 
-                    new Date().toISOString()
+                    new Date().toISOString(),
+
+                    last_successful_module: module
 
             }
 
@@ -290,6 +305,10 @@ class BatchStatusManager {
     // Update Connector State
     // ----------------------------------
 
+    // TODO
+// Merge existing payload before update.
+// Do not overwrite payload.connector.
+
     async updateConnectorState({
 
         batch_id,
@@ -304,23 +323,22 @@ class BatchStatusManager {
 
             fields: {
 
-                payload: {
-
-                    connector:
-
-                        connectorState
-
-                }
-
             }
 
         });
 
     }
 
+
+    
     // ----------------------------------
     // Increment Retry Count
     // ----------------------------------
+
+    // TODO
+// Auto increment retry_count from database.
+// Current implementation expects retry_count from caller.
+
 
     async incrementRetry({
 
@@ -371,7 +389,7 @@ class BatchStatusManager {
         });
 
     }
-    
+
 
 }
 

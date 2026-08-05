@@ -1,5 +1,4 @@
-const OperationBuilder =
-    require("./OperationBuilder");
+
 
 class BatchQueue {
 
@@ -15,28 +14,46 @@ class BatchQueue {
 
     enqueue(operation) {
 
-        const builtOperation =
-            OperationBuilder.build(operation);
+    if (!operation) {
 
-        this.queue.push(
-            builtOperation
+        throw new Error(
+
+            "Operation is required"
+
         );
-
-        return builtOperation;
 
     }
 
+    this.queue.push(
+
+        operation
+
+    );
+
+    return operation;
+
+}
     // ----------------------------------
     // Add Multiple Operations
     // ----------------------------------
 
     enqueueMany(operations = []) {
 
-        const builtOperations = [];
+        if (!Array.isArray(operations)) {
+
+            throw new Error(
+
+                "operations must be an array"
+
+            );
+
+        }
+
+        const queuedOperations = [];
 
         for (const operation of operations) {
 
-            builtOperations.push(
+            queuedOperations.push(
 
                 this.enqueue(operation)
 
@@ -44,7 +61,7 @@ class BatchQueue {
 
         }
 
-        return builtOperations;
+        return queuedOperations;
 
     }
 

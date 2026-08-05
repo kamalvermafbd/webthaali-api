@@ -12,16 +12,28 @@ const fs = require("fs");
 const ReconciliationEngine =
     require("../reconciliations/ReconciliationEngine");
 
-
+const VoucherRowBuilder =
+    require("./VoucherRowBuilder");
 
 const {
-    buildVoucherRow,
+    filterRowsByVoucherGuids
+} = require("./VoucherChildRowFilter");
+
+const {
     buildLedgerRows,
     buildInventoryRows,
     buildStockVoucherRows,
     buildBillAllocationRows,
-    buildCostCentreRows,
-} = require("./voucherRowBuilder");
+    buildCostCentreRows
+} = require("./VoucherChildRowBuilder");
+
+const BatchManager =
+    require("../sync-engine/BatchManager");
+
+const {
+    buildVoucherOperations
+} = require("../sync-engine/VoucherOperationBuilder");
+
 
 async function loadLedgerMap({
     company_code,
@@ -1095,10 +1107,35 @@ async function saveVoucherExecutionData({
 
 }) {
 
+    const operations =
+    buildVoucherOperations({
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id,
+
+        voucherGuids,
+
+        voucherRows: rowsToSave,
+
+        ledgerRows,
+
+        inventoryRows,
+
+        stockVoucherRows,
+
+        billAllocationRows,
+
+        costCentreRows
+
+    });
+
     // -------------------------
     // DELETE OLD CHILD RECORDS
     // -------------------------
-
+/*
     await deleteVoucherLedgers({
 
         company_code,
@@ -1139,7 +1176,18 @@ async function saveVoucherExecutionData({
 
     });
 
+*/
 
+const result =
+    await BatchManager.execute({
+
+        operations
+
+    });
+
+return result.success;
+
+/*
     // -------------------------
     // SAVE NEW DATA
     // -------------------------
@@ -1194,7 +1242,7 @@ async function saveVoucherExecutionData({
     });
 
     return success;
-
+*/
 }
 
 /* 02.08.26
@@ -1997,7 +2045,7 @@ switch (integrityResult.action) {
 
 voucherRows.push(
 
-    buildVoucherRow({
+    VoucherRowBuilder.build({
 
         header,
 
@@ -2103,6 +2151,52 @@ fs.appendFileSync(
     }) + "\n"
 );
 
+
+ledgerRows =
+    filterRowsByVoucherGuids({
+
+        voucherGuids,
+
+        rows: ledgerRows
+
+    });
+
+
+inventoryRows =
+    filterRowsByVoucherGuids({
+
+        voucherGuids,
+
+        rows: inventoryRows
+
+    });
+
+stockVoucherRows =
+    filterRowsByVoucherGuids({
+
+        voucherGuids,
+
+        rows: stockVoucherRows
+
+    });
+
+billAllocationRows =
+    filterRowsByVoucherGuids({
+
+        voucherGuids,
+
+        rows: billAllocationRows
+
+    });
+
+costCentreRows =
+    filterRowsByVoucherGuids({
+
+        voucherGuids,
+
+        rows: costCentreRows
+
+    });
 
 success =
     await saveVoucherExecutionData({

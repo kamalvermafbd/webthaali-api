@@ -7,6 +7,8 @@ const {
 
 } = require("./constants");
 
+const DB_CHUNK_SIZE = 500;
+
 const supabase = createClient(
 
     process.env.SUPABASE_URL,
@@ -16,6 +18,68 @@ const supabase = createClient(
 );
 
 class BatchExecutor {
+
+    // ----------------------------------
+// Process Rows In Chunks
+// ----------------------------------
+
+    async processChunks({
+
+        rows,
+
+        callback
+
+    }) {
+
+        if (!Array.isArray(rows)) {
+
+            throw new Error(
+
+                "rows must be an array"
+
+            );
+
+        }
+
+        if (typeof callback !== "function") {
+
+            throw new Error(
+
+                "callback must be a function"
+
+            );
+
+        }
+
+        for (
+
+            let i = 0;
+
+            i < rows.length;
+
+            i += DB_CHUNK_SIZE
+
+        ) {
+
+            const chunk =
+
+                rows.slice(
+
+                    i,
+
+                    i + DB_CHUNK_SIZE
+
+                );
+
+            await callback(
+
+                chunk
+
+            );
+
+        }
+
+    }
 
     async execute(operation) {
 
@@ -87,6 +151,12 @@ class BatchExecutor {
 
         }
 
+        await this.processChunks({
+
+        rows,
+
+        callback: async (chunk) => {
+
         const {
 
             error
@@ -95,7 +165,7 @@ class BatchExecutor {
 
             .from(table)
 
-            .insert(rows);
+            .insert(chunk);
 
         if (error) {
 
@@ -107,7 +177,11 @@ class BatchExecutor {
 
         }
 
-        return true;
+    }
+
+});
+
+return true;
 
     }
 
@@ -133,33 +207,43 @@ class BatchExecutor {
 
         }
 
-        const {
+     await this.processChunks({
 
-            error
+        rows,
 
-        } = await supabase
+        callback: async (chunk) => {
 
-            .from(table)
+            const {
 
-            .upsert(
+                error
 
-                rows,
+            } = await supabase
 
-                options
+                .from(table)
 
-            );
+                .upsert(
 
-        if (error) {
+                    chunk,
 
-            throw new Error(
+                    options
 
-                `UPSERT failed (${table}) : ${error.message}`
+                );
 
-            );
+            if (error) {
+
+                throw new Error(
+
+                    `UPSERT failed (${table}) : ${error.message}`
+
+                );
+
+            }
 
         }
 
-        return true;
+    });
+
+    return true;
 
     }
 
@@ -250,7 +334,7 @@ class BatchExecutor {
     // DELETE
     // ----------------------------------
 
-    async executeDelete(operation) {
+   async executeDelete(operation) {
 
         const {
 
@@ -259,11 +343,6 @@ class BatchExecutor {
             filters = []
 
         } = operation;
-
-        let query =
-            supabase
-                .from(table)
-                .delete();
 
         if (!filters.length) {
 
@@ -274,6 +353,36 @@ class BatchExecutor {
             );
 
         }
+
+        for (const filter of filters) {
+
+            if (
+
+                filter.type === "in"
+
+                &&
+
+                Array.isArray(filter.value)
+
+                &&
+
+                filter.value.length === 0
+
+            ) {
+
+                return true;
+
+            }
+
+        }
+
+        let query =
+
+            supabase
+
+                .from(table)
+
+                .delete();
 
         for (const filter of filters) {
 
@@ -316,6 +425,9 @@ class BatchExecutor {
         return true;
 
     }
+
+
+
 
 }
 

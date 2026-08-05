@@ -1,9 +1,8 @@
-const { createClient } = require("@supabase/supabase-js");
+const BatchManager =
+    require("../sync-engine/BatchManager");
 
-const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY
-);
+const CostCentreRowBuilder =
+    require("./CostCentreRowBuilder");
 
 async function saveCostCentres({
     company_code,
@@ -22,170 +21,85 @@ async function saveCostCentres({
 
     if (!Array.isArray(costCentres) || costCentres.length === 0) {
 
-    return {
+        return {
 
-        total: 0,
+            total: 0,
 
-        success: 0,
+            success: 0,
 
-        failed: 0,
+            failed: 0,
 
-        skipped: true
-
-    };
-
-}
-
-    const now = new Date().toISOString();
-
-    const withGuid = [];
-
-    const withoutGuid = [];
-
-    for (const costCentre of costCentres) {
-
-        const row = {
-
-            company_code,
-            tally_owner,
-
-           guid:
-                costCentre.guid?.trim() || null,
-
-            masterid:
-            (
-                costCentre.masterId
-                ??
-                costCentre.master_id
-                ??
-                costCentre.masterid
-            )?.toString()
-            ||
-            null,
-
-            alterid:
-                costCentre.alterId
-                ??
-                costCentre.alter_id
-                ??
-                costCentre.alterid
-                ??
-                null,
-
-            name:
-                costCentre.name?.trim() || null,
-
-            parent:
-                costCentre.parent?.trim() || null,
-
-            category:
-                costCentre.category?.trim() || null,
-
-            reserved_name:
-            (
-                costCentre.reservedName
-                ??
-                costCentre.reserved_name
-            )?.trim()
-            ||
-            null,
-
-            is_deleted:
-                false,
-
-            last_synced_at:
-                now,
-
-            sync_batch_id,
-
-            updated_at:
-                now
-                
+            skipped: true
 
         };
 
+    }
+
+    const now = new Date().toISOString();
+
+    const rows = [];
+
+    for (const costCentre of costCentres) {
+
+        const row =
+
+        CostCentreRowBuilder.build({
+
+            costCentre,
+
+            company_code,
+
+            tally_owner,
+
+            sync_batch_id,
+
+            now
+
+        });
+
        if (row.guid) {
 
-        withGuid.push(row);
+            rows.push(row);
 
-    }
-    else {
+        } else {
 
-        withoutGuid.push(row);
+            console.warn(
 
-    }
+                `[${company_code}] [${tally_owner}] Skipping Cost Centre "${row.name}" because GUID is missing.`
 
-    }
-
-    let success = 0;
-
-    if (withGuid.length > 0) {
-
-        const { error } = await supabase
-
-            .from("tally_sync_cost_centres")
-
-            .upsert(
-                withGuid,
-                {
-                    onConflict: "company_code,tally_owner,guid"
-                }
-            );
-
-        if (error) {
-
-            throw new Error(
-                "Failed to save cost centres (GUID Upsert): " +
-                error.message
             );
 
         }
 
-        success += withGuid.length;
-
     }
 
-    if (withoutGuid.length > 0) {
+    return await BatchManager.run({
 
-    const { error } = await supabase
+        batch_id:
 
-        .from("tally_sync_cost_centres")
+            sync_batch_id,
 
-        .upsert(
-            withoutGuid,
-            {
-                onConflict:
-                "company_code,tally_owner,name"
-            }
-        );
+        module:
 
-    if (error) {
+            "MASTER",
 
-        throw new Error(
-            "Failed to save Cost Centres (NAME Upsert): "
-            +
-            error.message
-        );
+        entity:
 
-        }
+            "COST_CENTRE",
 
-        success += withoutGuid.length;
+        table:
 
-    }
+            "tally_sync_cost_centres",
 
-    return {
+        company_code,
 
-        total:
-            costCentres.length,
+        tally_owner,
 
-        success,
+        sync_batch_id,
 
-        failed:
-            costCentres.length - success,
+        rows
 
-        sync_batch_id
-
-    };
+    });
 
 }
 

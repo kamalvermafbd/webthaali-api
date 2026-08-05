@@ -1,9 +1,10 @@
-const { createClient } = require("@supabase/supabase-js");
+const LedgerRowBuilder =
+    require("./LedgerRowBuilder");
 
-const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY
-);
+
+const BatchManager =
+    require("../sync-engine/BatchManager");
+
 
 async function saveLedgers({
     company_code,
@@ -11,6 +12,16 @@ async function saveLedgers({
     sync_batch_id,
     ledgers = []
 }) {
+
+    if (!sync_batch_id) {
+
+    throw new Error(
+
+        "sync_batch_id missing in saveLedgers"
+
+    );
+
+}
 
     if (!Array.isArray(ledgers) || ledgers.length === 0) {
 
@@ -22,174 +33,76 @@ async function saveLedgers({
 
     }
 
-    const now = new Date().toISOString();
+const rows = [];
 
-    const withGuid = [];
-   // const withoutGuid = [];
+const now =
 
-    // ===========================
-// LOAD GROUPS FOR LOOKUP
-// ===========================
+    new Date().toISOString();
 
-const { data: groups, error: groupsError } = await supabase
-    .from("tally_sync_groups")
-    .select("name,guid,master_id,alter_id")
-    .eq("company_code", company_code)
-    .eq("tally_owner", tally_owner);
+for (const ledger of ledgers) {
 
-if (groupsError) {
-    throw new Error("Failed to load groups : " + groupsError.message);
-}
+    const row =
 
-const groupMap = {};
+        LedgerRowBuilder.build({
 
-for (const group of groups || []) {
-
-    groupMap[(group.name || "").trim().toUpperCase()] = group;
-
-}
-
-
-    for (const ledger of ledgers) {
-
-        const parentGroup =
-    groupMap[(ledger.parent || "").trim().toUpperCase()];
-
-   if (!parentGroup && ledger.parent) {
-    console.warn(
-        `[${company_code}] Parent group not found for Ledger "${ledger.name}". Parent="${ledger.parent}"`
-    );
-}
-
-        const row = {
+            ledger,
 
             company_code,
+
             tally_owner,
 
-            guid: ledger.guid?.trim() || null,
-            alter_id: ledger.alterId ?? null,
-            master_id: ledger.masterId?.toString() || null,
-
-            name: ledger.name?.trim(),
-            parent: ledger.parent?.trim() || null,
-
-            parent_group_guid:
-                parentGroup?.guid || null,
-
-            parent_group_master_id:
-                parentGroup?.master_id || null,
-
-            parent_group_alter_id:
-                parentGroup?.alter_id || null,
-
-            root_group:
-                parentGroup?.root_group || null,
-                
-            reserved_name: ledger.reservedName?.trim() || null,
-
-            gst_applicable: ledger.gstApplicable?.trim() || null,
-            gst_registration_type: ledger.gstRegistrationType?.trim() || null,
-            gstin: ledger.gstin?.trim() || null,
-
-            mailing_name: ledger.mailingName?.trim() || null,
-            address: ledger.address?.trim() || null,
-            state_name: ledger.stateName?.trim() || null,
-            country: ledger.country?.trim() || null,
-            pin_code: ledger.pinCode?.trim() || null,
-
-            phone: ledger.phone?.trim() || null,
-            email: ledger.email?.trim() || null,
-            contact_person: ledger.contactPerson?.trim() || null,
-
-            opening_balance: ledger.openingBalanceAmount ?? 0,
-            opening_balance_type: ledger.openingBalanceType ?? null,
-
-            is_bill_wise: ledger.isBillWise ?? null,
-            is_revenue: ledger.isRevenue ?? null,
-            is_deemed_positive: ledger.isDeemedPositive ?? null,
-
-            gst_duty_type: ledger.gstDutyType?.trim() || null,
-
-            gst_tax_type: ledger.gstTaxType?.trim() || null,
-
-            gst_rate: ledger.gstRate ?? null,
-          //  root_group: ledger.rootGroup?.trim() || null,
-
-          tax_percentage_of_calculation: ledger.gstRate ?? null,
-
-            is_deleted: false,
-
-
-
-            last_synced_at: now,
             sync_batch_id,
 
-            updated_at: now
+            now
 
-        };
+        });
 
-        if (row.guid) {
+    if (row.guid) {
 
-            withGuid.push(row);
+        rows.push(row);
 
-      } else {
+    } else {
 
- console.warn(
-    `[${company_code}] [${tally_owner}] Skipping Ledger "${row.name}" because GUID is missing.`
-);
+        console.warn(
 
-}
+            `[${company_code}] [${tally_owner}] Skipping Ledger "${row.name}" because GUID is missing.`
 
-    }
-
-
-   
-
-    let success = 0;
-
-    // ===========================
-    // GUID BASED UPSERT
-    // ===========================
-
-    if (withGuid.length > 0) {
-
-        const { error } = await supabase
-
-            .from("tally_sync_ledgers")
-
-            .upsert(
-                withGuid,
-                {
-                    onConflict: "company_code,tally_owner,guid"
-                }
-            );
-
-        if (error) {
-
-            throw new Error(
-                "Failed to save ledgers (GUID Upsert): " +
-                error.message
-            );
-
-        }
-
-        success += withGuid.length;
+        );
 
     }
 
-    
+}
 
-    return {
+return await BatchManager.run({
 
-        total: ledgers.length,
+    batch_id:
 
-        success,
+        sync_batch_id,
 
-        failed: ledgers.length - success
+    module:
 
-    };
+        "MASTER",
+
+    entity:
+
+        "LEDGER",
+
+    table:
+
+        "tally_sync_ledgers",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows
+
+});
 
 }
+
 
 module.exports = {
 

@@ -113,13 +113,21 @@ const { saveStocks } = require("./services/saveStocks");
 const {
     saveSyncSnapshotChunk
 } = require("./services/sync/SyncSnapshotService");
+
+/*
 const {
   reconcileMasters
 } = require("./services/masters/MasterReconciliationService");
+*/
 
+const ReconciliationManager =
+    require("./sync-engine/ReconciliationManager");
+/*
 const {
   applyMasterActions
 } = require("./services/masters/MasterActionService");
+*/
+
 
 const {
     getResumePoint
@@ -34665,7 +34673,7 @@ app.get("/getMasters", async (req, res) => {
 
     }
 
-    // =========================
+// =========================
 // LAST ALTER ID
 // =========================
 
@@ -34802,8 +34810,6 @@ if (runningBatch) {
 
 }
 
-
-
 else {
 
     sync_batch_id = crypto.randomUUID();
@@ -34915,6 +34921,7 @@ const result = await sendChunkedToConnector(
     }
 );
 
+/*
 await updateMasterStatus({
 
     sync_batch_id,
@@ -34929,6 +34936,7 @@ console.log(
   "Masters received. Vouchers:",
   result.vouchers?.length || 0
 );
+*/
 
 if (!result.success) {
 
@@ -35262,6 +35270,7 @@ if (
     resumePoint === "GROUP"
 ) {
 
+  /*
 await updateMasterStatus({
 
     sync_batch_id,
@@ -35271,6 +35280,7 @@ await updateMasterStatus({
     action:"PROCESSING"
 
 });
+*/
 
 syncDebug({
 
@@ -35284,6 +35294,7 @@ syncDebug({
 // =========================
 // SAVE GROUPS
 // =========================
+/*
 groupResult = await saveGroups({
 
     company_code,
@@ -35295,7 +35306,27 @@ groupResult = await saveGroups({
     groups: result.groups || []
 
 });
+*/
 
+groupResult = await BatchManager.run({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTER",
+
+    entity: "GROUP",
+
+    table: "tally_sync_groups",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows: result.groups || []
+
+});
 
 console.log(
     "GROUP SAVE :",
@@ -35306,12 +35337,15 @@ console.log(
 // =========================
 // GROUP RECONCILIATION
 // =========================
+/*
 groupReconciliation =
-    await reconcileMasters({
+    await ReconciliationManager.reconcile({
 
         table: "tally_sync_groups",
 
-        entity_type:"GROUP",
+        module: "MASTER",
+
+        entity_type: "GROUP",
 
         company_code,
 
@@ -35326,13 +35360,22 @@ console.log(
     "GROUP RECONCILIATION :",
     groupReconciliation
 );
+*/
+
+groupReconciliation =
+    groupResult.reconciliation;
+
+console.log(
+    "GROUP RECONCILIATION :",
+    groupReconciliation
+);
 
 // =========================
 // GROUP ACTIONS
 // =========================
-
-groupActionResult =
-await applyMasterActions({
+/*
+  groupActionResult =
+  await applyMasterActions({
 
     table:"tally_sync_groups",
 
@@ -35364,6 +35407,8 @@ await updateMasterStatus({
 
 });
 
+*/
+
 syncDebug({
 
     stage:"GROUP_COMPLETED",
@@ -35379,6 +35424,8 @@ if (
     resumePoint === "GROUP" ||
     resumePoint === "STOCK_GROUP"
 ) {
+
+  /*
 await updateMasterStatus({
 
     sync_batch_id,
@@ -35389,6 +35436,8 @@ await updateMasterStatus({
 
 });
 
+*/
+
 masterFlowDebug({
     stage:"STOCK_GROUP_PROCESSING",
     sync_batch_id
@@ -35398,6 +35447,7 @@ masterFlowDebug({
 // SAVE STOCK GROUPS
 // =========================
 
+/*
 stockGroupResult = await saveStockGroups({
 
     company_code,
@@ -35410,6 +35460,27 @@ stockGroupResult = await saveStockGroups({
         result.stockGroups || []
 
 });
+*/
+
+stockGroupResult = await BatchManager.run({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTER",
+
+    entity: "STOCK_GROUP",
+
+    table: "tally_sync_stock_groups",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows: result.stockGroups || []
+
+});
 
 
 console.log(
@@ -35420,7 +35491,7 @@ console.log(
 // =========================
 // STOCK GROUP RECONCILIATION
 // =========================
-
+/*
 stockGroupReconciliation =
     await reconcileMasters({
 
@@ -35435,6 +35506,11 @@ stockGroupReconciliation =
         sync_batch_id
 
     });
+*/
+
+stockGroupReconciliation =
+    stockGroupResult.reconciliation;
+
 
 console.log(
     "STOCK GROUP RECONCILIATION :",
@@ -35445,7 +35521,7 @@ console.log(
 // =========================
 // STOCK GROUP ACTIONS
 // =========================
-
+/*
 stockGroupActionResult =
     await applyMasterActions({
 
@@ -35476,6 +35552,7 @@ await updateMasterStatus({
     action:"COMPLETED"
 
 });
+*/
 
 masterFlowDebug({
     stage:"STOCK_GROUP_COMPLETED",
@@ -35491,6 +35568,7 @@ if (
     resumePoint === "LEDGER"
 ) {
 
+  /* 05.08.26
 await updateMasterStatus({
 
     sync_batch_id,
@@ -35500,6 +35578,7 @@ await updateMasterStatus({
     action:"PROCESSING"
 
 });
+*/
 
 masterFlowDebug({
     stage:"LEDGER_PROCESSING",
@@ -35509,22 +35588,62 @@ masterFlowDebug({
 // =========================
 // SAVE LEDGERS
 // =========================
-
+/*
 ledgerResult = await saveLedgers({
   company_code,
   tally_owner,
    sync_batch_id,
   ledgers: result.ledgers || []
 });
+*/
+
+ledgerResult = await BatchManager.run({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTER",
+
+    entity: "LEDGER",
+
+    table: "tally_sync_ledgers",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows: result.ledgers || []
+
+});
+
 
 console.log("LEDGER SAVE :", ledgerResult);
+
 
 // =========================
 // LEDGER RECONCILIATION
 // =========================
-
+/*
 ledgerReconciliation =
-    await reconcileMasters({
+  await ReconciliationManager.reconcile({
+
+      table:"tally_sync_ledgers",
+
+      module:"MASTER",
+
+      entity_type:"LEDGER",
+
+      company_code,
+
+      tally_owner,
+
+      sync_batch_id
+
+  });
+
+ 
+ await reconcileMasters({
 
         table: "tally_sync_ledgers",
 
@@ -35537,6 +35656,11 @@ ledgerReconciliation =
         sync_batch_id
 
     });
+    */
+
+ledgerReconciliation =
+    ledgerResult.reconciliation;
+
 
 console.log(
     "LEDGER RECONCILIATION :",
@@ -35547,7 +35671,7 @@ console.log(
 // =========================
 // LEDGER ACTIONS
 // =========================
-
+/*
 ledgerActionResult =
     await applyMasterActions({
 
@@ -35569,6 +35693,7 @@ console.log(
     ledgerActionResult
 );
 
+
 await updateMasterStatus({
 
     sync_batch_id,
@@ -35578,6 +35703,7 @@ await updateMasterStatus({
     action:"COMPLETED"
 
 });
+*/
 
 masterFlowDebug({
     stage:"LEDGER_COMPLETED",
@@ -35626,6 +35752,24 @@ if(ledgerReconciliation?.missingGuids?.length){
     });
 
     const ledgerReconciliationAfterMissing =
+
+      await ReconciliationManager.reconcile({
+
+          table:"tally_sync_ledgers",
+
+          module:"MASTER",
+
+          entity_type:"LEDGER",
+
+          company_code,
+
+          tally_owner,
+
+          sync_batch_id
+
+      });
+
+/*
     await reconcileMasters({
 
         table:"tally_sync_ledgers",
@@ -35639,8 +35783,8 @@ if(ledgerReconciliation?.missingGuids?.length){
         sync_batch_id
 
     });
-
-
+*/
+/*
 await applyMasterActions({
 
     table:"tally_sync_ledgers",
@@ -35655,7 +35799,7 @@ await applyMasterActions({
         ledgerReconciliationAfterMissing
 
 });
-
+*/
 }
 }
 
@@ -35672,7 +35816,9 @@ if (
     resumePoint === "LEDGER" ||
     resumePoint === "GODOWN"
 ) {
-await updateMasterStatus({
+/* 05.08.26
+
+  await updateMasterStatus({
 
     sync_batch_id,
 
@@ -35681,6 +35827,7 @@ await updateMasterStatus({
     action:"PROCESSING"
 
 });
+*/
 
 masterFlowDebug({
     stage:"GODOWN_PROCESSING",
@@ -35689,13 +35836,35 @@ masterFlowDebug({
 // =========================
 // SAVE GODOWNS
 // =========================
-
+/*
 godownResult = await saveGodowns({
   company_code,
   tally_owner,
    sync_batch_id,
   godowns: result.godowns || []
 });
+*/
+godownResult = await BatchManager.run({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTER",
+
+    entity: "GODOWN",
+
+    table: "tally_sync_godowns",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows: result.godowns || []
+
+});
+
+
 
 console.log("GODOWN SAVE :", godownResult);
 
@@ -35703,8 +35872,26 @@ console.log("GODOWN SAVE :", godownResult);
 // =========================
 // GODOWN RECONCILIATION
 // =========================
-
+/*
 godownReconciliation =
+
+    await ReconciliationManager.reconcile({
+
+        table:"tally_sync_godowns",
+
+        module:"MASTER",
+
+        entity_type:"GODOWN",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+
+
     await reconcileMasters({
 
         table: "tally_sync_godowns",
@@ -35719,6 +35906,11 @@ godownReconciliation =
 
     });
 
+    */
+
+godownReconciliation =
+    godownResult.reconciliation;
+
 console.log(
     "GODOWN RECONCILIATION :",
     godownReconciliation
@@ -35728,7 +35920,7 @@ console.log(
 // =========================
 // GODOWN ACTIONS
 // =========================
-
+/*
 godownActionResult =
     await applyMasterActions({
 
@@ -35760,6 +35952,9 @@ await updateMasterStatus({
 
 });
 
+*/
+
+
 masterFlowDebug({
     stage:"GODOWN_COMPLETED",
     sync_batch_id
@@ -35776,7 +35971,9 @@ if (
     resumePoint === "GODOWN" ||
     resumePoint === "UNIT"
 ) {
-await updateMasterStatus({
+
+/* 05.08.26
+  await updateMasterStatus({
 
     sync_batch_id,
 
@@ -35785,6 +35982,7 @@ await updateMasterStatus({
     action:"PROCESSING"
 
 });
+*/
 
 masterFlowDebug({
     stage:"UNIT_PROCESSING",
@@ -35794,12 +35992,33 @@ masterFlowDebug({
 // =========================
 // SAVE UNITS
 // =========================
-
+/*
 unitResult = await saveUnits({
     company_code,
     tally_owner,
      sync_batch_id,
     units: result.units || []
+});
+*/
+
+unitResult = await BatchManager.run({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTER",
+
+    entity: "UNIT",
+
+    table: "tally_sync_units",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows: result.units || []
+
 });
 
 console.log("UNIT SAVE :", unitResult);
@@ -35808,8 +36027,26 @@ console.log("UNIT SAVE :", unitResult);
 // =========================
 // UNIT RECONCILIATION
 // =========================
-
+/*
 unitReconciliation =
+
+      await ReconciliationManager.reconcile({
+
+        table:"tally_sync_units",
+
+        module:"MASTER",
+
+        entity_type:"UNIT",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+
+
     await reconcileMasters({
 
         table: "tally_sync_units",
@@ -35823,6 +36060,12 @@ unitReconciliation =
         sync_batch_id
 
     });
+*/
+
+unitReconciliation =
+    unitResult.reconciliation;
+
+
 
 console.log(
     "UNIT RECONCILIATION :",
@@ -35833,7 +36076,7 @@ console.log(
 // =========================
 // UNIT ACTIONS
 // =========================
-
+/*
 unitActionResult =
     await applyMasterActions({
 
@@ -35864,6 +36107,7 @@ await updateMasterStatus({
     action:"COMPLETED"
 
 });
+*/
 
 masterFlowDebug({
     stage:"UNIT_COMPLETED",
@@ -35882,6 +36126,7 @@ if (
     resumePoint === "COST_CENTRE"
 ) {
 
+  /*
 await updateMasterStatus({
 
     sync_batch_id,
@@ -35891,6 +36136,7 @@ await updateMasterStatus({
     action:"PROCESSING"
 
 });
+*/
 
 masterFlowDebug({
     stage:"COST_CENTRE_PROCESSING",
@@ -35900,12 +36146,33 @@ masterFlowDebug({
 // =========================
 // SAVE COST CENTRES
 // =========================
-
+/*
 costCentreResult = await saveCostCentres({
   company_code,
   tally_owner,
    sync_batch_id,
   costCentres: result.costCentres || []
+});
+*/
+
+costCentreResult = await BatchManager.run({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTER",
+
+    entity: "COST_CENTRE",
+
+    table: "tally_sync_cost_centres",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows: result.costCentres || []
+
 });
 
 console.log("COST CENTRE SAVE :", costCentreResult);
@@ -35913,8 +36180,25 @@ console.log("COST CENTRE SAVE :", costCentreResult);
 // =========================
 // COST CENTRE RECONCILIATION
 // =========================
-
+/*
 costCentreReconciliation =
+
+    await ReconciliationManager.reconcile({
+
+      table:"tally_sync_cost_centres",
+
+      module:"MASTER",
+
+      entity_type:"COST_CENTRE",
+
+      company_code,
+
+      tally_owner,
+
+      sync_batch_id
+
+  });
+
     await reconcileMasters({
 
         table: "tally_sync_cost_centres",
@@ -35928,6 +36212,9 @@ costCentreReconciliation =
         sync_batch_id
 
     });
+*/
+costCentreReconciliation =
+    costCentreResult.reconciliation;
 
 console.log(
     "COST CENTRE RECONCILIATION :",
@@ -35938,7 +36225,7 @@ console.log(
 // =========================
 // COST CENTRE ACTIONS
 // =========================
-
+/*
 costCentreActionResult =
     await applyMasterActions({
 
@@ -35960,7 +36247,6 @@ console.log(
     costCentreActionResult
 );
 
-
 await updateMasterStatus({
 
     sync_batch_id,
@@ -35970,12 +36256,12 @@ await updateMasterStatus({
     action:"COMPLETED"
 
 });
+*/
 
 masterFlowDebug({
     stage:"COST_CENTRE_COMPLETED",
     sync_batch_id
 });
-
 
 }
 
@@ -35990,6 +36276,8 @@ if (
     resumePoint === "COST_CENTRE" ||
     resumePoint === "STOCK"
 ) {
+
+  /*
 await updateMasterStatus({
 
     sync_batch_id,
@@ -35999,6 +36287,7 @@ await updateMasterStatus({
     action:"PROCESSING"
 
 });
+*/
 
 masterFlowDebug({
     stage:"STOCK_PROCESSING",
@@ -36007,17 +36296,57 @@ masterFlowDebug({
 // =========================
 // SAVE STOCKS
 // =========================
-
+/*
 stockResult = await saveStocks({
     company_code,
     tally_owner,
      sync_batch_id,
     stocks: result.stocks || []
 });
+*/
+stockResult = await BatchManager.run({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTER",
+
+    entity: "STOCK",
+
+    table: "tally_sync_stocks",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows: result.stocks || []
+
+});
+
 
 console.log("STOCK SAVE :", stockResult);
 
+/*
 stockReconciliation =
+
+  await ReconciliationManager.reconcile({
+
+      table:"tally_sync_stocks",
+
+      module:"MASTER",
+
+      entity_type:"STOCK",
+
+      company_code,
+
+      tally_owner,
+
+      sync_batch_id
+
+  });
+
+
     await reconcileMasters({
 
         table: "tally_sync_stocks",
@@ -36031,12 +36360,18 @@ stockReconciliation =
         sync_batch_id
 
     });
+*/
+
+stockReconciliation =
+    stockResult.reconciliation;
+
 
 console.log(
     "STOCK RECONCILIATION :",
     stockReconciliation
 );
 
+/*
 stockActionResult =
     await applyMasterActions({
 
@@ -36067,6 +36402,9 @@ await updateMasterStatus({
     action:"COMPLETED"
 
 });
+
+*/
+
 masterFlowDebug({
 
     stage:"STOCK_COMPLETED",
@@ -36108,9 +36446,11 @@ if(stockReconciliation?.missingGuids?.length){
     });
 
     const stockReconciliationAfterMissing =
-    await reconcileMasters({
+     await ReconciliationManager.reconcile({
 
         table:"tally_sync_stocks",
+
+        module:"MASTER",
 
         entity_type:"STOCK",
 
@@ -36122,7 +36462,7 @@ if(stockReconciliation?.missingGuids?.length){
 
     });
 
-
+/*
 await applyMasterActions({
 
     table:"tally_sync_stocks",
@@ -36137,6 +36477,7 @@ await applyMasterActions({
         stockReconciliationAfterMissing
 
 });
+*/
 
 }
 }
@@ -36312,28 +36653,28 @@ return res.json({
 db: {
     groups: groupResult,
     groupReconciliation: groupReconciliation,
-    groupAction: groupActionResult,
+   // groupAction: groupActionResult,
     ledgers: ledgerResult,
     
     godowns: godownResult,
     godownReconciliation: godownReconciliation,
-    godownAction: godownActionResult,
+  //  godownAction: godownActionResult,
 
      stockGroups: stockGroupResult,
     stockGroupReconciliation: stockGroupReconciliation,
-    stockGroupAction: stockGroupActionResult,
+   // stockGroupAction: stockGroupActionResult,
 
 
     stocks: stockResult,
     stockReconciliation: stockReconciliation,
-    stockAction: stockActionResult,
+    //stockAction: stockActionResult,
     costCentres: costCentreResult,
     costCentreReconciliation: costCentreReconciliation,
-    costCentreAction: costCentreActionResult,
+    //costCentreAction: costCentreActionResult,
 
     units: unitResult,
     unitReconciliation: unitReconciliation,
-    unitAction: unitActionResult,
+    //unitAction: unitActionResult,
     
     vouchers: voucherResult,
 

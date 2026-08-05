@@ -1,9 +1,8 @@
-const { createClient } = require("@supabase/supabase-js");
+const GroupRowBuilder =
+    require("./GroupRowBuilder");
 
-const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY
-);
+const BatchManager =
+    require("../sync-engine/BatchManager");
 
 console.log("✅ saveGroups.js LOADED");
 
@@ -56,265 +55,60 @@ async function saveGroups({
     }
 
 
+    const rows = [];
 
-    const now =
-        new Date().toISOString();
+        for (const group of groups) {
 
+            rows.push(
 
+                GroupRowBuilder.build({
 
-    const withGuid = [];
+                    company_code,
 
-    const withoutGuid = [];
+                    tally_owner,
 
+                    sync_batch_id,
 
+                    group
 
-    for (const group of groups) {
+                })
 
+            );
 
-        const row = {
-
-
-            company_code,
-
-            tally_owner,
-
-
-            guid:
-                group.guid?.trim() || null,
+        }
 
 
-            alter_id:
-                group.alterId ?? null,
+    const result =
 
+    await BatchManager.run({
 
-            master_id:
-                group.masterId?.toString() || null,
-
-
-
-            name:
-                group.name?.trim(),
-
-
-            parent:
-                group.parent?.trim() || null,
-
-
-            reserved_name:
-                group.reservedName?.trim() || null,
-
-
-
-            parent_guid:
-                group.parentGuid?.trim() || null,
-
-
-            parent_master_id:
-                group.parentMasterId?.toString() || null,
-
-
-            parent_alter_id:
-                group.parentAlterId ?? null,
-
-
-
-            is_subledger:
-                group.isSubledger ?? false,
-
-
-            is_billwise_on:
-                group.isBillwiseOn ?? false,
-
-
-            track_negative_balances:
-                group.trackNegativeBalances ?? false,
-
-
-            is_condensed:
-                group.isCondensed ?? false,
-
-
-
-            is_revenue:
-                group.isRevenue ?? null,
-
-
-            is_deemed_positive:
-                group.isDeemedPositive ?? null,
-
-
-
-            is_deleted:false,
-
-
-            created_at:
-                now,
-
-
-            last_synced_at:
-                now,
-
+        batch_id:
 
             sync_batch_id,
 
+        module:
 
-            updated_at:
-                now
+            "MASTER",
 
-        };
+        entity:
 
+            "GROUP",
 
+        table:
 
-        if (row.guid) {
+            "tally_sync_groups",
 
-            withGuid.push(row);
+        company_code,
 
-        }
-        else {
+        tally_owner,
 
-            withoutGuid.push(row);
+        sync_batch_id,
 
-        }
+        rows
 
-    }
-
-
-
-    let success = 0;
-
-
-
-    // =========================
-    // GUID UPSERT
-    // =========================
-
-    if (withGuid.length > 0) {
-
-console.log("Saving GUID groups:", withGuid.length);
-        const {
-
-            error
-
-        } = await supabase
-
-
-        .from(
-            "tally_sync_groups"
-        )
-
-
-        .upsert(
-
-            withGuid,
-
-            {
-
-                onConflict:
-                "company_code,tally_owner,guid"
-
-            }
-
-        );
-
-console.log("GUID UPSERT ERROR:", error);
-
-        if (error) {
-
-            throw new Error(
-
-                "Groups GUID save failed : "
-                +
-                error.message
-
-            );
-
-        }
-
-
-
-        success += withGuid.length;
-
-    }
-
-
-
-
-    // =========================
-    // NAME FALLBACK
-    // =========================
-
-    if (withoutGuid.length > 0) {
-
-console.log("Saving NAME groups:", withoutGuid.length);
-        const {
-
-            error
-
-        } = await supabase
-
-
-        .from(
-            "tally_sync_groups"
-        )
-
-
-        .upsert(
-
-            withoutGuid,
-
-            {
-
-                onConflict:
-                "company_code,tally_owner,name"
-
-            }
-
-        );
-
-console.log("NAME UPSERT ERROR:", error);
-
-        if (error) {
-
-
-            throw new Error(
-
-                "Groups NAME save failed : "
-                +
-                error.message
-
-            );
-
-
-        }
-
-
-
-        success += withoutGuid.length;
-
-
-    }
-
-
-
-
-    return {
-
-
-        total:
-            groups.length,
-
-
-        success,
-
-
-        failed:
-            groups.length - success,
-
-
-        sync_batch_id
-
-
-    };
+    });
+  
+   return result;
 
 
 }
