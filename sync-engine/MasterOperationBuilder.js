@@ -239,7 +239,13 @@ function buildMasterOperation({
 
         rows,
 
-        options,
+        options:
+        Object.keys(options).length
+            ? options
+            : {
+                onConflict:
+                    CONFLICT_KEYS[table]
+            },
 
         company_code,
 
@@ -285,7 +291,13 @@ function buildOperation({
 
             rows,
 
-            options
+            options:
+                Object.keys(options).length
+                    ? options
+                    : {
+                        onConflict:
+                            CONFLICT_KEYS[table]
+                    }
 
         })
 

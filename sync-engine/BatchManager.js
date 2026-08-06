@@ -338,17 +338,59 @@ const {
 
             });
 
-            return {
+          return {
+
+            success: true,
+
+            message:
+
+                "No changes detected",
+
+            validation,
+
+            execution: {
 
                 success: true,
 
-                message:
+                successCount: 0,
 
-                    "No changes detected",
+                failedCount: 0,
 
-                validation
+                failedOperations: []
 
-            };
+            },
+
+            retryResult: {
+
+                success: true,
+
+                retried: 0
+
+            },
+
+            reconciliation: {
+
+                success: true,
+
+                missingGuids: [],
+
+                extraGuids: [],
+
+                alterChanged: [],
+
+                summary: {
+
+                    missing: 0,
+
+                    extra: 0,
+
+                    alterChanged: 0
+
+                }
+
+            }
+
+        };
 
         }
 

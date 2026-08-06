@@ -312,23 +312,11 @@ if (rows.length === 0) {
 
             if (incomingValue > dbValue) {
 
-                changedRows.push({
+            changedRows.push(row);
 
-                    ...row,
+            continue;
 
-                    oldAlterId:
-
-                        dbValue,
-
-                    newAlterId:
-
-                        incomingValue
-
-                });
-
-                continue;
-
-            }
+        }
 
             unchangedRows.push(row);
 
