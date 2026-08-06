@@ -21,15 +21,11 @@ class GroupRowBuilder {
 
         sync_batch_id,
 
-        group,
-
-        now
+        group
 
     }) {
 
-        const timestamp =
-
-            now ||
+        const now =
 
             new Date().toISOString();
 
@@ -86,9 +82,14 @@ class GroupRowBuilder {
 
             is_deleted: false,
 
-            created_at: timestamp,
-            updated_at: timestamp,
-            last_synced_at: timestamp,
+            created_at:
+                now,
+
+            updated_at:
+                now,
+
+            last_synced_at:
+                now,
 
             sync_batch_id
 

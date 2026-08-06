@@ -1,6 +1,3 @@
-const LedgerRowBuilder =
-    require("./LedgerRowBuilder");
-
 
 const BatchManager =
     require("../sync-engine/BatchManager");
@@ -33,45 +30,7 @@ async function saveLedgers({
 
     }
 
-const rows = [];
 
-const now =
-
-    new Date().toISOString();
-
-for (const ledger of ledgers) {
-
-    const row =
-
-        LedgerRowBuilder.build({
-
-            ledger,
-
-            company_code,
-
-            tally_owner,
-
-            sync_batch_id,
-
-            now
-
-        });
-
-    if (row.guid) {
-
-        rows.push(row);
-
-    } else {
-
-        console.warn(
-
-            `[${company_code}] [${tally_owner}] Skipping Ledger "${row.name}" because GUID is missing.`
-
-        );
-
-    }
-
-}
 
 return await BatchManager.run({
 
@@ -79,17 +38,9 @@ return await BatchManager.run({
 
         sync_batch_id,
 
-    module:
-
-        "MASTER",
-
     entity:
 
         "LEDGER",
-
-    table:
-
-        "tally_sync_ledgers",
 
     company_code,
 
@@ -97,7 +48,7 @@ return await BatchManager.run({
 
     sync_batch_id,
 
-    rows
+    rows: ledgers
 
 });
 

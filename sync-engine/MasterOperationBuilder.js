@@ -6,7 +6,9 @@ const {
 
     OPERATION_TYPE,
 
-    ALTER_ID_COLUMN
+    ALTER_ID_COLUMN,
+
+    CONFLICT_KEYS
 
 } = require("./constants");
 
@@ -18,28 +20,23 @@ function buildGroupOperation({
     options = {}
 }) {
 
-    return {
+    return buildMasterOperation({
 
-      entity:
-            ENTITY_TYPE.GROUP,
+        entity: ENTITY_TYPE.GROUP,
 
-        table:
-            TABLES.GROUPS,
-
-        operation:
-            OPERATION_TYPE.UPSERT,
-
-        rows,
-
-        options,
+        table: TABLES.GROUPS,
 
         company_code,
 
         tally_owner,
 
-        sync_batch_id
+        sync_batch_id,
 
-    };
+        rows,
+
+        options
+
+    });
 }
 
 function buildStockGroupOperation({
@@ -50,28 +47,23 @@ function buildStockGroupOperation({
      options = {}
 }) {
 
-    return {
+    return buildMasterOperation({
 
-        entity:
-            ENTITY_TYPE.STOCK_GROUP,
+        entity: ENTITY_TYPE.STOCK_GROUP,
 
-        table:
-            TABLES.STOCK_GROUPS,
-
-        operation:
-            OPERATION_TYPE.UPSERT,
-
-        rows,
-
-        options,
+        table: TABLES.STOCK_GROUPS,
 
         company_code,
 
         tally_owner,
 
-        sync_batch_id
+        sync_batch_id,
 
-    };
+        rows,
+
+        options
+
+    });
 
 }
 
@@ -84,40 +76,28 @@ function buildLedgerOperation({
 }) {
 
         
-    return {
+    return buildMasterOperation({
 
-        entity:
-                ENTITY_TYPE.LEDGER,
+        entity: ENTITY_TYPE.LEDGER,
 
-        table:
-                TABLES.LEDGERS,
-
-        operation:
-                OPERATION_TYPE.UPSERT,
-
-        rows,
-
-
-        options:
-        Object.keys(options).length
-
-            ? options
-
-            : {
-
-                onConflict:
-
-                    "company_code,tally_owner,guid"
-
-            },
+        table: TABLES.LEDGERS,
 
         company_code,
 
         tally_owner,
 
-        sync_batch_id
+        sync_batch_id,
 
-    };
+        rows,
+
+        options:
+            Object.keys(options).length
+                ? options
+                : {
+                    onConflict: CONFLICT_KEYS[TABLES.LEDGERS]
+                }
+
+    });
 
 }
 
@@ -128,28 +108,23 @@ function buildStockOperation({
     rows,
      options = {}
 }) {
-        return {
+        return buildMasterOperation({
 
-            entity:
-                ENTITY_TYPE.STOCK,
+            entity: ENTITY_TYPE.STOCK,
 
-            table:
-                TABLES.STOCKS,
-
-            operation:
-                OPERATION_TYPE.UPSERT,
-
-            rows,
-
-            options,
+            table: TABLES.STOCKS,
 
             company_code,
 
             tally_owner,
 
-            sync_batch_id
+            sync_batch_id,
 
-        };
+            rows,
+
+            options
+
+        });
 
 }
 
@@ -161,29 +136,23 @@ function buildUnitOperation({
      options = {}
 }) {
 
-        return {
+      return buildMasterOperation({
 
-            entity:
-                ENTITY_TYPE.UNIT,
+            entity: ENTITY_TYPE.UNIT,
 
-            table:
-                TABLES.UNITS,
-
-            operation:
-                OPERATION_TYPE.UPSERT,
-
-            rows,
-
-            options,
+            table: TABLES.UNITS,
 
             company_code,
 
             tally_owner,
 
-            sync_batch_id
+            sync_batch_id,
 
-        };
+            rows,
 
+            options
+
+        });
 }
 
 function buildGodownOperation({
@@ -194,16 +163,79 @@ function buildGodownOperation({
     options = {}
 }) {
 
+    return buildMasterOperation({
+
+            entity: ENTITY_TYPE.GODOWN,
+
+            table: TABLES.GODOWNS,
+
+            company_code,
+
+            tally_owner,
+
+            sync_batch_id,
+
+            rows,
+
+            options
+
+        });
+
+}
+
+function buildCostCentreOperation({
+    company_code,
+    tally_owner,
+    sync_batch_id,
+    rows,
+    options = {}
+}) {
+
+        return buildMasterOperation({
+
+            entity: ENTITY_TYPE.COST_CENTRE,
+
+            table: TABLES.COST_CENTRES,
+
+            company_code,
+
+            tally_owner,
+
+            sync_batch_id,
+
+            rows,
+
+            options
+
+        });
+
+}
+
+function buildMasterOperation({
+
+    entity,
+
+    table,
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows,
+
+    options = {}
+
+}) {
+
     return {
 
-        entity:
-            ENTITY_TYPE.GODOWN,
+        entity,
 
-        table:
-            TABLES.GODOWNS,
+        table,
 
-        operation:
-            OPERATION_TYPE.UPSERT,
+        operation: OPERATION_TYPE.UPSERT,
 
         rows,
 
@@ -219,38 +251,48 @@ function buildGodownOperation({
 
 }
 
-function buildCostCentreOperation({
+function buildOperation({
+
+    entity,
+
+    table,
+
     company_code,
+
     tally_owner,
+
     sync_batch_id,
+
     rows,
+
     options = {}
+
 }) {
 
-        return {
+    return [
 
-              entity:
-                ENTITY_TYPE.COST_CENTRE,
+        buildMasterOperation({
 
-            table:
-                TABLES.COST_CENTRES,
+            entity,
 
-            operation:
-                OPERATION_TYPE.UPSERT,
-
-            rows,
-
-            options,
+            table,
 
             company_code,
 
             tally_owner,
 
-            sync_batch_id
+            sync_batch_id,
 
-        };
+            rows,
+
+            options
+
+        })
+
+    ];
 
 }
+
 
 function buildAlterUpdateOperations({
 
@@ -427,8 +469,11 @@ function buildSoftDeleteOperations({
 
 }
 
-
 module.exports = {
+
+    buildOperation,
+
+    buildMasterOperation,
 
     buildGroupOperation,
 

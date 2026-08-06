@@ -121,12 +121,13 @@ class BatchQueue {
     // Clear Queue
     // ----------------------------------
 
-    clear() {
+   clear() {
 
         this.queue = [];
 
-    }
+        return true;
 
+    }
     // ----------------------------------
     // Get All Operations
     // ----------------------------------

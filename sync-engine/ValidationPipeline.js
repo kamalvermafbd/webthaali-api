@@ -237,13 +237,7 @@ if (rows.length === 0) {
             const existing =
 
                 dbMap.get(guid);
-/*
-            const alterColumn =
 
-                ALTER_ID_COLUMN[table] ||
-
-                "alter_id";
-*/
             if (!existing) {
 
                 newRows.push(row);

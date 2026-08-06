@@ -5,7 +5,11 @@ const {
 
     TABLES,
 
-    SNAPSHOT_STATUS
+    SNAPSHOT_STATUS,
+
+    CONFLICT_KEYS,
+
+    DB_CONFIG
 
 } = require("./constants");
 
@@ -16,8 +20,6 @@ const supabase = createClient(
     process.env.SUPABASE_SERVICE_KEY
 
 );
-
-const SNAPSHOT_CHUNK_SIZE = 500;
 
 class SnapshotManager {
 
@@ -59,7 +61,7 @@ async processChunks({
 
         i < rows.length;
 
-        i += SNAPSHOT_CHUNK_SIZE
+        i += DB_CONFIG.CHUNK_SIZE
 
     ) {
 
@@ -69,7 +71,7 @@ async processChunks({
 
                 i,
 
-                i + SNAPSHOT_CHUNK_SIZE
+                i + DB_CONFIG.CHUNK_SIZE
 
             );
 
@@ -93,7 +95,7 @@ async processChunks({
 
         onConflict =
 
-            "company_code,tally_owner,module,entity_type,guid"
+    CONFLICT_KEYS[TABLES.SNAPSHOT]
 
     }) {
 
@@ -395,6 +397,9 @@ async processChunks({
 
     }) {
 
+        const now =
+    new Date().toISOString();
+
         if (!status) {
 
             throw new Error(
@@ -417,9 +422,9 @@ async processChunks({
 
                 status,
 
-                updated_at:
+               updated_at:
 
-                    new Date().toISOString()
+                now
 
             })
 
@@ -499,6 +504,10 @@ async processChunks({
 
     }) {
 
+        const now =
+
+     new Date().toISOString();
+
         if (!Array.isArray(guids)) {
 
         throw new Error(
@@ -532,8 +541,7 @@ async processChunks({
                     SNAPSHOT_STATUS.DELETED,
 
                 updated_at:
-
-                    new Date().toISOString()
+                     now
 
             })
 
@@ -708,6 +716,10 @@ async processChunks({
 
     }) {
 
+        const now =
+
+    new Date().toISOString();
+
         if (!company_code) {
 
             throw new Error(
@@ -766,7 +778,7 @@ async processChunks({
 
                 updated_at:
 
-                    new Date().toISOString()
+                    now
 
             })
 

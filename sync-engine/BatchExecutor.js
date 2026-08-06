@@ -3,11 +3,11 @@ const { createClient } =
 
 const {
 
-    OPERATION_TYPE
+    OPERATION_TYPE,
+
+    DB_CONFIG
 
 } = require("./constants");
-
-const DB_CHUNK_SIZE = 500;
 
 const supabase = createClient(
 
@@ -57,7 +57,7 @@ class BatchExecutor {
 
             i < rows.length;
 
-            i += DB_CHUNK_SIZE
+            i += DB_CONFIG.CHUNK_SIZE
 
         ) {
 
@@ -67,7 +67,7 @@ class BatchExecutor {
 
                     i,
 
-                    i + DB_CHUNK_SIZE
+                    i + DB_CONFIG.CHUNK_SIZE
 
                 );
 
@@ -213,6 +213,12 @@ return true;
 
         callback: async (chunk) => {
 
+            console.dir(chunk[0], {
+    depth: null
+});
+
+console.log("OPTIONS :", options);
+
             const {
 
                 error
@@ -220,6 +226,8 @@ return true;
             } = await supabase
 
                 .from(table)
+
+                
 
                 .upsert(
 

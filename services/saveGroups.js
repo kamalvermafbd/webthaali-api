@@ -1,5 +1,3 @@
-const GroupRowBuilder =
-    require("./GroupRowBuilder");
 
 const BatchManager =
     require("../sync-engine/BatchManager");
@@ -55,29 +53,6 @@ async function saveGroups({
     }
 
 
-    const rows = [];
-
-        for (const group of groups) {
-
-            rows.push(
-
-                GroupRowBuilder.build({
-
-                    company_code,
-
-                    tally_owner,
-
-                    sync_batch_id,
-
-                    group
-
-                })
-
-            );
-
-        }
-
-
     const result =
 
     await BatchManager.run({
@@ -86,17 +61,9 @@ async function saveGroups({
 
             sync_batch_id,
 
-        module:
-
-            "MASTER",
-
         entity:
 
             "GROUP",
-
-        table:
-
-            "tally_sync_groups",
 
         company_code,
 
@@ -104,7 +71,7 @@ async function saveGroups({
 
         sync_batch_id,
 
-        rows
+        rows: groups
 
     });
   

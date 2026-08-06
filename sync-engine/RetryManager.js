@@ -66,6 +66,8 @@ async retry({
 
         let failed = 0;
 
+        const failedOperations = [];
+
                 for (const operation of operations) {
 
             try {
@@ -80,17 +82,23 @@ async retry({
 
             }
 
-           catch (error) {
+          catch (error) {
 
-                failed++;
+            failed++;
 
-            operation.retry_error =
+            failedOperations.push({
 
-                error?.message ||
+                operation,
 
-                String(error);
+                error:
 
-            }
+                    error?.message ||
+
+                    String(error)
+
+            });
+
+        }
 
         }
 
@@ -98,17 +106,17 @@ async retry({
 
             batch_id,
 
-            retry_count:
-
-                retried
+           retry_count: operations.length
 
         });
 
-        return {
+       return {
 
             retried,
 
             failed,
+
+            failedOperations,
 
             success:
 

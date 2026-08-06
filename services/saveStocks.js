@@ -1,8 +1,6 @@
 const BatchManager =
     require("../sync-engine/BatchManager");
 
-const StockRowBuilder =
-    require("./StockRowBuilder");
 
 async function saveStocks({
     company_code,
@@ -34,64 +32,15 @@ async function saveStocks({
         };
 
     }
-
-    const now = new Date().toISOString();
-
-    const rows = [];
-
-
-
-// ===========================
-// BUILD ROWS
-// ===========================
-
-    for (const stock of stocks) {
-
-       const row = StockRowBuilder.build({
-
-            stock,
-
-            company_code,
-
-            tally_owner,
-
-            sync_batch_id,
-
-            now
-
-        });
-
-        if (row.guid) {
-
-            rows.push(row);
-
-        } else {
-
-            console.warn(
-                `[${company_code}] [${tally_owner}] Skipping Stock "${row.name}" because GUID is missing.`
-            );
-
-        }
-
-    }
-
-    return await BatchManager.run({
+return await BatchManager.run({
 
     batch_id:
 
         sync_batch_id,
 
-    module:
-
-        "MASTER",
-
     entity:
 
         "STOCK",
-
-    table:
-
-        "tally_sync_stocks",
 
     company_code,
 
@@ -99,7 +48,7 @@ async function saveStocks({
 
     sync_batch_id,
 
-    rows
+    rows: stocks
 
 });
 

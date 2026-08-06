@@ -15,7 +15,9 @@ const SnapshotManager =
 
 const {
 
-    VALIDATION_SELECT_COLUMNS
+    VALIDATION_SELECT_COLUMNS,
+
+    ALTER_ID_COLUMN
 
 } = require("./constants");
 
@@ -253,54 +255,6 @@ buildGuidMap(rows = []) {
                 }
 
 
-
-
-/*
-    const snapshotMap =
-
-            new Map();
-
-        for (const row of snapshotRows) {
-
-            if (!row.guid) {
-
-                continue;
-
-            }
-
-            snapshotMap.set(
-
-                row.guid,
-
-                row
-
-            );
-
-        }
-
-    const dbMap =
-
-            new Map();
-
-        for (const row of dbRows || []) {
-
-            if (!row.guid) {
-
-                continue;
-
-            }
-
-            dbMap.set(
-
-                row.guid,
-
-                row
-
-            );
-
-        }
-*/
-
         const snapshotMap =
             this.buildGuidMap(snapshotRows);
 
@@ -317,6 +271,12 @@ buildGuidMap(rows = []) {
         const extraGuids = [];
 
         const alterChanged = [];
+
+        const alterColumn =
+
+    ALTER_ID_COLUMN[table] ||
+
+    "alter_id";
 
         // ----------------------------------
         // Snapshot -> DB
@@ -339,21 +299,18 @@ buildGuidMap(rows = []) {
 // after all reconciliation modules
 // are migrated.
 
-          const dbAlterId =
+          
+        const dbAlterId =
 
-                dbRow.alter_id ??
+            dbRow[alterColumn] ??
 
-                dbRow.alterid ??
+            null;
 
-                null;
+        const snapshotAlterId =
 
-            const snapshotAlterId =
+            snapshot[alterColumn] ??
 
-                snapshot.alter_id ??
-
-                snapshot.alterid ??
-
-                null;
+            null;
 
                 if (
 

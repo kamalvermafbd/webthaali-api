@@ -6,6 +6,32 @@
 // Database Operations
 // ------------------------------------------------------
 
+const GroupRowBuilder =
+    require("../services/GroupRowBuilder");
+
+const StockGroupRowBuilder =
+    require("../services/StockGroupRowBuilder");
+
+const LedgerRowBuilder =
+    require("../services/LedgerRowBuilder");
+
+const StockRowBuilder =
+    require("../services/StockRowBuilder");
+
+const UnitRowBuilder =
+    require("../services/UnitRowBuilder");
+
+const GodownRowBuilder =
+    require("../services/GodownRowBuilder");
+
+const CostCentreRowBuilder =
+    require("../services/CostCentreRowBuilder");
+
+const VoucherRowBuilder =
+    require("../services/VoucherRowBuilder");
+
+
+
 const OPERATION_TYPE = {
 
     INSERT: "INSERT",
@@ -124,6 +150,140 @@ const ALTER_ID_COLUMN = {
 
 };
 
+
+// ------------------------------------------------------
+// Module Types
+// ------------------------------------------------------
+
+const MODULE_TYPE = {
+
+    MASTER: "MASTER",
+
+    VOUCHER: "VOUCHER"
+
+};
+
+// ------------------------------------------------------
+// Entity Metadata Registry
+// ------------------------------------------------------
+const ENTITY_METADATA = {
+
+    [ENTITY_TYPE.GROUP]: {
+
+        module: MODULE_TYPE.MASTER,
+
+        table: TABLES.GROUPS,
+
+        builder: GroupRowBuilder,
+
+        inputKey: "group"
+
+    },
+
+    [ENTITY_TYPE.STOCK_GROUP]: {
+
+        module: MODULE_TYPE.MASTER,
+
+        table: TABLES.STOCK_GROUPS,
+
+        builder: StockGroupRowBuilder,
+
+        inputKey: "group"
+
+    },
+
+    [ENTITY_TYPE.LEDGER]: {
+
+        module: MODULE_TYPE.MASTER,
+
+        table: TABLES.LEDGERS,
+
+        builder: LedgerRowBuilder,
+
+        inputKey: "ledger"
+
+    },
+
+    [ENTITY_TYPE.STOCK]: {
+
+        module: MODULE_TYPE.MASTER,
+
+        table: TABLES.STOCKS,
+
+        builder: StockRowBuilder,
+
+        inputKey: "stock"
+
+    },
+
+    [ENTITY_TYPE.UNIT]: {
+
+        module: MODULE_TYPE.MASTER,
+
+        table: TABLES.UNITS,
+
+        builder: UnitRowBuilder,
+
+        inputKey: "unit"
+
+    },
+
+    [ENTITY_TYPE.GODOWN]: {
+
+        module: MODULE_TYPE.MASTER,
+
+        table: TABLES.GODOWNS,
+
+        builder: GodownRowBuilder,
+
+        inputKey: "godown"
+
+    },
+
+    [ENTITY_TYPE.COST_CENTRE]: {
+
+        module: MODULE_TYPE.MASTER,
+
+        table: TABLES.COST_CENTRES,
+
+        builder: CostCentreRowBuilder,
+
+        inputKey: "costCentre"
+
+    },
+
+    [ENTITY_TYPE.VOUCHER]: {
+
+        module: MODULE_TYPE.VOUCHER,
+
+        table: TABLES.VOUCHERS,
+
+        builder: VoucherRowBuilder,
+
+        inputKey: "voucher"
+
+    }
+
+};
+
+// ------------------------------------------------------
+// Conflict Keys
+// ------------------------------------------------------
+
+const CONFLICT_KEYS = {
+
+    [TABLES.LEDGERS]:
+        "company_code,tally_owner,guid",
+
+          [TABLES.VOUCHERS]:
+        "company_code,tally_owner,guid",
+
+        [TABLES.SNAPSHOT]:
+         "company_code,tally_owner,module,entity_type,guid"
+
+};
+
+
 // ------------------------------------------------------
 // Batch Status
 // ------------------------------------------------------
@@ -206,6 +366,28 @@ const RETRY = {
 
 };
 
+// ------------------------------------------------------
+// Database Configuration
+// ------------------------------------------------------
+
+const DB_CONFIG = {
+
+    CHUNK_SIZE: 500
+
+};
+
+const FILTERS = {
+
+    ACTIVE: {
+
+        column: "is_deleted",
+
+        value: false
+
+    }
+
+};
+
 
 // ------------------------------------------------------
 // Exports
@@ -221,6 +403,12 @@ module.exports = {
     VALIDATION_SELECT_COLUMNS,
 
     ALTER_ID_COLUMN,
+   
+    MODULE_TYPE,
+
+    ENTITY_METADATA,
+
+    CONFLICT_KEYS,
 
     BATCH_STATUS,
 
@@ -230,6 +418,10 @@ module.exports = {
 
     VALIDATION_ACTION,
 
-    RETRY
+    DB_CONFIG,
+
+    RETRY,
+
+    FILTERS,
 
 };

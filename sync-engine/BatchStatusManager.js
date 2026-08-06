@@ -14,7 +14,9 @@ const { createClient } =
 
 const {
 
-    BATCH_STATUS
+    BATCH_STATUS,
+
+    TABLES
 
 } = require("./constants");
 
@@ -66,7 +68,7 @@ class BatchStatusManager {
 
         } = await supabase
 
-            .from("sync_batches")
+            .from(TABLES.SYNC_BATCHES)
 
             .update({
 

@@ -22,6 +22,13 @@ const RetryManager =
 const MasterOperationBuilder =
     require("./MasterOperationBuilder");
 
+const {
+
+    ENTITY_METADATA,
+
+    MODULE_TYPE
+
+} = require("./constants");
 
 class BatchManager {
 
@@ -74,11 +81,20 @@ async execute({
 
         catch (error) {
 
+            console.error(
+                "BATCH EXECUTION ERROR:",
+                error
+            );
+
             failedCount++;
 
-            failedOperations.push(
-                operation
-            );
+            failedOperations.push({
+
+                operation,
+
+                error: error.message
+
+            });
 
         }
 
@@ -90,7 +106,7 @@ async execute({
 
         success:
 
-            failedCount === 0,
+        failedCount === 0,
 
         successCount,
 
@@ -119,12 +135,8 @@ finally {
     async run({
 
         batch_id,
-
-        module,
-
+       
         entity,
-
-        table,
 
         company_code,
 
@@ -137,6 +149,32 @@ finally {
         options = {}
 
     }) {
+
+        const metadata =
+
+    ENTITY_METADATA[entity];
+
+if (!metadata) {
+
+    throw new Error(
+
+        `Unsupported entity : ${entity}`
+
+    );
+
+}
+
+const {
+
+    module,
+
+    table,
+
+    builder,
+
+    inputKey
+
+} = metadata;
 
     if (!batch_id) {
 
@@ -219,13 +257,32 @@ finally {
 
             batch_id,
 
-            module: entity,
+            module,
 
             entity,
 
             action: "PROCESSING"
 
         });
+
+
+        const dbRows =
+
+            rows.map(row =>
+
+                builder.build({
+
+                    company_code,
+
+                    tally_owner,
+
+                    sync_batch_id,
+
+                    [inputKey]: row
+
+                })
+
+            );
 
         const validation =
 
@@ -237,7 +294,7 @@ finally {
 
                 tally_owner,
 
-                rows
+                rows: dbRows
 
             });
 
@@ -253,11 +310,17 @@ finally {
 
             batch_id,
 
-            module: entity,
+            module,
 
             entity,
 
             action: "COMPLETED"
+
+        });
+
+        await BatchStatusManager.markReconciliationCompleted({
+
+            batch_id
 
         });
 
@@ -291,208 +354,40 @@ finally {
 
             let operations = [];
 
-        if (module === "MASTER") {
+        if (module === MODULE_TYPE.MASTER) {
 
-            switch (entity) {
+            operations =
 
-                case "GROUP":
+                MasterOperationBuilder.buildOperation({
 
-                operations = [
-                    MasterOperationBuilder.buildGroupOperation({
+                    entity,
 
-                        company_code,
+                    table,
 
-                        tally_owner,
+                    company_code,
 
-                        sync_batch_id,
+                    tally_owner,
 
-                        options,
+                    sync_batch_id,
 
-                        rows: [
+                    rows: [
 
-                            ...validation.newRows,
+                        ...validation.newRows,
 
-                            ...validation.changedRows
+                        ...validation.changedRows
 
-                        ]
+                    ],
 
-                    })
-                ];
-                    break;
+                    options
 
-                case "LEDGER":
+                });   
 
-                    operations = [
-                        MasterOperationBuilder.buildLedgerOperation({
 
-                            company_code,
 
-                            tally_owner,
-
-                            sync_batch_id,
-
-                            options,
-
-                            rows: [
-
-                                ...validation.newRows,
-
-                                ...validation.changedRows
-
-                            ]
-
-                        })
-                    ];
-
-                    break;
-
-                case "STOCK":
-
-                    operations = [
-                        MasterOperationBuilder.buildStockOperation({
-
-                            company_code,
-
-                            tally_owner,
-
-                            sync_batch_id,
-
-                            options,
-
-                            rows: [
-
-                                ...validation.newRows,
-
-                                ...validation.changedRows
-
-                            ]
-
-                        })
-                        
-                    ];
-
-                    break;
-
-                case "STOCK_GROUP":
-
-                    operations = [
-                        MasterOperationBuilder.buildStockGroupOperation({
-
-                            company_code,
-
-                            tally_owner,
-
-                            sync_batch_id,
-
-                            options,
-
-                            rows: [
-
-                                ...validation.newRows,
-
-                                ...validation.changedRows
-
-                            ]
-
-                        })
-                        
-                    ];
-
-                    break;
-
-                case "UNIT":
-
-                    operations = [
-                        MasterOperationBuilder.buildUnitOperation({
-
-                            company_code,
-
-                            tally_owner,
-
-                            sync_batch_id,
-
-                            options,
-
-                            rows: [
-
-                                ...validation.newRows,
-
-                                ...validation.changedRows
-
-                            ]
-
-                        })
-                    ];
-
-                    break;
-
-                case "GODOWN":
-
-                    operations = [
-                        MasterOperationBuilder.buildGodownOperation({
-
-                            company_code,
-
-                            tally_owner,
-
-                            sync_batch_id,
-
-                            options,
-
-                            rows: [
-
-                                ...validation.newRows,
-
-                                ...validation.changedRows
-
-                            ]
-
-                        })
-                    ];
-
-                    break;
-
-                case "COST_CENTRE":
-
-                    operations = [
-                        MasterOperationBuilder.buildCostCentreOperation({
-
-                            company_code,
-
-                            tally_owner,
-
-                            sync_batch_id,
-
-                            options,
-
-                            rows: [
-
-                                ...validation.newRows,
-
-                                ...validation.changedRows
-
-                            ]
-
-                        })
-                    ];
-
-                    break;
-
-                default:
-
-                    throw new Error(
-
-                        "Unsupported master entity : " +
-
-                        entity
-
-                    );
-
-            }
 
         }
 
-       else if (module === "VOUCHER") {
+       else if (module === MODULE_TYPE.VOUCHER) {
 
     throw new Error(
 
@@ -539,9 +434,13 @@ finally {
 
             batch_id,
 
-            operations:
+           operations:
 
-                execution.failedOperations
+                execution.failedOperations.map(
+
+                    item => item.operation
+
+                )
 
         });
 
@@ -702,7 +601,7 @@ finally {
 
             batch_id,
 
-            module: entity,
+            module,
 
             entity,
 

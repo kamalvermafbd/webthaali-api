@@ -122,6 +122,8 @@ const {
 
 const ReconciliationManager =
     require("./sync-engine/ReconciliationManager");
+
+
 /*
 const {
   applyMasterActions
@@ -175,6 +177,8 @@ const {
 //});
 
 const { registerEvents } = require("./socketio/connectorEvents");
+const BatchManager = require("./sync-engine/BatchManager");
+console.log("BatchManager =", typeof BatchManager);
 
 registerEvents(io);
 
@@ -13527,6 +13531,14 @@ app.post(
       // =========================
 
       console.time("supabase_login");
+
+      console.log("====== SUPABASE CHECK ======");
+console.log("SUPABASE URL:", process.env.SUPABASE_URL);
+console.log(
+  "SUPABASE KEY:",
+  process.env.SUPABASE_SERVICE_ROLE_KEY?.substring(0, 20)
+);
+console.log("============================");
 
       const {
   data,
@@ -36727,6 +36739,18 @@ app.post("/testSaveGroups", async (req, res) => {
 
     }
 
+});
+
+app.get("/testSupabase", async (req, res) => {
+  const { data, error } = await supabase
+    .from("usersheet")
+    .select("*")
+    .limit(1);
+
+  console.log("DATA:", data);
+  console.log("ERROR:", error);
+
+  res.json({ data, error });
 });
 
 server.listen(

@@ -1,0 +1,9 @@
+{
+  "totalIncoming": 26,
+  "totalDb": 26,
+  "matched": 26,
+  "missingInDB": 0,
+  "missingInTally": 0,
+  "status": "MATCHED",
+  "guidsToDelete": []
+}

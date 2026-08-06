@@ -1,8 +1,6 @@
 const BatchManager =
     require("../sync-engine/BatchManager");
 
-const CostCentreRowBuilder =
-    require("./CostCentreRowBuilder");
 
 async function saveCostCentres({
     company_code,
@@ -35,72 +33,26 @@ async function saveCostCentres({
 
     }
 
-    const now = new Date().toISOString();
+ 
+ return await BatchManager.run({
 
-    const rows = [];
-
-    for (const costCentre of costCentres) {
-
-        const row =
-
-        CostCentreRowBuilder.build({
-
-            costCentre,
-
-            company_code,
-
-            tally_owner,
-
-            sync_batch_id,
-
-            now
-
-        });
-
-       if (row.guid) {
-
-            rows.push(row);
-
-        } else {
-
-            console.warn(
-
-                `[${company_code}] [${tally_owner}] Skipping Cost Centre "${row.name}" because GUID is missing.`
-
-            );
-
-        }
-
-    }
-
-    return await BatchManager.run({
-
-        batch_id:
-
-            sync_batch_id,
-
-        module:
-
-            "MASTER",
-
-        entity:
-
-            "COST_CENTRE",
-
-        table:
-
-            "tally_sync_cost_centres",
-
-        company_code,
-
-        tally_owner,
+    batch_id:
 
         sync_batch_id,
 
-        rows
+    entity:
 
-    });
+        "COST_CENTRE",
 
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows: costCentres
+
+});
 }
 
 module.exports = {

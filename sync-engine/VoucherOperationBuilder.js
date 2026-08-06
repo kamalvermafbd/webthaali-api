@@ -3,7 +3,8 @@ const OperationBuilder = require("./OperationBuilder");
 const {
     ENTITY_TYPE,
     TABLES,
-    OPERATION_TYPE
+    OPERATION_TYPE,
+    CONFLICT_KEYS
 } = require("./constants");
 function buildDeleteOperations({
 
@@ -207,13 +208,12 @@ function buildSaveOperations({
 
             rows: voucherRows,
 
-            options: {
+           options: {
 
                 onConflict:
-                    "company_code,tally_owner,guid"
+                    CONFLICT_KEYS[TABLES.VOUCHERS]
 
-                  },
-
+            },
 
             company_code,
 
@@ -317,6 +317,16 @@ function buildSaveOperations({
 
 }
 
+function buildOperation(args) {
+
+    return buildVoucherOperations(
+
+        args
+
+    );
+
+}
+
 function buildVoucherOperations(args) {
 
     return [
@@ -330,6 +340,8 @@ function buildVoucherOperations(args) {
 }
 
 module.exports = {
+
+    buildOperation,
 
     buildDeleteOperations,
 
