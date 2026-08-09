@@ -1,0 +1,55 @@
+{
+  "table": "tally_sync_stocks",
+  "module": "MASTER",
+  "entity_type": "STOCK",
+  "snapshotCount": 8,
+  "dbCount": 8,
+  "matched": 8,
+  "missingCount": 0,
+  "extraCount": 0,
+  "alterChangedCount": 8,
+  "missingGuids": [],
+  "extraGuids": [],
+  "alterChanged": [
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d0",
+      "oldAlterId": 380,
+      "newAlterId": null
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000010d",
+      "oldAlterId": 603,
+      "newAlterId": null
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fb",
+      "oldAlterId": 590,
+      "newAlterId": null
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d1",
+      "oldAlterId": 576,
+      "newAlterId": null
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fc",
+      "oldAlterId": 385,
+      "newAlterId": null
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000ff",
+      "oldAlterId": 386,
+      "newAlterId": null
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f9",
+      "oldAlterId": 608,
+      "newAlterId": null
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d7",
+      "oldAlterId": 609,
+      "newAlterId": null
+    }
+  ]
+}

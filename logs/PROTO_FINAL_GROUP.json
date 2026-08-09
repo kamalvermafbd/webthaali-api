@@ -1,0 +1,7 @@
+{
+  "entity": "GROUP",
+  "expectedItems": 29,
+  "actualReceived": 29,
+  "expectedChunks": 1,
+  "snapshot": true
+}

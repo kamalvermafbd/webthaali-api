@@ -5,15 +5,26 @@ const supabase = createClient(
     process.env.SUPABASE_SERVICE_KEY
 );
 
-const VoucherIntegrityService = require("./VoucherIntegrityService");
+//const VoucherIntegrityService = require("./VoucherIntegrityService");
 
 const fs = require("fs");
-
+/*
 const ReconciliationEngine =
     require("../reconciliations/ReconciliationEngine");
+*/
+
+const ReconciliationManager =
+    require("../sync-engine/ReconciliationManager");
+    
+const VoucherExecutionService =
+    require("../sync-engine/VoucherExecutionService");
 
 const VoucherRowBuilder =
     require("./VoucherRowBuilder");
+
+
+const VoucherValidationService =
+    require("../sync-engine/VoucherValidationService");
 
 const {
     filterRowsByVoucherGuids
@@ -27,13 +38,21 @@ const {
     buildCostCentreRows
 } = require("./VoucherChildRowBuilder");
 
-const BatchManager =
+const BatchStatusManager =
+require("../sync-engine/BatchStatusManager");
+
+/*const BatchManager =
     require("../sync-engine/BatchManager");
 
 const {
     buildVoucherOperations
 } = require("../sync-engine/VoucherOperationBuilder");
-
+*/
+const {
+    VALIDATION_ACTION,
+    TABLES,
+    VOUCHER_COLUMNS
+} = require("../sync-engine/constants");
 
 async function loadLedgerMap({
     company_code,
@@ -64,6 +83,7 @@ async function loadLedgerMap({
 
 }
 
+/* 070826
 async function validateNewVoucher(args) {
 
     const {
@@ -144,23 +164,14 @@ return runIntegrityValidation({
 
 }
 
+
 async function runIntegrityValidation(args) {
 
     return VoucherIntegrityService.validateVoucher(args);
 
 }
 
-const VALIDATION_ACTION = {
-
-    INSERT: "INSERT",
-
-    UPDATE: "UPDATE",
-
-    FORCE_UPDATE: "FORCE_UPDATE",
-
-    SKIP: "SKIP",
-
-};
+*/
 
 function getVoucherGuids(rows) {
 
@@ -194,6 +205,8 @@ function getRowsToSave({
 
 }
 
+
+/* 070826
 function buildValidationResult({
 
     action,
@@ -219,6 +232,7 @@ function buildValidationResult({
     };
 
 }
+*/
 
 /* 28.07.26 removed
 
@@ -539,7 +553,7 @@ async function deleteCostCentres({
 
 */
 
-/// new logic is_deleted =true code  add 02.08.26
+/* 080826
 async function deleteVoucherLedgers({
 
     company_code,
@@ -735,9 +749,9 @@ async function deleteCostCentres({
 
 }
 
+*/
 
-
-
+/*
 async function saveVoucher({
 
     voucher,
@@ -768,9 +782,52 @@ async function saveVoucher({
     });
 
 }
+*/
 
+async function saveVoucher({
+    voucher,
+    sync_batch_id,
+    company_code,
+    tally_owner
+}) {
 
+    const guid =
+        voucher?.guid ||
+        voucher?.header?.guid;
 
+    const result =
+        await VoucherExecutionService.execute({
+
+            company_code,
+
+            tally_owner,
+
+            sync_batch_id,
+
+            rowsToSave: [voucher],
+
+            allVoucherGuids:
+                guid ? [guid] : [],
+
+            voucherGuids:
+                guid ? [guid] : [],
+
+            ledgerRows: [],
+
+            inventoryRows: [],
+
+            stockVoucherRows: [],
+
+            billAllocationRows: [],
+
+            costCentreRows: []
+
+        });
+
+    return result;
+}
+
+/* 088026
 async function saveVoucherHeaders({
 
    
@@ -1080,6 +1137,7 @@ async function saveStockVouchers({
     );
 
 }
+*/
 
 async function saveVoucherExecutionData({
 
@@ -1090,6 +1148,8 @@ async function saveVoucherExecutionData({
     sync_batch_id,
 
     rowsToSave,
+
+    allVoucherGuids,
 
     voucherGuids,
 
@@ -1107,8 +1167,10 @@ async function saveVoucherExecutionData({
 
 }) {
 
-    const operations =
-    buildVoucherOperations({
+    console.log(">>> saveVoucherExecutionData START");
+
+    const result =
+    await VoucherExecutionService.execute({
 
         company_code,
 
@@ -1116,9 +1178,11 @@ async function saveVoucherExecutionData({
 
         sync_batch_id,
 
-        voucherGuids,
+        rowsToSave,
 
-        voucherRows: rowsToSave,
+        allVoucherGuids,
+
+        voucherGuids,
 
         ledgerRows,
 
@@ -1132,182 +1196,13 @@ async function saveVoucherExecutionData({
 
     });
 
-    // -------------------------
-    // DELETE OLD CHILD RECORDS
-    // -------------------------
-/*
-    await deleteVoucherLedgers({
+return result;
 
-        company_code,
-        tally_owner,
-        voucherGuids
-
-    });
-
-    await deleteVoucherInventory({
-
-        company_code,
-        tally_owner,
-        voucherGuids
-
-    });
-
-    await deleteStockVouchers({
-
-        company_code,
-        tally_owner,
-        voucherGuids
-
-    });
-
-    await deleteBillAllocations({
-
-        company_code,
-        tally_owner,
-        voucherGuids
-
-    });
-
-    await deleteCostCentres({
-
-        company_code,
-        tally_owner,
-        voucherGuids
-
-    });
-
-*/
-
-const result =
-    await BatchManager.execute({
-
-        operations
-
-    });
-
-return result.success;
-
-/*
-    // -------------------------
-    // SAVE NEW DATA
-    // -------------------------
-
-    const success =
-        await saveVoucherHeaders({
-
-            rowsToSave,
-
-            sync_batch_id,
-
-            company_code,
-
-            tally_owner
-
-        });
-
-    await saveVoucherLedgers({
-
-        ledgerRows,
-        sync_batch_id
-
-    });
-
-    await saveVoucherInventory({
-
-        inventoryRows,
-        sync_batch_id
-
-    });
-
-    await saveBillAllocations({
-
-        billAllocationRows,
-        sync_batch_id
-
-    });
-
-    await saveCostCentres({
-
-        costCentreRows,
-        sync_batch_id
-
-    });
-
-    await saveStockVouchers({
-
-        stockVoucherRows,
-        sync_batch_id,
-        STOCK_DEBUG_FILE
-
-    });
-
-    return success;
-*/
-}
-
-/* 02.08.26
-async function deleteMissingVouchers({
-
-    company_code,
-
-    tally_owner,
-
-    deletedVoucherGuids
-
-}) {
-
-    if (deletedVoucherGuids.length === 0) {
-
-        return;
-
-    }
-
-    await supabase
-        .from("tally_voucher_inventory")
-        .delete()
-        .eq("company_code", company_code)
-        .eq("tally_owner", tally_owner)
-        .in("voucher_guid", deletedVoucherGuids);
-
-    await supabase
-        .from("tally_voucher_ledgers")
-        .delete()
-        .eq("company_code", company_code)
-        .eq("tally_owner", tally_owner)
-        .in("voucher_guid", deletedVoucherGuids);
-
-    await supabase
-        .from("tally_stock_vouchers")
-        .delete()
-        .eq("company_code", company_code)
-        .eq("tally_owner", tally_owner)
-        .in("voucher_guid", deletedVoucherGuids);
-
-    await supabase
-        .from("tally_vouchers")
-        .delete()
-        .eq("company_code", company_code)
-        .eq("tally_owner", tally_owner)
-        .in("guid", deletedVoucherGuids);
-
-    await supabase
-    .from("tally_bill_allocations")
-    .delete()
-    .eq("company_code", company_code)
-    .eq("tally_owner", tally_owner)
-    .in("voucher_guid", deletedVoucherGuids);
-
-    await supabase
-    .from("tally_costcentre_allocations")
-    .delete()
-    .eq("company_code", company_code)
-    .eq("tally_owner", tally_owner)
-    .in("voucher_guid", deletedVoucherGuids);
 
 }
 
-*/
 
+/* 080826
 async function deleteMissingVouchers({
 
     company_code,
@@ -1454,6 +1349,7 @@ async function deleteMissingVouchers({
 
 
 }
+*/
 
 async function loadExistingVoucherMap({
 
@@ -1462,6 +1358,9 @@ async function loadExistingVoucherMap({
     tally_owner
 
 }) {
+
+    const voucherColumns =
+    VOUCHER_COLUMNS[TABLES.VOUCHERS];
 
     const {
 
@@ -1473,7 +1372,11 @@ async function loadExistingVoucherMap({
 
         .from("tally_vouchers")
 
-        .select("guid, alterid")
+       .select([
+            voucherColumns.GUID,
+            voucherColumns.ALTER_ID,
+            voucherColumns.IS_DELETED
+        ].join(", "))
 
         .eq("company_code", company_code)
 
@@ -1491,17 +1394,18 @@ async function loadExistingVoucherMap({
 
     }
 
-    return new Map(
+return new Map(
+    (existingVouchers || []).map(v => [
+        v[voucherColumns.GUID],
+        {
+            alterid:
+                Number(v[voucherColumns.ALTER_ID]),
 
-        (existingVouchers || []).map(v => [
-
-            v.guid,
-
-            Number(v.alterid)
-
-        ])
-
-    );
+            is_deleted:
+                v[voucherColumns.IS_DELETED] === true
+        }
+    ])
+);
 
 }
 
@@ -1543,16 +1447,26 @@ async function loadExistingVoucherGuidMap({
 }
 */
 
+
+/* 080826 
 async function saveVoucherGuids({
     company_code,
     tally_owner,
     sync_batch_id
 }) {
-const { data: batch, error } = await supabase
-    .from("sync_batches")
-    .select("*")
-    .eq("batch_id", sync_batch_id)
-    .single();
+
+const batch =
+    await BatchStatusManager.loadBatch({
+
+        batch_id: sync_batch_id
+
+    });
+
+const error =
+
+    batch ? null :
+
+    new Error("Batch not found");
 
 console.log("================================");
 console.log("SAVE VOUCHER GUIDS");
@@ -1575,33 +1489,12 @@ if (
 
 }
 
-/*
-     const existingVoucherMap =
-        await loadExistingVoucherGuidMap({
-
-            company_code,
-
-            tally_owner
-
-        });
-
-    const incomingVoucherGuids =
-    new Set(
-        voucherGuids
-            .map(v =>
-                typeof v === "string"
-                    ? v.trim()
-                    : v.guid?.trim()
-            )
-            .filter(Boolean)
-    );
-*/
         //--------------------------------------------------
     // Reconcile Voucher GUIDs
     //--------------------------------------------------
 
     const reconciliationResult =
-    await ReconciliationEngine.reconcile({
+    await ReconciliationManager.reconcile({
 
         company_code,
 
@@ -1633,35 +1526,7 @@ if (
     )
 );
 
-/*
 
-fs.appendFileSync(
-    "./logs/voucher-guid-debug.jsonl",
-    JSON.stringify({
-        stage: "BEFORE_COMPARE",
-        company_code,
-        tally_owner,
-     dbCount: reconciliationResult.summary.totalDb,
-    incomingCount: reconciliationResult.summary.totalIncoming,
-    matched: reconciliationResult.summary.matched,
-    status: reconciliationResult.summary.status
-    }) + "\n"
-);
-        */
-/*
-const guidsToDelete = [];
-    
-
- for (const [guid] of existingVoucherMap) {
-
-    if (!incomingVoucherGuids.has(guid)) {
-
-        guidsToDelete.push(guid);
-
-    }
-
-}
-*/
 
 const guidsToDelete =
     reconciliationResult.missingInTally;
@@ -1751,18 +1616,23 @@ if (guidsToDelete.length > 0) {
 
 }
 
-if (reconciliationResult.missingInDB.length === 0) {
+await BatchStatusManager.updateFields({
 
-    await supabase
-        .from("sync_batches")
-        .update({
-            reconciliation_completed: true
-        })
-        .eq("batch_id", sync_batch_id);
+    batch_id: sync_batch_id,
+
+    fields: {
+
+        reconciliation_completed: true
+
+    }
+
+});
 
 }
+*/
 
-}
+
+
 
 const STOCK_DEBUG_FILE =
     "./logs/stock-movement-debug.jsonl";
@@ -1822,15 +1692,15 @@ const runId =
 
 const voucherRows = [];
 
-const ledgerRows = [];
+let ledgerRows = [];
 
-const inventoryRows = [];
+let inventoryRows = [];
 
-const stockVoucherRows = [];
+let stockVoucherRows = [];
 
-const billAllocationRows = [];
+let billAllocationRows = [];
 
-const costCentreRows = [];
+let costCentreRows = [];
 
 let existingVoucherMap = new Map();
 
@@ -1966,13 +1836,20 @@ try {
     console.log("BEFORE VALIDATE", header.guid);
 
 integrityResult =
-    await validateNewVoucher({
-        company_code,
-        tally_owner,
-        parsedVoucher: voucher,
-        runId,
-        existingVoucherMap,
-    });
+    await VoucherValidationService
+        .validateNewVoucher({
+
+            company_code,
+
+            tally_owner,
+
+            parsedVoucher: voucher,
+
+            runId,
+
+            existingVoucherMap
+
+        });
 
     fs.appendFileSync(
     "./logs/integrity-result.jsonl",
@@ -2120,6 +1997,10 @@ console.log(
 
 let voucherGuids = [];
 
+console.log("voucherRows:", voucherRows.length);
+console.log("voucherGuids:", voucherGuids.length);
+console.log("vouchers:", vouchers.length);
+
 if (voucherRows.length > 0){
 
       rowsToSave = getRowsToSave({
@@ -2198,7 +2079,9 @@ costCentreRows =
 
     });
 
-success =
+console.log(">>> CALLING saveVoucherExecutionData");
+
+const executionResult =
     await saveVoucherExecutionData({
 
         company_code,
@@ -2208,6 +2091,8 @@ success =
         sync_batch_id,
 
         rowsToSave,
+
+        allVoucherGuids,
 
         voucherGuids,
 
@@ -2225,8 +2110,31 @@ success =
 
     });
 
+    success =
+    executionResult.success;
+
+    if (
+    executionResult?.reconciliation?.missingGuids?.length > 0
+) {
+
+    console.log(
+        "Missing vouchers from engine reconciliation:",
+        executionResult.reconciliation.missingGuids.length
+    );
+
+    return {
+        status: "WAITING_FOR_MISSING_VOUCHERS",
+
+        missingVoucherGuids:
+            executionResult.reconciliation.missingGuids,
+
+        executionResult
+    };
 }
 
+}
+
+/*
  const { error: postUpdateError } = await supabase
     .from("sync_batches")
     .update({
@@ -2242,7 +2150,23 @@ if (postUpdateError) {
 console.log(
     "INCREMENTAL POST COMPLETED UPDATED"
 );
+*/
 
+await BatchStatusManager.updateFields({
+
+    batch_id: sync_batch_id,
+
+    fields: {
+
+        incremental_post_completed: true
+
+    }
+
+});
+
+console.log(
+    "INCREMENTAL POST COMPLETED UPDATED"
+);
 
     fs.appendFileSync(
     "./logs/api-flow.jsonl",
@@ -2296,17 +2220,25 @@ await supabase
 
    .eq("batch_id", sync_batch_id);
 */
+await BatchStatusManager.updateFields({
 
-const { data, error } = await supabase
-    .from("sync_batches")
-    .update({
+    batch_id: sync_batch_id,
+
+    fields: {
+
         guid_scan_completed: true,
-        //total_guids: validGuids.length,
+
         total_vouchers: vouchers.length,
+
         current_module: "GUID_SCAN"
-    })
-    .eq("batch_id", sync_batch_id)
-    .select();
+
+    }
+
+});
+
+const data = null;
+
+const error = null;
 
     const { data: verifyBatch, error: verifyError } = await supabase
     .from("sync_batches")
@@ -2343,43 +2275,17 @@ console.log("VERIFY AFTER UPDATE :", verify);
     }) + "\n"
 );
 
-fs.appendFileSync(
-    "./logs/api-flow.jsonl",
-    JSON.stringify({
-        stage: "CALLING_SAVE_VOUCHER_GUIDS"
-    }) + "\n"
-);
-
-
-
-
-const reconciliationStatus =
-    await saveVoucherGuids({
-    company_code,
-    tally_owner,
-    sync_batch_id
-});
 
 fs.appendFileSync(
     "./logs/api-flow.jsonl",
     JSON.stringify({
-        stage: "SAVE_VOUCHER_GUIDS_COMPLETED",
-        reconciliationStatus
+        stage: "ENGINE_RECONCILIATION_COMPLETED"
     }) + "\n"
 );
 
-if (
-    reconciliationStatus?.status ===
-    "WAITING_FOR_MISSING_VOUCHERS"
-) {
-
-    console.log(
-        "Waiting for missing vouchers from connector..."
-    );
-
-    return reconciliationStatus;
-
-}
+console.log(
+    "Voucher reconciliation already completed by Sync Engine."
+);
 
 await supabase
     .from("sync_batches")
@@ -2419,6 +2325,7 @@ fs.appendFileSync(
 
 }
 
+/*080826
 async function cleanupOrphanVoucherData({
     company_code,
     tally_owner
@@ -2683,22 +2590,25 @@ if (orphanStockVoucherGuids.length > 0) {
 
 }
 
+*/
+
 module.exports = {
 
     saveVouchers,
-     saveVoucherGuids,
+    
+    //saveVoucherGuids,
 
     saveVoucherExecutionData,
 
-    deleteVoucherLedgers,
+     saveVoucher,
+
+ /*   deleteVoucherLedgers,
 
     deleteVoucherInventory,
 
     deleteStockVouchers,
 
     deleteBillAllocations,
-
-    saveVoucher,
 
     deleteCostCentres,
 
@@ -2711,5 +2621,5 @@ module.exports = {
     saveVoucherInventory,
 
     saveStockVouchers
-
+*/
 };

@@ -1,0 +1,30 @@
+{
+  "table": "tally_sync_cost_centres",
+  "module": "MASTER",
+  "entity_type": "COST_CENTRE",
+  "snapshotCount": 3,
+  "dbCount": 3,
+  "matched": 3,
+  "missingCount": 0,
+  "extraCount": 0,
+  "alterChangedCount": 3,
+  "missingGuids": [],
+  "extraGuids": [],
+  "alterChanged": [
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000de",
+      "oldAlterId": 369,
+      "newAlterId": null
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f5",
+      "oldAlterId": 371,
+      "newAlterId": null
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000df",
+      "oldAlterId": 370,
+      "newAlterId": null
+    }
+  ]
+}

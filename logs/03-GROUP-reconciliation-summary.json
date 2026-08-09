@@ -1,0 +1,12 @@
+{
+  "table": "tally_sync_groups",
+  "module": "MASTER",
+  "entity_type": "GROUP",
+  "summary": {
+    "snapshotCount": 29,
+    "dbCount": 29,
+    "missing": 0,
+    "extra": 0,
+    "alterChanged": 0
+  }
+}

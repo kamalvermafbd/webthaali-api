@@ -1,0 +1,21 @@
+{
+  "entity": "COST_CENTRE",
+  "module": "MASTER",
+  "chunkIndex": 1,
+  "totalChunks": 1,
+  "rows": 3,
+  "guids": [
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000de",
+      "alterId": "369"
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f5",
+      "alterId": "371"
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000df",
+      "alterId": "370"
+    }
+  ]
+}

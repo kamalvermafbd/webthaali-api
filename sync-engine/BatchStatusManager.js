@@ -103,7 +103,144 @@ class BatchStatusManager {
 
     }
 
+     // ----------------------------------
+    // Load Batch
+    // ----------------------------------
+
+        async loadBatch({
+
+            batch_id
+
+        }) {
+
+            if (!batch_id) {
+
+                throw new Error(
+
+                    "batch_id is required"
+
+                );
+
+            }
+
+            const {
+
+                data,
+
+                error
+
+            } = await supabase
+
+                .from(TABLES.SYNC_BATCHES)
+
+                .select("*")
+
+                .eq(
+
+                    "batch_id",
+
+                    batch_id
+
+                )
+
+                .single();
+
+            if (error) {
+
+                throw new Error(
+
+                    "Failed to load batch : " +
+
+                    error.message
+
+                );
+
+            }
+
+            return data;
+
+        }
+
+
         // ----------------------------------
+        // Load Running Batch
+        // ----------------------------------
+
+        async loadRunningBatch({
+
+            company_code,
+
+            tally_owner
+
+        }) {
+
+            const {
+
+                data,
+
+                error
+
+            } = await supabase
+
+                .from(TABLES.SYNC_BATCHES)
+
+                .select("*")
+
+                .eq(
+
+                    "company_code",
+
+                    company_code
+
+                )
+
+                .eq(
+
+                    "tally_owner",
+
+                    tally_owner
+
+                )
+
+                .eq(
+
+                    "batch_status",
+
+                    BATCH_STATUS.RUNNING
+
+                )
+
+                .order(
+
+                    "created_at",
+
+                    {
+
+                        ascending: false
+
+                    }
+
+                )
+
+                .limit(1);
+
+            if (error) {
+
+                throw new Error(
+
+                    "Failed to load running batch : " +
+
+                    error.message
+
+                );
+
+            }
+
+            return data?.[0] || null;
+
+        }
+
+    // ----------------------------------
     // Update Batch Status
     // ----------------------------------
 
@@ -151,7 +288,7 @@ class BatchStatusManager {
 
             batch_id,
 
-            fields: {
+           fields: {
 
                 current_module: module,
 
@@ -159,7 +296,9 @@ class BatchStatusManager {
 
                 current_action: action,
 
-                current_operation: operation
+                current_operation: operation,
+
+                last_successful_module: module
 
             }
 
@@ -293,10 +432,11 @@ class BatchStatusManager {
 
                 error_message:
 
-                    error?.message ||
+                    typeof error === "string"
 
-                    String(error)
+                        ? error
 
+                        : error?.message || "Unknown Error"
             }
 
         });

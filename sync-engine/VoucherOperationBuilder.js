@@ -4,8 +4,13 @@ const {
     ENTITY_TYPE,
     TABLES,
     OPERATION_TYPE,
-    CONFLICT_KEYS
+    CONFLICT_KEYS,
+    ALTER_ID_COLUMN,
+    VOUCHER_RECONCILIATION
 } = require("./constants");
+
+
+/*
 function buildDeleteOperations({
 
     company_code,
@@ -173,6 +178,82 @@ function buildDeleteOperations({
     ];
 
 }
+*/
+
+function buildDeleteOperations({
+    company_code,
+    tally_owner,
+    sync_batch_id,
+    voucherGuids
+}) {
+
+    const operations = [];
+
+    const childTables =
+        Object.entries(
+            VOUCHER_RECONCILIATION.CHILDREN
+        );
+
+    for (const [table, config] of childTables) {
+
+        operations.push(
+
+            OperationBuilder.build({
+
+                entity:
+                    ENTITY_TYPE.VOUCHER,
+
+                table,
+
+                operation:
+                    OPERATION_TYPE.DELETE,
+
+                filters: [
+
+                            {
+                                type: "eq",
+
+                                column: "company_code",
+
+                                value: company_code
+
+                            },
+
+                            {
+                                type: "eq",
+
+                                column: "tally_owner",
+
+                                value: tally_owner
+
+                            },
+
+                            {
+                                type: "in",
+
+                                column:
+                                    config.guidColumn,
+
+                                value:
+                                    voucherGuids
+                            }
+
+                        ],
+
+                company_code,
+
+                tally_owner,
+
+                sync_batch_id
+
+            })
+
+        );
+
+    }
+
+    return operations;
+}
 
 function buildSaveOperations({
 
@@ -339,6 +420,302 @@ function buildVoucherOperations(args) {
 
 }
 
+
+function buildAlterUpdateOperations({
+    table,
+    company_code,
+    tally_owner,
+    sync_batch_id,
+    alterChanged = []
+}) {
+
+    return alterChanged.map(item => ({
+        entity: ENTITY_TYPE.VOUCHER,
+        table: TABLES.VOUCHERS,
+        operation: OPERATION_TYPE.UPDATE,
+
+      values: {
+                [ALTER_ID_COLUMN[TABLES.VOUCHERS]]:
+                    item.newAlterId,
+
+                sync_batch_id,
+
+                updated_at:
+                    new Date().toISOString()
+            },
+
+        filters: [
+            {
+                type: "eq",
+                column: "company_code",
+                value: company_code
+            },
+            {
+                type: "eq",
+                column: "tally_owner",
+                value: tally_owner
+            },
+            {
+                type: "eq",
+                column: "guid",
+                value: item.guid
+            }
+        ]
+    }));
+}
+
+/* 080826
+
+function buildSoftDeleteOperations({
+    table,
+    company_code,
+    tally_owner,
+    sync_batch_id,
+    extraGuids = []
+}) {
+
+    return extraGuids.map(item => ({
+        entity: ENTITY_TYPE.VOUCHER,
+        table: TABLES.VOUCHERS,
+        operation: OPERATION_TYPE.UPDATE,
+
+        values: {
+            is_deleted: true,
+            sync_batch_id,
+            updated_at: new Date().toISOString()
+        },
+
+        filters: [
+            {
+                type: "eq",
+                column: "company_code",
+                value: company_code
+            },
+            {
+                type: "eq",
+                column: "tally_owner",
+                value: tally_owner
+            },
+            {
+                type: "eq",
+                column: "guid",
+                value: item.guid
+            },
+            {
+                type: "eq",
+                column: "is_deleted",
+                value: false
+            }
+        ]
+    }));
+}
+*/
+
+function buildOrphanDeleteOperations({
+    company_code,
+    tally_owner,
+    sync_batch_id,
+    orphanGuids = {}
+}) {
+
+    const operations = [];
+
+    for (
+        const [childTable, voucherGuids]
+        of Object.entries(orphanGuids)
+    ) {
+
+        if (
+            !Array.isArray(voucherGuids) ||
+            voucherGuids.length === 0
+        ) {
+            continue;
+        }
+
+        const childConfig =
+            VOUCHER_RECONCILIATION
+                .CHILDREN[childTable];
+
+        if (!childConfig) {
+            continue;
+        }
+
+        operations.push(
+
+            OperationBuilder.build({
+
+                entity:
+                    ENTITY_TYPE.VOUCHER,
+
+                table:
+                    childTable,
+
+                operation:
+                    OPERATION_TYPE.DELETE,
+
+                filters: [
+
+                    {
+                        type: "eq",
+                        column: "company_code",
+                        value: company_code
+                    },
+
+                    {
+                        type: "eq",
+                        column: "tally_owner",
+                        value: tally_owner
+                    },
+
+                    {
+                        type: "in",
+                        column:
+                            childConfig.guidColumn,
+                        value:
+                            voucherGuids
+                    }
+
+                ],
+
+                company_code,
+                tally_owner,
+                sync_batch_id
+
+            })
+
+        );
+
+    }
+
+    return operations;
+}
+
+function buildSoftDeleteOperations({
+    table,
+    company_code,
+    tally_owner,
+    sync_batch_id,
+    extraGuids = []
+}) {
+
+    const operations = [];
+
+    for (const item of extraGuids) {
+
+        const voucherGuid = item.guid;
+
+        // --------------------------------------------------
+        // 1. Child voucher rows → HARD DELETE
+        // --------------------------------------------------
+
+        operations.push(
+            ...buildDeleteOperations({
+
+                company_code,
+
+                tally_owner,
+
+                sync_batch_id,
+
+                voucherGuids: [
+                    voucherGuid
+                ]
+
+            })
+        );
+
+        // --------------------------------------------------
+        // 2. Main voucher row → SOFT DELETE
+        // --------------------------------------------------
+
+        const root =
+            VOUCHER_RECONCILIATION.ROOT;
+
+        operations.push(
+
+            OperationBuilder.build({
+
+                entity:
+                    ENTITY_TYPE.VOUCHER,
+
+                table:
+                    root.table,
+
+                operation:
+                    OPERATION_TYPE.UPDATE,
+
+                values: {
+
+                    [root.deletedColumn]:
+                        true,
+
+                    sync_batch_id,
+
+                    [root.updatedColumn]:
+                        new Date().toISOString()
+
+                },
+
+                filters: [
+
+                    {
+                        type: "eq",
+
+                        column:
+                            "company_code",
+
+                        value:
+                            company_code
+                    },
+
+                    {
+                        type: "eq",
+
+                        column:
+                            "tally_owner",
+
+                        value:
+                            tally_owner
+                    },
+
+                    {
+                        type: "eq",
+
+                        column:
+                            root.guidColumn,
+
+                        value:
+                            voucherGuid
+                    },
+
+                    {
+                        type: "eq",
+
+                        column:
+                            root.deletedColumn,
+
+                        value:
+                            false
+                    }
+
+                ],
+
+                company_code,
+
+                tally_owner,
+
+                sync_batch_id
+
+            })
+
+        );
+
+    }
+
+    return operations;
+}
+
+
 module.exports = {
 
     buildOperation,
@@ -347,6 +724,12 @@ module.exports = {
 
     buildSaveOperations,
 
-    buildVoucherOperations
+    buildVoucherOperations,
+
+    buildAlterUpdateOperations,
+
+    buildSoftDeleteOperations,
+
+    buildOrphanDeleteOperations,
 
 };

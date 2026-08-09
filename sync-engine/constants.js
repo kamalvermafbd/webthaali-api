@@ -266,23 +266,165 @@ const ENTITY_METADATA = {
 
 };
 
+
+// ------------------------------------------------------
+// Entity Sequence
+// ------------------------------------------------------
+const MASTER_ENTITY_SEQUENCE = [
+
+    ENTITY_TYPE.GROUP,
+
+    ENTITY_TYPE.STOCK_GROUP,
+
+    ENTITY_TYPE.LEDGER,
+
+    ENTITY_TYPE.STOCK,
+
+    ENTITY_TYPE.UNIT,
+
+    ENTITY_TYPE.GODOWN,
+
+    ENTITY_TYPE.COST_CENTRE
+
+];
+
+const VOUCHER_ENTITY_SEQUENCE = [
+
+    ENTITY_TYPE.VOUCHER
+
+];
+
+const ENTITY_SEQUENCE = [
+
+    ...MASTER_ENTITY_SEQUENCE,
+
+    ...VOUCHER_ENTITY_SEQUENCE
+
+];
+
+//Ye hardcoded if (GROUP)... else if (LEDGER)... ko future me replace karega.
+
 // ------------------------------------------------------
 // Conflict Keys
 // ------------------------------------------------------
 
 const CONFLICT_KEYS = {
 
+    [TABLES.GROUPS]:
+        "company_code,tally_owner,guid",
+
+    [TABLES.STOCK_GROUPS]:
+        "company_code,tally_owner,guid",
+
     [TABLES.LEDGERS]:
         "company_code,tally_owner,guid",
 
-          [TABLES.VOUCHERS]:
+    [TABLES.STOCKS]:
         "company_code,tally_owner,guid",
 
-        [TABLES.SNAPSHOT]:
-         "company_code,tally_owner,module,entity_type,guid"
+    [TABLES.UNITS]:
+        "company_code,tally_owner,guid",
+
+    [TABLES.GODOWNS]:
+        "company_code,tally_owner,guid",
+
+    [TABLES.COST_CENTRES]:
+        "company_code,tally_owner,guid",
+
+    [TABLES.VOUCHERS]:
+        "company_code,tally_owner,guid",
+
+    [TABLES.SNAPSHOT]:
+        "company_code,tally_owner,module,entity_type,guid"
 
 };
 
+// ------------------------------------------------------
+// Voucher Table Columns
+// ------------------------------------------------------
+
+const VOUCHER_COLUMNS = {
+
+    [TABLES.VOUCHERS]: {
+        GUID: "guid",
+        ALTER_ID: "alterid",
+        IS_DELETED: "is_deleted",
+        UPDATED_AT: "updated_at"
+    },
+
+    [TABLES.VOUCHER_LEDGERS]: {
+        GUID: "voucher_guid"
+    },
+
+    [TABLES.VOUCHER_INVENTORY]: {
+        GUID: "voucher_guid",
+        IS_DELETED: "is_deleted",
+        UPDATED_AT: "updated_at"
+    },
+
+    [TABLES.STOCK_VOUCHERS]: {
+        GUID: "voucher_guid",
+        IS_DELETED: "is_deleted",
+        UPDATED_AT: "updated_at"
+    },
+
+    [TABLES.BILL_ALLOCATIONS]: {
+        GUID: "voucher_guid",
+        IS_DELETED: "is_deleted",
+        UPDATED_AT: "updated_at"
+    },
+
+    [TABLES.COST_CENTRE_ALLOCATIONS]: {
+        GUID: "voucher_guid",
+        IS_DELETED: "is_deleted"
+    }
+
+};
+
+
+// ------------------------------------------------------
+// Voucher Reconciliation Columns
+// ------------------------------------------------------
+const VOUCHER_RECONCILIATION = {
+
+    ROOT: {
+        table: TABLES.VOUCHERS,
+        guidColumn: "guid",
+        deletedColumn: "is_deleted",
+        updatedColumn: "updated_at",
+        deleteMode: "SOFT_DELETE"
+    },
+
+    CHILDREN: {
+
+        [TABLES.VOUCHER_LEDGERS]: {
+            guidColumn: "voucher_guid",
+            deleteMode: "HARD_DELETE"
+        },
+
+        [TABLES.VOUCHER_INVENTORY]: {
+            guidColumn: "voucher_guid",
+            deleteMode: "HARD_DELETE"
+        },
+
+        [TABLES.STOCK_VOUCHERS]: {
+            guidColumn: "voucher_guid",
+            deleteMode: "HARD_DELETE"
+        },
+
+        [TABLES.BILL_ALLOCATIONS]: {
+            guidColumn: "voucher_guid",
+            deleteMode: "HARD_DELETE"
+        },
+
+        [TABLES.COST_CENTRE_ALLOCATIONS]: {
+            guidColumn: "voucher_guid",
+            deleteMode: "HARD_DELETE"
+        }
+
+    }
+
+};
 
 // ------------------------------------------------------
 // Batch Status
@@ -299,6 +441,41 @@ const BATCH_STATUS = {
     COMPLETED: "COMPLETED",
 
     FAILED: "FAILED"
+
+};
+
+
+// ------------------------------------------------------
+// Sync Stages
+// ------------------------------------------------------
+
+const SYNC_STAGE = {
+
+    INIT: "INIT",
+
+    WAITING_CONNECTOR: "WAITING_CONNECTOR",
+
+    CONNECTOR_READY: "CONNECTOR_READY",
+
+    RECEIVING: "RECEIVING",
+
+    VALIDATING: "VALIDATING",
+
+    EXECUTING: "EXECUTING",
+
+    RETRY: "RETRY",
+
+    SNAPSHOT: "SNAPSHOT",
+
+    RECONCILIATION: "RECONCILIATION",
+
+    ENTITY_COMPLETED: "ENTITY_COMPLETED",
+
+    GUID_SCAN: "GUID_SCAN",
+
+    POST_PROCESS: "POST_PROCESS",
+
+    COMPLETED: "COMPLETED"
 
 };
 
@@ -403,8 +580,20 @@ module.exports = {
     VALIDATION_SELECT_COLUMNS,
 
     ALTER_ID_COLUMN,
+
+    VOUCHER_COLUMNS,
+
+    VOUCHER_RECONCILIATION,
    
     MODULE_TYPE,
+
+    ENTITY_SEQUENCE,
+
+    MASTER_ENTITY_SEQUENCE,
+
+    VOUCHER_ENTITY_SEQUENCE,
+
+    SYNC_STAGE,
 
     ENTITY_METADATA,
 

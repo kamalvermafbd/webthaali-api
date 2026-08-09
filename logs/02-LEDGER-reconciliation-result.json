@@ -1,0 +1,14 @@
+{
+  "table": "tally_sync_ledgers",
+  "module": "MASTER",
+  "entity_type": "LEDGER",
+  "snapshotCount": 30,
+  "dbCount": 30,
+  "matched": 30,
+  "missingCount": 0,
+  "extraCount": 0,
+  "alterChangedCount": 0,
+  "missingGuids": [],
+  "extraGuids": [],
+  "alterChanged": []
+}

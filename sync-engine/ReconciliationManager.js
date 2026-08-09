@@ -11,14 +11,12 @@ const supabase = createClient(
 
 const SnapshotManager =
     require("./SnapshotManager");
-
+const fs = require("fs");
 
 const {
-
     VALIDATION_SELECT_COLUMNS,
-
-    ALTER_ID_COLUMN
-
+    ALTER_ID_COLUMN,
+    VOUCHER_RECONCILIATION
 } = require("./constants");
 
 
@@ -210,6 +208,46 @@ buildGuidMap(rows = []) {
 
                 }
 
+                fs.writeFileSync(
+
+              `./logs/01-${entity_type}-reconciliation-input.json`,
+
+                JSON.stringify(
+
+                    {
+
+                        table,
+
+                        company_code,
+
+                        tally_owner,
+
+                        module,
+
+                        entity_type,
+
+                        sync_batch_id,
+
+                        snapshotCount: snapshotRows.length,
+
+                        dbCount: dbRows?.length || 0,
+
+                        snapshotGuids: snapshotRows.map(r => r.guid),
+
+                        dbGuids: (dbRows || []).map(r => r.guid)
+
+                    },
+
+                    null,
+
+                    2
+
+                )
+
+            );
+
+            /* 080826
+
                 if (
 
                     snapshotRows.length === 0 &&
@@ -253,18 +291,90 @@ buildGuidMap(rows = []) {
                     };
 
                 }
-
+                */
 
         const snapshotMap =
             this.buildGuidMap(snapshotRows);
 
        const dbMap =
 
-    this.buildGuidMap(
+            this.buildGuidMap(
 
-        dbRows || []
+                dbRows || []
 
-    );
+            );
+
+// ----------------------------------
+// Child Orphan Detection
+// ----------------------------------
+
+        const orphanGuids = {};
+
+        if (
+            entity_type === "VOUCHER" &&
+            table === VOUCHER_RECONCILIATION.ROOT.table
+        ) {
+
+        const childTables =
+            Object.entries(
+                VOUCHER_RECONCILIATION.CHILDREN
+            );
+
+        for (const [childTable, config] of childTables) {
+
+            const {
+                data: childRows,
+                error: childError
+            } = await supabase
+                .from(childTable)
+                .select(config.guidColumn)
+                .eq(
+                    "company_code",
+                    company_code
+                )
+                .eq(
+                    "tally_owner",
+                    tally_owner
+                );
+
+            if (childError) {
+
+                throw new Error(
+                    `Failed to load child rows for orphan detection (${childTable}) : ` +
+                    childError.message
+                );
+
+            }
+
+            const orphanSet =
+                new Set();
+
+            for (const row of childRows || []) {
+
+                const voucherGuid =
+                    String(
+                        row[config.guidColumn] || ""
+                    ).trim();
+
+                if (
+                    voucherGuid &&
+                    !dbMap.has(voucherGuid)
+                ) {
+
+                    orphanSet.add(
+                        voucherGuid
+                    );
+
+                }
+
+            }
+
+            orphanGuids[childTable] =
+                [...orphanSet];
+
+            }
+
+        }
             
         const missingGuids = [];
 
@@ -272,11 +382,17 @@ buildGuidMap(rows = []) {
 
         const alterChanged = [];
 
+                
         const alterColumn =
+            ALTER_ID_COLUMN[table];
 
-    ALTER_ID_COLUMN[table] ||
+        if (!alterColumn) {
 
-    "alter_id";
+            throw new Error(
+                `ALTER_ID_COLUMN missing for table: ${table}`
+            );
+
+        }
 
         // ----------------------------------
         // Snapshot -> DB
@@ -354,8 +470,122 @@ buildGuidMap(rows = []) {
 
         }
 
+        fs.writeFileSync(
+
+            `./logs/02-${entity_type}-reconciliation-result.json`,
+
+            JSON.stringify(
+
+                {
+
+                    table,
+
+                    module,
+
+                    entity_type,
+
+                    snapshotCount: snapshotRows.length,
+
+                    dbCount: dbRows?.length || 0,
+
+                    matched:
+
+                        snapshotRows.length - missingGuids.length,
+
+                    missingCount:
+
+                        missingGuids.length,
+
+                    extraCount:
+
+                        extraGuids.length,
+
+                    alterChangedCount:
+
+                        alterChanged.length,
+
+                    missingGuids:
+
+                        missingGuids.map(r => ({
+
+                            guid: r.guid,
+
+                            alter_id: r[alterColumn]
+
+                        })),
+
+                    extraGuids:
+
+                        extraGuids.map(r => ({
+
+                            guid: r.guid,
+
+                            alter_id: r[alterColumn]
+
+                        })),
+
+                    alterChanged
+
+                },
+
+                null,
+
+                2
+
+            )
+
+        );
 
 
+
+        fs.writeFileSync(
+
+    `./logs/03-${entity_type}-reconciliation-summary.json`,
+
+    JSON.stringify(
+
+        {
+
+            table,
+
+            module,
+
+            entity_type,
+
+            summary: {
+
+                snapshotCount:
+
+                    snapshotRows.length,
+
+                dbCount:
+
+                    dbRows?.length || 0,
+
+                missing:
+
+                    missingGuids.length,
+
+                extra:
+
+                    extraGuids.length,
+
+                alterChanged:
+
+                    alterChanged.length
+
+            }
+
+        },
+
+        null,
+
+        2
+
+    )
+
+);
+/*080826
         return {
 
             success: true,
@@ -396,6 +626,51 @@ buildGuidMap(rows = []) {
 
                     alterChanged.length
 
+            }
+
+        };
+
+        */
+
+        return {
+
+    success: true,
+
+    table,
+    module,
+    entity_type,
+
+    sync_batch_id,
+
+    snapshotCount:
+        snapshotRows.length,
+
+    dbCount:
+        dbRows?.length || 0,
+
+    missingGuids,
+    extraGuids,
+    alterChanged,
+
+    orphanGuids,
+
+    summary: {
+        missing:
+            missingGuids.length,
+
+        extra:
+            extraGuids.length,
+
+        alterChanged:
+            alterChanged.length,
+
+        orphan:
+            Object.values(orphanGuids)
+                .reduce(
+                    (total, guids) =>
+                        total + guids.length,
+                    0
+                )
             }
 
         };

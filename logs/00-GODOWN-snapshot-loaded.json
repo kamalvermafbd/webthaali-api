@@ -1,0 +1,21 @@
+{
+  "company_code": "C0018",
+  "tally_owner": "USER",
+  "module": "MASTER",
+  "entity_type": "GODOWN",
+  "rowsFound": 2,
+  "guids": [
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000063",
+      "alter_id": 372,
+      "master_id": null,
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000dc",
+      "alter_id": 373,
+      "master_id": null,
+      "is_deleted": false
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+{
+  "total": 6,
+  "rows": [
+    {
+      "sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "company_code": "C0018",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "UNIT",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fe",
+      "alter_id": "463",
+      "master_id": null,
+      "status": "COMPLETED",
+      "is_deleted": false
+    },
+    {
+      "sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "company_code": "C0018",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "UNIT",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d6",
+      "alter_id": "460",
+      "master_id": null,
+      "status": "COMPLETED",
+      "is_deleted": false
+    },
+    {
+      "sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "company_code": "C0018",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "UNIT",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f8",
+      "alter_id": "462",
+      "master_id": null,
+      "status": "COMPLETED",
+      "is_deleted": false
+    },
+    {
+      "sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "company_code": "C0018",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "UNIT",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000e0",
+      "alter_id": "461",
+      "master_id": null,
+      "status": "COMPLETED",
+      "is_deleted": false
+    },
+    {
+      "sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "company_code": "C0018",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "UNIT",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000ce",
+      "alter_id": "458",
+      "master_id": null,
+      "status": "COMPLETED",
+      "is_deleted": false
+    },
+    {
+      "sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "company_code": "C0018",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "UNIT",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000cf",
+      "alter_id": "459",
+      "master_id": null,
+      "status": "COMPLETED",
+      "is_deleted": false
+    }
+  ]
+}

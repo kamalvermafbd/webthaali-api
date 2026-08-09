@@ -1,0 +1,183 @@
+{
+  "company_code": "C0018",
+  "tally_owner": "USER",
+  "module": "MASTER",
+  "entity_type": "GROUP",
+  "rowsFound": 29,
+  "guids": [
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000018",
+      "alter_id": 339,
+      "master_id": "24",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000000a",
+      "alter_id": 325,
+      "master_id": "10",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000000b",
+      "alter_id": 326,
+      "master_id": "11",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000007",
+      "alter_id": 322,
+      "master_id": "7",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000001",
+      "alter_id": 316,
+      "master_id": "1",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000015",
+      "alter_id": 336,
+      "master_id": "21",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000016",
+      "alter_id": 337,
+      "master_id": "22",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000001c",
+      "alter_id": 343,
+      "master_id": "28",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000001b",
+      "alter_id": 342,
+      "master_id": "27",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000005",
+      "alter_id": 320,
+      "master_id": "5",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000013",
+      "alter_id": 334,
+      "master_id": "19",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000006",
+      "alter_id": 321,
+      "master_id": "6",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000003",
+      "alter_id": 318,
+      "master_id": "3",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000012",
+      "alter_id": 333,
+      "master_id": "18",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000001a",
+      "alter_id": 341,
+      "master_id": "26",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000019",
+      "alter_id": 340,
+      "master_id": "25",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000000e",
+      "alter_id": 329,
+      "master_id": "14",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000004",
+      "alter_id": 319,
+      "master_id": "4",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000000d",
+      "alter_id": 328,
+      "master_id": "13",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000da",
+      "alter_id": 586,
+      "master_id": "218",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000002",
+      "alter_id": 317,
+      "master_id": "2",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000008",
+      "alter_id": 323,
+      "master_id": "8",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000000f",
+      "alter_id": 330,
+      "master_id": "15",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000017",
+      "alter_id": 338,
+      "master_id": "23",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000000c",
+      "alter_id": 327,
+      "master_id": "12",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000011",
+      "alter_id": 332,
+      "master_id": "17",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000010",
+      "alter_id": 331,
+      "master_id": "16",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000014",
+      "alter_id": 335,
+      "master_id": "20",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000009",
+      "alter_id": 324,
+      "master_id": "9",
+      "is_deleted": false
+    }
+  ]
+}

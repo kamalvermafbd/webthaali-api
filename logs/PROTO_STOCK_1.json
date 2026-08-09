@@ -1,0 +1,41 @@
+{
+  "entity": "STOCK",
+  "module": "MASTER",
+  "chunkIndex": 1,
+  "totalChunks": 1,
+  "rows": 8,
+  "guids": [
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d1",
+      "alterId": 576
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d0",
+      "alterId": 380
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000010d",
+      "alterId": 603
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fb",
+      "alterId": 590
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fc",
+      "alterId": 385
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000ff",
+      "alterId": 386
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f9",
+      "alterId": 608
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d7",
+      "alterId": 609
+    }
+  ]
+}

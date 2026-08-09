@@ -1,0 +1,31 @@
+{
+  "total": 2,
+  "rows": [
+    {
+      "sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "company_code": "C0018",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "GODOWN",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000dc",
+      "alter_id": 373,
+      "master_id": null,
+      "status": "COMPLETED",
+      "is_deleted": false
+    },
+    {
+      "sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+      "company_code": "C0018",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "GODOWN",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000063",
+      "alter_id": 372,
+      "master_id": null,
+      "status": "COMPLETED",
+      "is_deleted": false
+    }
+  ]
+}

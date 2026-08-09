@@ -68,6 +68,16 @@ async function saveSyncSnapshotChunk({
     }
 
 
+    console.log("================================");
+console.log("SNAPSHOT CHUNK");
+console.log("ENTITY :", entity_type);
+console.log("MODULE :", module);
+console.log("ROWS RECEIVED :", rows.length);
+console.log("FIRST GUID :", rows[0]?.guid);
+console.log("LAST GUID :", rows[rows.length - 1]?.guid);
+console.log("================================");
+
+
 
     // =========================
     // PREPARE ROWS
@@ -120,7 +130,39 @@ async function saveSyncSnapshotChunk({
     }));
 
 
+const fs = require("fs");
 
+fs.writeFileSync(
+
+    `./logs/01-${entity_type}-incoming-snapshot.json`,
+
+    JSON.stringify(
+
+        {
+
+            sync_batch_id,
+company_code,
+tally_owner,
+
+            entity_type,
+
+            module,
+
+            rowsReceived: rows.length,
+
+            snapshotRows: snapshotRows.length,
+
+            data: snapshotRows
+
+        },
+
+        null,
+
+        2
+
+    )
+
+);
 
     if (snapshotRows.length === 0) {
 

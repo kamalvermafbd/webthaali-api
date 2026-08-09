@@ -22,6 +22,9 @@ const RetryManager =
 const MasterOperationBuilder =
     require("./MasterOperationBuilder");
 
+const VoucherOperationBuilder =
+    require("./VoucherOperationBuilder");
+
 const {
 
     ENTITY_METADATA,
@@ -126,6 +129,354 @@ finally {
 
 }
 
+// ----------------------------------
+// Post Execution
+// ----------------------------------
+
+async postExecution({
+
+    batch_id,
+    module,
+    entity,
+    table,
+    company_code,
+    tally_owner,
+    sync_batch_id,
+    snapshotRows = [],
+    validation,
+    execution
+
+}) {
+
+      
+
+
+const fs = require("fs");
+
+if (snapshotRows.length > 0) {
+
+    await SnapshotManager.saveSnapshotRows({
+
+        rows: snapshotRows
+
+    });
+
+    const fs = require("fs");
+
+    fs.writeFileSync(
+
+        `./logs/PRE_SAVE_${entity}.json`,
+
+        JSON.stringify(
+
+            {
+
+                entity,
+
+                rowsReceived:
+                    snapshotRows.length,
+
+                firstRow:
+                    snapshotRows[0] || null,
+
+                guids:
+                    snapshotRows.map(
+                        r => r.guid
+                    )
+
+            },
+
+            null,
+
+            2
+
+        )
+
+    );
+
+}
+
+    const retryResult =
+
+    execution.failedCount === 0
+
+        ? {
+
+            success: true,
+
+            retried: 0
+
+        }
+
+        : await RetryManager.retry({
+
+            batch_id,
+
+           operations:
+
+                execution.failedOperations.map(
+
+                    item => item.operation
+
+                )
+
+        });
+
+        if (!retryResult.success) {
+
+            await BatchStatusManager.markFailed({
+
+                batch_id
+
+            });
+
+            return {
+
+                success: false,
+
+                execution,
+
+                retryResult
+
+            };
+
+        }
+
+/* 080826
+        await SnapshotManager.removeMissingGuids({
+
+    sync_batch_id,
+
+    company_code,
+
+    tally_owner,
+
+    module,
+
+    entity_type: entity
+
+});
+*/
+const reconciliation =
+
+    await ReconciliationManager.reconcile({
+
+        table,
+
+        company_code,
+
+        tally_owner,
+
+        module,
+
+        entity_type: entity,
+
+        sync_batch_id
+
+    });
+
+    console.log("================================");
+    console.log("RECON RESULT");
+    console.log("missing :", reconciliation.missingGuids.length);
+    console.log("extra :", reconciliation.extraGuids.length);
+    console.log("alter :", reconciliation.alterChanged.length);
+    console.log("================================");
+
+
+let reconciliationOperations = [];
+
+const ReconciliationOperationBuilder =
+    entity === "VOUCHER"
+        ? VoucherOperationBuilder
+        : MasterOperationBuilder;
+
+    reconciliationOperations.push(
+
+    ...ReconciliationOperationBuilder.buildAlterUpdateOperations({
+
+        table,
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id,
+
+        alterChanged:
+            reconciliation.alterChanged
+
+    })
+
+);
+
+    reconciliationOperations.push(
+
+    ...ReconciliationOperationBuilder.buildSoftDeleteOperations({
+
+        table,
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id,
+
+        extraGuids:
+            reconciliation.extraGuids
+
+    })
+
+);
+
+
+if (entity === "VOUCHER") {
+
+    reconciliationOperations.push(
+
+        ...VoucherOperationBuilder
+            .buildOrphanDeleteOperations({
+
+                company_code,
+
+                tally_owner,
+
+                sync_batch_id,
+
+                orphanGuids:
+                    reconciliation.orphanGuids
+
+            })
+
+    );
+
+}
+
+const reconciliationExecution =
+
+    reconciliationOperations.length === 0
+
+        ? {
+            success: true,
+            failedCount: 0
+        }
+
+        : await this.execute({
+
+            operations:
+                reconciliationOperations
+
+        });
+
+const reconciliationRetryResult =
+
+    reconciliationExecution.failedCount === 0
+
+        ? {
+            success: true,
+            retried: 0
+        }
+
+        : await RetryManager.retry({
+
+            batch_id,
+
+            operations:
+                reconciliationExecution.failedOperations.map(
+                    item => item.operation
+                )
+
+        });
+
+if (!reconciliationRetryResult.success) {
+
+    await BatchStatusManager.markFailed({
+
+        batch_id
+
+    });
+
+    return {
+
+        success: false,
+
+        validation,
+
+        execution,
+
+        retryResult,
+
+        reconciliation,
+
+        reconciliationExecution,
+
+        reconciliationRetryResult
+
+    };
+
+}
+
+ await SnapshotManager.removeMissingGuids({
+
+    sync_batch_id,
+    company_code,
+    tally_owner,
+    module,
+    entity_type: entity
+
+    });
+
+
+await BatchStatusManager.markReconciliationCompleted({
+
+    batch_id
+
+});
+
+await BatchStatusManager.updateModule({
+
+    batch_id,
+
+    module,
+
+    entity,
+
+    action: "COMPLETED"
+
+});
+
+await BatchStatusManager.updateFields({
+
+    batch_id,
+
+    fields: {
+
+        last_successful_module: module
+
+    }
+
+});
+return {
+
+    success: true,
+
+    validation,
+
+    execution,
+
+    retryResult,
+
+    reconciliation,
+
+    missingGuids:
+        reconciliation.missingGuids || [],
+
+    reconciliationExecution,
+
+    reconciliationRetryResult
+};
+
+}
+
 
 
     // ----------------------------------
@@ -149,6 +500,12 @@ finally {
         options = {}
 
     }) {
+
+        console.log("================================");
+        console.log("BATCH MANAGER");
+        console.log("entity :", entity);
+        console.log("rows received :", rows?.length);
+        console.log("================================");
 
         const metadata =
 
@@ -298,101 +655,21 @@ const {
 
             });
 
-        if (
+       if (
 
-            validation.newRows.length === 0 &&
+    validation.newRows.length === 0 &&
 
-            validation.changedRows.length === 0
+    validation.changedRows.length === 0
 
-        ) {
+) {
 
-            await BatchStatusManager.updateModule({
+    console.log(
 
-            batch_id,
+        "No DB changes detected. Continuing with reconciliation..."
 
-            module,
+    );
 
-            entity,
-
-            action: "COMPLETED"
-
-        });
-
-        await BatchStatusManager.markReconciliationCompleted({
-
-            batch_id
-
-        });
-
-            await BatchStatusManager.markCompleted({
-
-                batch_id,
-
-                module,
-
-                processed:
-
-                    validation.unchangedRows.length,
-
-                failed: 0
-
-            });
-
-          return {
-
-            success: true,
-
-            message:
-
-                "No changes detected",
-
-            validation,
-
-            execution: {
-
-                success: true,
-
-                successCount: 0,
-
-                failedCount: 0,
-
-                failedOperations: []
-
-            },
-
-            retryResult: {
-
-                success: true,
-
-                retried: 0
-
-            },
-
-            reconciliation: {
-
-                success: true,
-
-                missingGuids: [],
-
-                extraGuids: [],
-
-                alterChanged: [],
-
-                summary: {
-
-                    missing: 0,
-
-                    extra: 0,
-
-                    alterChanged: 0
-
-                }
-
-            }
-
-        };
-
-        }
+}
 
             let operations = [];
 
@@ -452,7 +729,41 @@ const {
         }
 
 
-       const execution =
+    const snapshotRows =
+
+    dbRows.map(row => ({
+
+        sync_batch_id,
+
+        last_sync_batch_id: sync_batch_id,
+
+        company_code,
+
+        tally_owner,
+
+        module,
+
+        entity_type: entity,
+
+        guid: row.guid,
+
+        alter_id:
+            row.alter_id ??
+            row.alterid ??
+            null,
+
+        master_id:
+            row.master_id ??
+            null,
+
+        status: "COMPLETED",
+
+        is_deleted: false
+
+    }));
+
+
+    const execution =
 
     await this.execute({
 
@@ -460,229 +771,31 @@ const {
 
     });
 
-    const retryResult =
 
-    execution.failedCount === 0
 
-        ? {
+    return await this.postExecution({
 
-            success: true,
+    batch_id,
 
-            retried: 0
+    module,
 
-        }
+    entity,
 
-        : await RetryManager.retry({
+    table,
 
-            batch_id,
+    company_code,
 
-           operations:
+    tally_owner,
 
-                execution.failedOperations.map(
+    sync_batch_id,
 
-                    item => item.operation
+    snapshotRows,
 
-                )
+    validation,
 
-        });
+    execution
 
-        if (!retryResult.success) {
-
-            await BatchStatusManager.markFailed({
-
-                batch_id
-
-            });
-
-            return {
-
-                success: false,
-
-                execution,
-
-                retryResult
-
-            };
-
-        }
-
-        
-        await SnapshotManager.removeMissingGuids({
-
-            sync_batch_id,
-
-            company_code,
-
-            tally_owner,
-
-            module,
-
-            entity_type:
-
-                entity
-
-        });
-
-
-    const reconciliation =
-
-        await ReconciliationManager.reconcile({
-
-            table,
-
-            company_code,
-
-            tally_owner,
-
-            module,
-
-            entity_type:
-
-                entity,
-
-            sync_batch_id
-
-        });
-
-
-        let reconciliationOperations = [];
-
-        reconciliationOperations.push(
-
-            ...MasterOperationBuilder.buildAlterUpdateOperations({
-
-                table,
-
-                company_code,
-
-                tally_owner,
-
-                sync_batch_id,
-
-                alterChanged:
-
-                    reconciliation.alterChanged
-
-            })
-
-        );
-
-        reconciliationOperations.push(
-
-            ...MasterOperationBuilder.buildSoftDeleteOperations({
-
-                table,
-
-                company_code,
-
-                tally_owner,
-
-                sync_batch_id,
-
-                extraGuids:
-
-                    reconciliation.extraGuids
-
-            })
-
-        );
-
-       const reconciliationExecution =
-
-            reconciliationOperations.length === 0
-
-                ? {
-
-                    success: true,
-
-                    failedCount: 0
-
-                }
-
-                : await this.execute({
-
-                    operations:
-
-                        reconciliationOperations
-
-                });
-
-        if (!reconciliationExecution.success) {
-
-            await BatchStatusManager.markFailed({
-
-                batch_id
-
-            });
-
-           return {
-
-                success: false,
-
-                validation,
-
-                execution,
-
-                retryResult,
-
-                reconciliation,
-
-                reconciliationExecution
-
-            };
-
-        }
-
-        await BatchStatusManager.markReconciliationCompleted({
-
-            batch_id
-
-        });
-
-        await BatchStatusManager.updateModule({
-
-            batch_id,
-
-            module,
-
-            entity,
-
-            action: "COMPLETED"
-
-        });
-
-        await BatchStatusManager.markCompleted({
-
-            batch_id,
-
-              module,
-
-            processed:
-
-                execution.successCount || 0,
-
-            failed:
-
-                execution.failedCount || 0
-
-        });
-
-
-        return {
-
-            success: true,
-
-            validation,
-
-            execution,
-
-            retryResult,
-
-            reconciliation
-
-        };
-
-
+});
 
     }
 

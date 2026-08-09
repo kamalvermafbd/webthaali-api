@@ -1,0 +1,7 @@
+{
+  "entity": "UNIT",
+  "expectedItems": 6,
+  "actualReceived": 6,
+  "expectedChunks": 1,
+  "snapshot": true
+}

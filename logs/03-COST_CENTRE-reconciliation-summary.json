@@ -1,0 +1,12 @@
+{
+  "table": "tally_sync_cost_centres",
+  "module": "MASTER",
+  "entity_type": "COST_CENTRE",
+  "summary": {
+    "snapshotCount": 3,
+    "dbCount": 3,
+    "missing": 0,
+    "extra": 0,
+    "alterChanged": 3
+  }
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000010c",
+    "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+    "is_deleted": false
+  },
+  {
+    "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f7",
+    "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+    "is_deleted": false
+  },
+  {
+    "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fd",
+    "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+    "is_deleted": false
+  },
+  {
+    "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000e2",
+    "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+    "is_deleted": false
+  },
+  {
+    "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fa",
+    "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+    "is_deleted": false
+  },
+  {
+    "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000e3",
+    "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+    "is_deleted": false
+  }
+]

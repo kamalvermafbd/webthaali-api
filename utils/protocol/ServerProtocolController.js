@@ -35,6 +35,28 @@ class ServerProtocolController {
                 collection.key
             ] = rows;
 
+            const fs = require("fs");
+
+fs.writeFileSync(
+
+    `./logs/FINAL_${collection.key}.json`,
+
+    JSON.stringify(
+
+        {
+            collection: collection.key,
+            total: rows.length,
+            rows
+        },
+
+        null,
+
+        2
+
+    )
+
+);
+
             console.log(
 
                 `DONE -> ${collection.key}`

@@ -145,6 +145,14 @@ class BatchExecutor {
 
         } = operation;
 
+        const rowsWithBatch =
+            rows.map(row => ({
+                ...row,
+                sync_batch_id:
+                    operation.sync_batch_id
+            }));
+
+
         if (rows.length === 0) {
 
             return true;
@@ -153,9 +161,16 @@ class BatchExecutor {
 
         await this.processChunks({
 
-        rows,
+        rows: rowsWithBatch,
 
         callback: async (chunk) => {
+
+            console.log("================================");
+            console.log("BATCH EXECUTOR");
+            console.log("table :", table);
+            console.log("chunk size :", chunk.length);
+            console.log("total rows :", rows.length);
+            console.log("================================");
 
         const {
 
@@ -201,6 +216,13 @@ return true;
 
         } = operation;
 
+        const rowsWithBatch =
+            rows.map(row => ({
+                ...row,
+                sync_batch_id:
+                    operation.sync_batch_id
+            }));
+
         if (rows.length === 0) {
 
             return true;
@@ -209,12 +231,14 @@ return true;
 
      await this.processChunks({
 
-        rows,
+      //  rows,
+
+        rows: rowsWithBatch,
 
         callback: async (chunk) => {
 
-            console.dir(chunk[0], {
-    depth: null
+        console.dir(chunk[0], {
+        depth: null
 });
 
 console.log("OPTIONS :", options);
@@ -236,6 +260,8 @@ console.log("OPTIONS :", options);
                     options
 
                 );
+
+                console.log("UPSERT DONE :", table, chunk.length);
 
             if (error) {
 
@@ -259,77 +285,77 @@ console.log("OPTIONS :", options);
     // UPDATE
     // ----------------------------------
 
-    async executeUpdate(operation) {
+   async executeUpdate(operation) {
 
-        const {
+    const {
+        table,
+        values,
+        filters = []
+    } = operation;
 
-            table,
+    if (!values) {
 
-            values,
+        throw new Error(
+            "Update values are required"
+        );
 
-            filters = []
+    }
 
-        } = operation;
+    if (!filters.length) {
 
-        if (!values) {
+        throw new Error(
+            "Operation requires filters"
+        );
 
-            throw new Error(
+    }
 
-                "Update values are required"
+    const inFilter =
+        filters.find(
+            filter =>
+                filter.type === "in" &&
+                Array.isArray(filter.value)
+        );
 
-            );
+    // ----------------------------------
+    // No IN filter → normal UPDATE
+    // ----------------------------------
 
-        }
+    if (!inFilter) {
 
         let query =
             supabase
                 .from(table)
                 .update(values);
 
-        if (!filters.length) {
+        for (const filter of filters) {
 
-            throw new Error(
+            if (
+                typeof query[filter.type] !==
+                "function"
+            ) {
 
-                "Operation requires filters"
+                throw new Error(
+                    `Unsupported filter type : ${filter.type}`
+                );
 
-            );
+            }
+
+            query =
+                query[filter.type](
+                    filter.column,
+                    filter.value
+                );
 
         }
 
-      for (const filter of filters) {
-
-    if (typeof query[filter.type] !== "function") {
-
-        throw new Error(
-
-            `Unsupported filter type : ${filter.type}`
-
-        );
-
-    }
-
-    query = query[filter.type](
-
-        filter.column,
-
-        filter.value
-
-    );
-
-}
-
         const {
-
             error
-
         } = await query;
 
         if (error) {
 
             throw new Error(
-
                 `UPDATE failed (${table}) : ${error.message}`
-
             );
 
         }
@@ -339,9 +365,95 @@ console.log("OPTIONS :", options);
     }
 
     // ----------------------------------
-    // DELETE
+    // Empty IN → nothing to update
     // ----------------------------------
 
+    if (inFilter.value.length === 0) {
+
+        return true;
+
+    }
+
+    // ----------------------------------
+    // UPDATE IN chunks
+    // ----------------------------------
+
+    await this.processChunks({
+
+        rows: inFilter.value,
+
+        callback: async (chunk) => {
+
+            let query =
+                supabase
+                    .from(table)
+                    .update(values);
+
+            for (const filter of filters) {
+
+                if (
+                    typeof query[filter.type] !==
+                    "function"
+                ) {
+
+                    throw new Error(
+                        `Unsupported filter type : ${filter.type}`
+                    );
+
+                }
+
+                const value =
+                    filter === inFilter
+                        ? chunk
+                        : filter.value;
+
+                query =
+                    query[filter.type](
+                        filter.column,
+                        value
+                    );
+
+            }
+
+            console.log("================================");
+            console.log("BATCH UPDATE");
+            console.log(
+                "table :",
+                table
+            );
+            console.log(
+                "chunk size :",
+                chunk.length
+            );
+            console.log(
+                "total values :",
+                inFilter.value.length
+            );
+            console.log("================================");
+
+            const {
+                error
+            } = await query;
+
+            if (error) {
+
+                throw new Error(
+                    `UPDATE failed (${table}) : ${error.message}`
+                );
+
+            }
+
+        }
+
+    });
+
+    return true;
+
+}
+    // ----------------------------------
+    // DELETE
+    // ----------------------------------
+/*
    async executeDelete(operation) {
 
         const {
@@ -433,8 +545,168 @@ console.log("OPTIONS :", options);
         return true;
 
     }
+    */
 
+        // ----------------------------------
+    // DELETE
+    // ----------------------------------
 
+    async executeDelete(operation) {
+
+        const {
+            table,
+            filters = []
+        } = operation;
+
+        if (!filters.length) {
+
+            throw new Error(
+                "Operation requires filters"
+            );
+
+        }
+
+        const inFilter =
+            filters.find(
+                filter =>
+                    filter.type === "in" &&
+                    Array.isArray(filter.value)
+            );
+
+        // ----------------------------------
+        // No IN filter → normal DELETE
+        // ----------------------------------
+
+        if (!inFilter) {
+
+            let query =
+                supabase
+                    .from(table)
+                    .delete();
+
+            for (const filter of filters) {
+
+                if (
+                    typeof query[filter.type] !==
+                    "function"
+                ) {
+
+                    throw new Error(
+                        `Unsupported filter type : ${filter.type}`
+                    );
+
+                }
+
+                query =
+                    query[filter.type](
+                        filter.column,
+                        filter.value
+                    );
+
+            }
+
+            const {
+                error
+            } = await query;
+
+            if (error) {
+
+                throw new Error(
+                    `DELETE failed (${table}) : ${error.message}`
+                );
+
+            }
+
+            return true;
+
+        }
+
+        // ----------------------------------
+        // Empty IN → nothing to delete
+        // ----------------------------------
+
+        if (inFilter.value.length === 0) {
+
+            return true;
+
+        }
+
+        // ----------------------------------
+        // DELETE IN chunks
+        // ----------------------------------
+
+        await this.processChunks({
+
+            rows: inFilter.value,
+
+            callback: async (chunk) => {
+
+                let query =
+                    supabase
+                        .from(table)
+                        .delete();
+
+                for (const filter of filters) {
+
+                    if (
+                        typeof query[filter.type] !==
+                        "function"
+                    ) {
+
+                        throw new Error(
+                            `Unsupported filter type : ${filter.type}`
+                        );
+
+                    }
+
+                    const value =
+                        filter === inFilter
+                            ? chunk
+                            : filter.value;
+
+                    query =
+                        query[filter.type](
+                            filter.column,
+                            value
+                        );
+
+                }
+
+                console.log("================================");
+                console.log("BATCH DELETE");
+                console.log(
+                    "table :",
+                    table
+                );
+                console.log(
+                    "chunk size :",
+                    chunk.length
+                );
+                console.log(
+                    "total values :",
+                    inFilter.value.length
+                );
+                console.log("================================");
+
+                const {
+                    error
+                } = await query;
+
+                if (error) {
+
+                    throw new Error(
+                        `DELETE failed (${table}) : ${error.message}`
+                    );
+
+                }
+
+            }
+
+        });
+
+        return true;
+
+    }
 
 
 }
