@@ -3,7 +3,7 @@
   "tally_owner": "USER",
   "module": "VOUCHER",
   "entity_type": "VOUCHER",
-  "rowsFound": 26,
+  "rowsFound": 25,
   "guids": [
     {
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000014",
@@ -42,7 +42,7 @@
       "is_deleted": false
     },
     {
-      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000068",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000001a",
       "alter_id": null,
       "master_id": null,
       "is_deleted": false
@@ -61,6 +61,12 @@
     },
     {
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000001d",
+      "alter_id": null,
+      "master_id": null,
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000002b",
       "alter_id": null,
       "master_id": null,
       "is_deleted": false
@@ -91,18 +97,6 @@
     },
     {
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000029",
-      "alter_id": null,
-      "master_id": null,
-      "is_deleted": false
-    },
-    {
-      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000001a",
-      "alter_id": null,
-      "master_id": null,
-      "is_deleted": false
-    },
-    {
-      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000002b",
       "alter_id": null,
       "master_id": null,
       "is_deleted": false

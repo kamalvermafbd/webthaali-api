@@ -1,9 +1,23 @@
 const fs = require("fs");
 const path = require("path");
 
-const dir = path.join(__dirname, "services");
+//const dir = path.join(__dirname, "services");
+const dir = path.join(__dirname, "logs");
 
 const patterns = [
+    /^00-(COST_CENTRE|GODOWN|GROUP|LEDGER|STOCK_GROUP|STOCK|UNIT|VOUCHER)-snapshot-loaded\.json$/,
+/^01-(COST_CENTRE|GODOWN|GROUP|LEDGER|STOCK_GROUP|STOCK|UNIT|VOUCHER)-(incoming-snapshot|reconciliation-input)\.json$/,
+/^02-before-upsert-(COST_CENTRE|GODOWN|GROUP|LEDGER|STOCK_GROUP|STOCK|UNIT|VOUCHER)\.json$/,
+  /^00-.*\.json$/,
+  /^01-.*\.json$/,
+  /^02-.*\.json$/,
+  /^03-.*\.json$/,
+  /^BEFORE_SAVE_.*\.json$/,
+  /^AFTER_SAVE_.*\.json$/,
+/^FINAL_.*\.json$/,
+/^PRE_SAVE_.*\.json$/,
+/^PROTO_.*\.json$/,
+/^REMOVE_.*\.json$/,
     /^incoming-vouchers-.*\.json$/,
     /^integrity-entry-.*\.txt$/,
     /^voucher-integrity-debug-.*\.json$/,

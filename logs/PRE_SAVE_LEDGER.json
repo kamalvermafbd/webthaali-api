@@ -2,8 +2,8 @@
   "entity": "LEDGER",
   "rowsReceived": 30,
   "firstRow": {
-    "sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
-    "last_sync_batch_id": "78755ee7-9b09-49d6-83e0-124a777a3a4d",
+    "sync_batch_id": "f04890d1-a96d-45cc-a546-5e14b7860e3d",
+    "last_sync_batch_id": "f04890d1-a96d-45cc-a546-5e14b7860e3d",
     "company_code": "C0018",
     "tally_owner": "USER",
     "module": "MASTER",

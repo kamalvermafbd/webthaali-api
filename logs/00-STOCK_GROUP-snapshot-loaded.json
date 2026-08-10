@@ -12,12 +12,6 @@
       "is_deleted": false
     },
     {
-      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f7",
-      "alter_id": 376,
-      "master_id": "247",
-      "is_deleted": false
-    },
-    {
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fd",
       "alter_id": 589,
       "master_id": "253",
@@ -39,6 +33,12 @@
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000e3",
       "alter_id": 375,
       "master_id": "227",
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f7",
+      "alter_id": 376,
+      "master_id": "247",
       "is_deleted": false
     }
   ]

@@ -2,21 +2,17 @@
   "table": "tally_vouchers",
   "module": "VOUCHER",
   "entity_type": "VOUCHER",
-  "snapshotCount": 26,
-  "dbCount": 28,
-  "matched": 26,
+  "snapshotCount": 25,
+  "dbCount": 26,
+  "matched": 25,
   "missingCount": 0,
-  "extraCount": 2,
+  "extraCount": 1,
   "alterChangedCount": 25,
   "missingGuids": [],
   "extraGuids": [
     {
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000005",
       "alter_id": 12
-    },
-    {
-      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000690",
-      "alter_id": null
     }
   ],
   "alterChanged": [
@@ -51,6 +47,11 @@
       "newAlterId": null
     },
     {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000001a",
+      "oldAlterId": 295,
+      "newAlterId": null
+    },
+    {
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000001b",
       "oldAlterId": 227,
       "newAlterId": null
@@ -63,6 +64,11 @@
     {
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000001d",
       "oldAlterId": 238,
+      "newAlterId": null
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000002b",
+      "oldAlterId": 241,
       "newAlterId": null
     },
     {
@@ -88,16 +94,6 @@
     {
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000029",
       "oldAlterId": 240,
-      "newAlterId": null
-    },
-    {
-      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000001a",
-      "oldAlterId": 295,
-      "newAlterId": null
-    },
-    {
-      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000002b",
-      "oldAlterId": 241,
       "newAlterId": null
     },
     {

@@ -12,16 +12,6 @@
   "extraGuids": [],
   "alterChanged": [
     {
-      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f8",
-      "oldAlterId": 462,
-      "newAlterId": null
-    },
-    {
-      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000e0",
-      "oldAlterId": 461,
-      "newAlterId": null
-    },
-    {
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fe",
       "oldAlterId": 463,
       "newAlterId": null
@@ -29,6 +19,16 @@
     {
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d6",
       "oldAlterId": 460,
+      "newAlterId": null
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f8",
+      "oldAlterId": 462,
+      "newAlterId": null
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000e0",
+      "oldAlterId": 461,
       "newAlterId": null
     },
     {

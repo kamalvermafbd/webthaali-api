@@ -12,6 +12,11 @@
   "extraGuids": [],
   "alterChanged": [
     {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d1",
+      "oldAlterId": 576,
+      "newAlterId": null
+    },
+    {
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d0",
       "oldAlterId": 380,
       "newAlterId": null
@@ -24,11 +29,6 @@
     {
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fb",
       "oldAlterId": 590,
-      "newAlterId": null
-    },
-    {
-      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d1",
-      "oldAlterId": 576,
       "newAlterId": null
     },
     {

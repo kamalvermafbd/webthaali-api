@@ -36814,6 +36814,22 @@ console.log(
     masterStatusResult
 );
 
+// =========================
+// FINAL BATCH COMPLETION
+// =========================
+
+const batchCompleted =
+    await BatchStatusManager.markCompleted({
+
+        batch_id: sync_batch_id
+
+    });
+
+console.log(
+    "BATCH COMPLETED :",
+    batchCompleted
+);
+
 const cleanupResult =
 await CleanupManager.cleanup({
 

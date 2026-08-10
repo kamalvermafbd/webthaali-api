@@ -1,7 +1,7 @@
 {
   "entity": "COST_CENTRE",
-  "expectedItems": 3,
-  "actualReceived": 3,
+  "expectedItems": 4,
+  "actualReceived": 4,
   "expectedChunks": 1,
   "snapshot": true
 }

@@ -3,10 +3,10 @@
   "module": "MASTER",
   "entity_type": "COST_CENTRE",
   "summary": {
-    "snapshotCount": 3,
-    "dbCount": 3,
+    "snapshotCount": 4,
+    "dbCount": 4,
     "missing": 0,
     "extra": 0,
-    "alterChanged": 3
+    "alterChanged": 4
   }
 }

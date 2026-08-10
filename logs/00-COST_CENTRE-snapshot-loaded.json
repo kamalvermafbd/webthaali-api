@@ -3,7 +3,7 @@
   "tally_owner": "USER",
   "module": "MASTER",
   "entity_type": "COST_CENTRE",
-  "rowsFound": 3,
+  "rowsFound": 4,
   "guids": [
     {
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000de",
@@ -20,6 +20,12 @@
     {
       "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000df",
       "alter_id": 370,
+      "master_id": null,
+      "is_deleted": false
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000111",
+      "alter_id": 612,
       "master_id": null,
       "is_deleted": false
     }

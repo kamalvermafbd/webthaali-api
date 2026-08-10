@@ -3,10 +3,10 @@
   "module": "VOUCHER",
   "entity_type": "VOUCHER",
   "summary": {
-    "snapshotCount": 26,
-    "dbCount": 28,
+    "snapshotCount": 25,
+    "dbCount": 26,
     "missing": 0,
-    "extra": 2,
+    "extra": 1,
     "alterChanged": 25
   }
 }
