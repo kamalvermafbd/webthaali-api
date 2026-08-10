@@ -28,7 +28,7 @@ const CostCentreRowBuilder =
     require("../services/CostCentreRowBuilder");
 
 const VoucherRowBuilder =
-    require("../services/VoucherRowBuilder");
+    require("../services/voucherRowBuilder");
 
 
 
