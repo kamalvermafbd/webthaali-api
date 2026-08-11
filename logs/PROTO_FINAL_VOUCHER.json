@@ -1,7 +1,0 @@
-{
-  "entity": "VOUCHER",
-  "expectedItems": 6587,
-  "actualReceived": 6587,
-  "expectedChunks": 2,
-  "snapshot": true
-}

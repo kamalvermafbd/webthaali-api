@@ -1,7 +1,0 @@
-{
-  "entity": "STOCK_GROUP",
-  "expectedItems": 6,
-  "actualReceived": 6,
-  "expectedChunks": 1,
-  "snapshot": true
-}
