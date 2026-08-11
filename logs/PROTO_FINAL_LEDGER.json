@@ -1,0 +1,7 @@
+{
+  "entity": "LEDGER",
+  "expectedItems": 30,
+  "actualReceived": 30,
+  "expectedChunks": 1,
+  "snapshot": true
+}

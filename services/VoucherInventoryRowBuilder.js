@@ -1,3 +1,20 @@
+function safeTrim(value) {
+    if (value == null) return "";
+
+    if (typeof value === "string") {
+        return value.trim();
+    }
+
+    if (
+        typeof value === "number" ||
+        typeof value === "boolean"
+    ) {
+        return String(value).trim();
+    }
+
+    return "";
+}
+
 function buildInventoryRows({
 
     voucher,
@@ -75,16 +92,14 @@ function buildInventoryRows({
         rows.push({
 
             voucher_guid:
-
-                header.guid.trim(),
+                safeTrim(header.guid),
 
             company_code,
 
             tally_owner,
 
             stock_item:
-
-                item.stockItem?.trim() || null,
+                safeTrim(item.stockItem) || null,
 
             actual_qty:
 
@@ -102,9 +117,8 @@ function buildInventoryRows({
 
                 item.billedQtyValue || null,
 
-            unit:
-
-                item.unit?.trim() || null,
+                unit:
+                safeTrim(item.unit) || null,
 
             rate:
 
@@ -127,8 +141,7 @@ function buildInventoryRows({
                 item.discount ?? null,
 
             godown:
-
-                item.godown?.trim() || null,
+                  safeTrim(item.godown) || null,
 
             batch_id:
 

@@ -1,0 +1,39 @@
+{
+  "table": "tally_sync_stocks",
+  "module": "MASTER",
+  "entity_type": "STOCK",
+  "snapshotCount": 135,
+  "dbCount": 127,
+  "matched": 127,
+  "missingCount": 8,
+  "extraCount": 0,
+  "alterChangedCount": 0,
+  "missingGuids": [
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d0"
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d1"
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d7"
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f9"
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fb"
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fc"
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000ff"
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000010d"
+    }
+  ],
+  "extraGuids": [],
+  "alterChanged": []
+}

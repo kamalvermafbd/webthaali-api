@@ -17,13 +17,12 @@ const {
     removeMissingSnapshotGuids
 } = require("../services/sync/SyncSnapshotService");
 
-const ACK_TIMEOUT = 999999933330000;
+const ACK_TIMEOUT = 15 * 60 * 1000;
 
 async function sendChunkedToConnector(
     socket,
     event,
-    payload,
-    timeout = 30000
+    payload
 ) {
 
     return new Promise((resolve, reject) => {
@@ -38,19 +37,21 @@ async function sendChunkedToConnector(
         let receivedItems = 0;
 
         let completed = false;
-        
+
+
+        let responseBatchId = null;
+        const receivedChunkIndexes = new Set();
 
         const resultEvent = `${event}Result`;
         const chunkEvent = `${event}Chunk`;
         const ackEvent = `${event}ChunkAck`;
         const completeEvent = `${event}Complete`;
-    let timer;
+    /*
+        let timer;
 
     function resetTimeout() {
-
-    
-
         }
+    */
 /*
         const timer = setTimeout(() => {
 
@@ -66,7 +67,7 @@ async function sendChunkedToConnector(
 */
         function cleanup() {
 
-            clearTimeout(timer);
+            //clearTimeout(timer);
 
             socket.off(resultEvent, onResult);
             socket.off(chunkEvent, onChunk);
@@ -131,16 +132,11 @@ async function sendChunkedToConnector(
 
 
             if (data.success === false) {
-
                 return reject(
-                    new Error(
-                        data.error || "Chunk rejected"
-                    )
+                    new Error(data.error || "Chunk rejected")
                 );
-
             }
-            resetTimeout();
-            
+
             resolve();
 
         }
@@ -181,6 +177,106 @@ async function sendChunkedToConnector(
 
 }
 
+
+function waitForCompleteAck(batchId) {
+
+    return new Promise((resolve, reject) => {
+
+        const completeAckEvent =
+            `${event}CompleteAck`;
+
+        const timeout = setTimeout(() => {
+
+            socket.off(
+                completeAckEvent,
+                onCompleteAck
+            );
+
+            socket.off(
+                "disconnect",
+                onDisconnect
+            );
+
+            reject(
+                new Error(
+                    "Complete ACK timeout"
+                )
+            );
+
+        }, ACK_TIMEOUT);
+
+        function onCompleteAck(data) {
+
+            if (
+                !data ||
+                data.batchId !== batchId
+            ) {
+                return;
+            }
+
+            clearTimeout(timeout);
+
+            socket.off(
+                completeAckEvent,
+                onCompleteAck
+            );
+
+            socket.off(
+                "disconnect",
+                onDisconnect
+            );
+
+            if (data.success === false) {
+
+                return reject(
+                    new Error(
+                        data.error ||
+                        "Complete rejected"
+                    )
+                );
+
+            }
+
+            resolve();
+
+        }
+
+        function onDisconnect(reason) {
+
+            clearTimeout(timeout);
+
+            socket.off(
+                completeAckEvent,
+                onCompleteAck
+            );
+
+            socket.off(
+                "disconnect",
+                onDisconnect
+            );
+
+            reject(
+                new Error(
+                    `Connector disconnected: ${reason}`
+                )
+            );
+
+        }
+
+        socket.on(
+            completeAckEvent,
+            onCompleteAck
+        );
+
+        socket.once(
+            "disconnect",
+            onDisconnect
+        );
+
+    });
+
+}
+
     async function sendRequestChunks(items) {
 
     const batchId = crypto.randomUUID();
@@ -199,30 +295,33 @@ async function sendChunkedToConnector(
 
        socket.emit(
     `${event}Chunk`,
-    {
+            {
 
-        batchId,
+                batchId,
 
-        company: payload.company,
+                company: payload.company,
 
-        sync_batch_id: payload.sync_batch_id,
+                sync_batch_id: payload.sync_batch_id,
 
-        tally_owner: payload.tally_owner,
+                tally_owner: payload.tally_owner,
 
-        module: payload.module,
+                module: payload.module,
 
-        entity_type: payload.entity_type,
+                entity_type: payload.entity_type,
 
-        chunkIndex: chunk.chunkIndex,
+                fromDate: payload.fromDate,
+                toDate: payload.toDate,
 
-        totalChunks: chunk.totalChunks,
+                chunkIndex: chunk.chunkIndex,
 
-        payloadSize: chunk.payloadSize,
+                totalChunks: chunk.totalChunks,
 
-        data: chunk.data
+                payloadSize: chunk.payloadSize,
 
-    }
-);
+                data: chunk.data
+
+            }
+        );
 
         await waitForAck(
             batchId,
@@ -235,9 +334,12 @@ async function sendChunkedToConnector(
 
     }
 
-   socket.emit(
-    `${event}Complete`,
-        {
+    const completeAckPromise =
+        waitForCompleteAck(batchId);
+
+    socket.emit(
+        `${event}Complete`,
+            {
 
             batchId,
 
@@ -258,7 +360,17 @@ async function sendChunkedToConnector(
             completedAt: new Date().toISOString()
 
         }
+
+        
     );
+
+
+    await completeAckPromise;
+
+        console.log(
+            "Request chunk transfer completed"
+        );
+
 }
 
 const protocolController =
@@ -378,8 +490,74 @@ console.log("ENTITY:", payload.entity_type);
 
                 return;
             }
-expectedChunks = data.totalChunks;
-     
+if (!responseBatchId) {
+    responseBatchId = data.batchId;
+}
+
+if (data.batchId !== responseBatchId) {
+    console.error(
+        "Ignoring chunk from unexpected batch:",
+        data.batchId
+    );
+    return;
+}
+
+if (receivedChunkIndexes.has(data.chunkIndex)) {
+    console.log(
+        `Duplicate chunk ignored: ${data.chunkIndex}`
+    );
+
+    socket.emit(
+        ackEvent,
+        {
+            batchId: data.batchId,
+            chunkIndex: data.chunkIndex,
+            success: true
+        }
+    );
+
+    return;
+}
+
+if (
+    !Number.isInteger(data.totalChunks) ||
+    data.totalChunks <= 0 ||
+    !Number.isInteger(data.chunkIndex) ||
+    data.chunkIndex < 1 ||
+    data.chunkIndex > data.totalChunks
+) {
+    socket.emit(
+        ackEvent,
+        {
+            batchId: data.batchId,
+            chunkIndex: data.chunkIndex,
+            success: false,
+            error: "Invalid chunk metadata"
+        }
+    );
+
+    return;
+}
+
+
+
+if (expectedChunks === null) {
+    expectedChunks = data.totalChunks;
+}
+
+if (data.totalChunks !== expectedChunks) {
+    socket.emit(
+        ackEvent,
+        {
+            batchId: data.batchId,
+            chunkIndex: data.chunkIndex,
+            success: false,
+            error: "Inconsistent totalChunks"
+        }
+    );
+
+    return;
+}    
 
 fs.appendFileSync(
     "./logs/snapshot-flag-debug.jsonl",
@@ -476,6 +654,8 @@ collectionList.push(
             `Total records received so far: ${receivedItems}`
         );
 
+        receivedChunkIndexes.add(data.chunkIndex);
+        
         socket.emit(
             ackEvent,
             {
@@ -500,6 +680,28 @@ async function onComplete(data) {
             return;
         }
 
+        if (!data?.batchId) {
+    cleanup();
+
+    return reject(
+        new Error(
+            "Complete event missing batchId"
+        )
+    );
+}
+
+if (
+    responseBatchId &&
+    data.batchId !== responseBatchId
+) {
+    cleanup();
+    return reject(
+        new Error(
+            `Complete batch mismatch. Expected ${responseBatchId}, Received ${data.batchId}`
+        )
+    );
+}
+
             if (completed) {
                 return;
             }
@@ -515,6 +717,19 @@ async function onComplete(data) {
                 );
 
             }
+
+            if (
+    !Number.isInteger(data.totalItems) ||
+    data.totalItems < 0
+) {
+    cleanup();
+
+    return reject(
+        new Error(
+            "Invalid totalItems in Complete event"
+        )
+    );
+}
 
             expectedItems =
                 data.totalItems;
@@ -538,19 +753,19 @@ async function onComplete(data) {
                 payload.snapshot === true
                 ? receivedItems
                 : collectionList.length;
-fs.writeFileSync(
+            fs.writeFileSync(
 
-    `./logs/PROTO_FINAL_${payload.entity_type}.json`,
+                `./logs/PROTO_FINAL_${payload.entity_type}.json`,
 
-    JSON.stringify(
+                JSON.stringify(
 
-        {
-            entity: payload.entity_type,
-            expectedItems,
-            actualReceived,
-            expectedChunks,
-            snapshot: payload.snapshot
-        },
+                {
+                    entity: payload.entity_type,
+                    expectedItems,
+                    actualReceived,
+                    expectedChunks,
+                    snapshot: payload.snapshot
+                },
 
         null,
 
@@ -624,34 +839,50 @@ try{
 
             if (payload.snapshot === true) {
 
-                cleanup();
+    socket.emit(
+        `${event}CompleteAck`,
+        {
+            batchId: data.batchId,
+            success: true
+        }
+    );
 
-                resolve({
+    cleanup();
 
-                    ...masterResult,
+    resolve({
 
-                    snapshotSaved: true,
+        ...masterResult,
 
-                    totalItems: receivedItems,
+        snapshotSaved: true,
 
-                    items: collectionList
+        totalItems: receivedItems,
 
-                });
+        items: collectionList
 
-                }
+    });
+
+}
             else {
 
-            cleanup();
-
-                resolve({
-
-                    ...masterResult,
-
-                    [collectionName]: collectionList
-
-                });
-
+    socket.emit(
+            `${event}CompleteAck`,
+            {
+                batchId: data.batchId,
+                success: true
             }
+        );
+
+        cleanup();
+
+        resolve({
+
+            ...masterResult,
+
+            [collectionName]: collectionList
+
+        });
+
+    }
         }
 
         function onDisconnect(reason) {

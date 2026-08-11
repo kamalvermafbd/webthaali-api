@@ -1,0 +1,25 @@
+{
+  "table": "tally_sync_godowns",
+  "module": "MASTER",
+  "entity_type": "GODOWN",
+  "snapshotCount": 2,
+  "dbCount": 2,
+  "matched": 2,
+  "missingCount": 0,
+  "extraCount": 0,
+  "alterChangedCount": 2,
+  "missingGuids": [],
+  "extraGuids": [],
+  "alterChanged": [
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000063",
+      "oldAlterId": 372,
+      "newAlterId": null
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000dc",
+      "oldAlterId": 373,
+      "newAlterId": null
+    }
+  ]
+}

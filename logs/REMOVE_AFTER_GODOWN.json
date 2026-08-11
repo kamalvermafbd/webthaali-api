@@ -1,0 +1,17 @@
+[
+  {
+    "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000063",
+    "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+    "is_deleted": false
+  },
+  {
+    "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000dc",
+    "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+    "is_deleted": false
+  },
+  {
+    "guid": "b06ee43a-c023-4bfc-b8d9-3fd85283e679-0000003e",
+    "last_sync_batch_id": "d8c54846-c3be-45ea-8532-b3396a5405e3",
+    "is_deleted": true
+  }
+]

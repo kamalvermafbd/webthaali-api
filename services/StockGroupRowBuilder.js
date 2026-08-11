@@ -11,6 +11,23 @@
 //
 // ======================================================
 
+function safeTrim(value) {
+    if (value == null) return "";
+
+    if (typeof value === "string") {
+        return value.trim();
+    }
+
+    if (
+        typeof value === "number" ||
+        typeof value === "boolean"
+    ) {
+        return String(value).trim();
+    }
+
+    return "";
+}
+
 class StockGroupRowBuilder {
 
     build({
@@ -39,8 +56,8 @@ class StockGroupRowBuilder {
 
             tally_owner,
 
-            guid:
-                group.guid?.trim() || null,
+           guid:
+                safeTrim(group.guid) || null,
 
             alter_id:
                 group.alterId
@@ -58,22 +75,18 @@ class StockGroupRowBuilder {
                 ||
                 null,
 
-            name:
-                group.name?.trim() || null,
+       name:
+    safeTrim(group.name) || null,
 
             parent:
-                group.parent?.trim()
-                ||
-                null,
+    safeTrim(group.parent) || null,
 
-            reserved_name:
-                (
-                    group.reservedName
-                    ??
-                    group.reserved_name
-                )?.trim()
-                ||
-                null,
+           reserved_name:
+    safeTrim(
+        group.reservedName
+        ??
+        group.reserved_name
+    ) || null,
 
             is_deleted:
                 false,

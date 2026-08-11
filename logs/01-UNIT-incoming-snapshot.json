@@ -1,0 +1,77 @@
+{
+  "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+  "company_code": "C0035",
+  "tally_owner": "USER",
+  "entity_type": "UNIT",
+  "module": "MASTER",
+  "rowsReceived": 6,
+  "snapshotRows": 6,
+  "data": [
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "UNIT",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fe",
+      "alter_id": "463",
+      "master_id": "254"
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "UNIT",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d6",
+      "alter_id": "460",
+      "master_id": "214"
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "UNIT",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f8",
+      "alter_id": "462",
+      "master_id": "248"
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "UNIT",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000e0",
+      "alter_id": "461",
+      "master_id": "224"
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "UNIT",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000ce",
+      "alter_id": "458",
+      "master_id": "206"
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "UNIT",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000cf",
+      "alter_id": "459",
+      "master_id": "207"
+    }
+  ]
+}

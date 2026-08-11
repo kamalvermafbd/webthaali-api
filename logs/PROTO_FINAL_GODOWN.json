@@ -1,0 +1,7 @@
+{
+  "entity": "GODOWN",
+  "expectedItems": 2,
+  "actualReceived": 2,
+  "expectedChunks": 1,
+  "snapshot": true
+}

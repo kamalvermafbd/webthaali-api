@@ -10,6 +10,23 @@
 // BatchManager
 //
 // ======================================================
+function safeTrim(value) {
+    if (value == null) return "";
+
+    if (typeof value === "string") {
+        return value.trim();
+    }
+
+    if (
+        typeof value === "number" ||
+        typeof value === "boolean"
+    ) {
+        return String(value).trim();
+    }
+
+    return "";
+}
+
 
 class UnitRowBuilder {
 
@@ -39,8 +56,8 @@ class UnitRowBuilder {
 
             tally_owner,
 
-            guid:
-                unit.guid?.trim() || null,
+           guid:
+    safeTrim(unit.guid) || null,
 
             masterid:
                 (
@@ -62,17 +79,15 @@ class UnitRowBuilder {
                 ??
                 null,
 
-            name:
-                unit.name?.trim() || null,
+      name:
+    safeTrim(unit.name) || null,
 
-            formal_name:
-                (
-                    unit.formalName
-                    ??
-                    unit.formal_name
-                )?.trim()
-                ||
-                null,
+          formal_name:
+    safeTrim(
+        unit.formalName
+        ??
+        unit.formal_name
+    ) || null,
 
             decimal_places:
                 (

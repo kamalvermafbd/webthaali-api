@@ -110,6 +110,20 @@ class VoucherExecutionService {
 
     console.log(">>> BatchManager FINISHED");
 
+    const snapshotRows =
+    SnapshotManager.buildSnapshotRows({
+        sync_batch_id,
+        company_code,
+        tally_owner,
+        module: MODULE_TYPE.VOUCHER,
+        entity_type: ENTITY_TYPE.VOUCHER,
+        rows: rowsToSave
+    });
+/*
+    await SnapshotManager.saveSnapshotRows({
+        rows: snapshotRows
+    });
+*/
    
 
     return await BatchManager.postExecution({
@@ -134,6 +148,8 @@ class VoucherExecutionService {
 
         
         validation: null,
+
+        snapshotRows,
 
         execution
 

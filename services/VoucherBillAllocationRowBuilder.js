@@ -3,6 +3,8 @@ const fs = require("fs");
 const debugFile =
     "./logs/due-date-debug.jsonl";
 
+
+
 function writeDueDebug(data) {
 
     fs.appendFileSync(
@@ -10,6 +12,23 @@ function writeDueDebug(data) {
         JSON.stringify(data, null, 2) + "\n\n"
     );
 
+}
+
+function safeTrim(value) {
+    if (value == null) return "";
+
+    if (typeof value === "string") {
+        return value.trim();
+    }
+
+    if (
+        typeof value === "number" ||
+        typeof value === "boolean"
+    ) {
+        return String(value).trim();
+    }
+
+    return "";
 }
 
 function getTransactionType({
@@ -417,14 +436,14 @@ function buildBillAllocationRows({
 
             rows.push({
 
-                voucher_guid:
-                    header.guid.trim(),
+               voucher_guid:
+                     safeTrim(header.guid),
 
                 ledger_guid:
                     ledger.ledgerGuid ?? null,
 
                 ledger_name:
-                    ledger.ledgerName?.trim() || null,
+                 safeTrim(ledger.ledgerName) || null,
 
                 company_code,
 

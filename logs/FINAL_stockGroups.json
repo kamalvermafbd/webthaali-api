@@ -1,0 +1,234 @@
+{
+  "collection": "stockGroups",
+  "total": 6,
+  "rows": [
+    {
+      "name": "Chawal",
+      "parent": "Primary",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000010c",
+      "masterId": "268",
+      "alterId": "602",
+      "reservedName": "",
+      "raw": {
+        "PARENT": {
+          "#text": " Primary",
+          "TYPE": "String"
+        },
+        "GROUPGUID": {
+          "#text": "755da616-c913-46c0-9ad0-de5499d071a0-0000010c",
+          "TYPE": "String"
+        },
+        "GROUPMASTERID": {
+          "#text": 268,
+          "TYPE": "Number"
+        },
+        "GROUPALTERID": {
+          "#text": 602,
+          "TYPE": "Number"
+        },
+        "LANGUAGENAME.LIST": {
+          "NAME.LIST": {
+            "NAME": "Chawal",
+            "TYPE": "String"
+          },
+          "LANGUAGEID": {
+            "#text": 1033,
+            "TYPE": "Number"
+          }
+        },
+        "NAME": "Chawal",
+        "RESERVEDNAME": ""
+      }
+    },
+    {
+      "name": "CPVC Pipe Fitting",
+      "parent": "Primary",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000e2",
+      "masterId": "226",
+      "alterId": "374",
+      "reservedName": "",
+      "raw": {
+        "PARENT": {
+          "#text": " Primary",
+          "TYPE": "String"
+        },
+        "GROUPGUID": {
+          "#text": "755da616-c913-46c0-9ad0-de5499d071a0-000000e2",
+          "TYPE": "String"
+        },
+        "GROUPMASTERID": {
+          "#text": 226,
+          "TYPE": "Number"
+        },
+        "GROUPALTERID": {
+          "#text": 374,
+          "TYPE": "Number"
+        },
+        "LANGUAGENAME.LIST": {
+          "NAME.LIST": {
+            "NAME": "CPVC Pipe Fitting",
+            "TYPE": "String"
+          },
+          "LANGUAGEID": {
+            "#text": 1033,
+            "TYPE": "Number"
+          }
+        },
+        "NAME": "CPVC Pipe Fitting",
+        "RESERVEDNAME": ""
+      }
+    },
+    {
+      "name": "Finished Product",
+      "parent": "Primary",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fa",
+      "masterId": "250",
+      "alterId": "377",
+      "reservedName": "",
+      "raw": {
+        "PARENT": {
+          "#text": " Primary",
+          "TYPE": "String"
+        },
+        "GROUPGUID": {
+          "#text": "755da616-c913-46c0-9ad0-de5499d071a0-000000fa",
+          "TYPE": "String"
+        },
+        "GROUPMASTERID": {
+          "#text": 250,
+          "TYPE": "Number"
+        },
+        "GROUPALTERID": {
+          "#text": 377,
+          "TYPE": "Number"
+        },
+        "LANGUAGENAME.LIST": {
+          "NAME.LIST": {
+            "NAME": "Finished Product",
+            "TYPE": "String"
+          },
+          "LANGUAGEID": {
+            "#text": 1033,
+            "TYPE": "Number"
+          }
+        },
+        "NAME": "Finished Product",
+        "RESERVEDNAME": ""
+      }
+    },
+    {
+      "name": "GI Pipe Fitting",
+      "parent": "Primary",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000e3",
+      "masterId": "227",
+      "alterId": "375",
+      "reservedName": "",
+      "raw": {
+        "PARENT": {
+          "#text": " Primary",
+          "TYPE": "String"
+        },
+        "GROUPGUID": {
+          "#text": "755da616-c913-46c0-9ad0-de5499d071a0-000000e3",
+          "TYPE": "String"
+        },
+        "GROUPMASTERID": {
+          "#text": 227,
+          "TYPE": "Number"
+        },
+        "GROUPALTERID": {
+          "#text": 375,
+          "TYPE": "Number"
+        },
+        "LANGUAGENAME.LIST": {
+          "NAME.LIST": {
+            "NAME": "GI Pipe Fitting",
+            "TYPE": "String"
+          },
+          "LANGUAGEID": {
+            "#text": 1033,
+            "TYPE": "Number"
+          }
+        },
+        "NAME": "GI Pipe Fitting",
+        "RESERVEDNAME": ""
+      }
+    },
+    {
+      "name": "Raw Material",
+      "parent": "Primary",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f7",
+      "masterId": "247",
+      "alterId": "376",
+      "reservedName": "",
+      "raw": {
+        "PARENT": {
+          "#text": " Primary",
+          "TYPE": "String"
+        },
+        "GROUPGUID": {
+          "#text": "755da616-c913-46c0-9ad0-de5499d071a0-000000f7",
+          "TYPE": "String"
+        },
+        "GROUPMASTERID": {
+          "#text": 247,
+          "TYPE": "Number"
+        },
+        "GROUPALTERID": {
+          "#text": 376,
+          "TYPE": "Number"
+        },
+        "LANGUAGENAME.LIST": {
+          "NAME.LIST": {
+            "NAME": "Raw Material",
+            "TYPE": "String"
+          },
+          "LANGUAGEID": {
+            "#text": 1033,
+            "TYPE": "Number"
+          }
+        },
+        "NAME": "Raw Material",
+        "RESERVEDNAME": ""
+      }
+    },
+    {
+      "name": "Waste Scrap Material Sd",
+      "parent": "Primary",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fd",
+      "masterId": "253",
+      "alterId": "589",
+      "reservedName": "",
+      "raw": {
+        "PARENT": {
+          "#text": " Primary",
+          "TYPE": "String"
+        },
+        "GROUPGUID": {
+          "#text": "755da616-c913-46c0-9ad0-de5499d071a0-000000fd",
+          "TYPE": "String"
+        },
+        "GROUPMASTERID": {
+          "#text": 253,
+          "TYPE": "Number"
+        },
+        "GROUPALTERID": {
+          "#text": 589,
+          "TYPE": "Number"
+        },
+        "LANGUAGENAME.LIST": {
+          "NAME.LIST": {
+            "NAME": "Waste Scrap Material Sd",
+            "TYPE": "String"
+          },
+          "LANGUAGEID": {
+            "#text": 1033,
+            "TYPE": "Number"
+          }
+        },
+        "NAME": "Waste Scrap Material Sd",
+        "RESERVEDNAME": ""
+      }
+    }
+  ]
+}

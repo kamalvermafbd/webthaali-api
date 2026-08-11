@@ -1,3 +1,20 @@
+function safeTrim(value) {
+    if (value == null) return "";
+
+    if (typeof value === "string") {
+        return value.trim();
+    }
+
+    if (
+        typeof value === "number" ||
+        typeof value === "boolean"
+    ) {
+        return String(value).trim();
+    }
+
+    return "";
+}
+
 function buildStockVoucherRows({
 
     voucher,
@@ -26,7 +43,7 @@ function buildStockVoucherRows({
         rows.push({
 
             voucher_guid:
-                header.guid.trim(),
+                safeTrim(header.guid),
 
             company_code,
 
@@ -42,7 +59,7 @@ function buildStockVoucherRows({
                 item.stockAlterId ?? null,
 
             stock_item:
-                item.stockItem?.trim() || null,
+                  safeTrim(item.stockItem) || null,
 
             movement_type:
                 item.movementType ?? null,
@@ -59,8 +76,8 @@ function buildStockVoucherRows({
             billed_qty_value:
                 item.billedQtyValue ?? null,
 
-            unit:
-                item.unit?.trim() || null,
+        unit:
+    safeTrim(item.unit) || null,
 
             rate:
                 item.rate ?? null,
@@ -71,8 +88,8 @@ function buildStockVoucherRows({
             amount:
                 item.amount ?? null,
 
-            godown:
-                item.godown?.trim() || null,
+          godown:
+    safeTrim(item.godown) || null,
 
             batch_name:
                 item.batchName ?? null,

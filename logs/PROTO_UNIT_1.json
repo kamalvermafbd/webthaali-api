@@ -1,0 +1,33 @@
+{
+  "entity": "UNIT",
+  "module": "MASTER",
+  "chunkIndex": 1,
+  "totalChunks": 1,
+  "rows": 6,
+  "guids": [
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fe",
+      "alterId": "463"
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d6",
+      "alterId": "460"
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f8",
+      "alterId": "462"
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000e0",
+      "alterId": "461"
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000ce",
+      "alterId": "458"
+    },
+    {
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000cf",
+      "alterId": "459"
+    }
+  ]
+}

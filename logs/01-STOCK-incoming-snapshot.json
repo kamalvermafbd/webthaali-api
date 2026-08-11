@@ -1,0 +1,99 @@
+{
+  "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+  "company_code": "C0035",
+  "tally_owner": "USER",
+  "entity_type": "STOCK",
+  "module": "MASTER",
+  "rowsReceived": 8,
+  "snapshotRows": 8,
+  "data": [
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "STOCK",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d1",
+      "alter_id": 576,
+      "master_id": 209
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "STOCK",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d0",
+      "alter_id": 380,
+      "master_id": 208
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "STOCK",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000010d",
+      "alter_id": 603,
+      "master_id": 269
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "STOCK",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fb",
+      "alter_id": 590,
+      "master_id": 251
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "STOCK",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fc",
+      "alter_id": 385,
+      "master_id": 252
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "STOCK",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000ff",
+      "alter_id": 386,
+      "master_id": 255
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "STOCK",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f9",
+      "alter_id": 608,
+      "master_id": 249
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "STOCK",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000d7",
+      "alter_id": 609,
+      "master_id": 215
+    }
+  ]
+}

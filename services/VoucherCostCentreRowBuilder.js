@@ -1,3 +1,21 @@
+function safeTrim(value) {
+    if (value == null) return "";
+
+    if (typeof value === "string") {
+        return value.trim();
+    }
+
+    if (
+        typeof value === "number" ||
+        typeof value === "boolean"
+    ) {
+        return String(value).trim();
+    }
+
+    return "";
+}
+
+
 function buildCostCentreRows({
 
     voucher,
@@ -18,8 +36,8 @@ function buildCostCentreRows({
 
             rows.push({
 
-                voucher_guid:
-                    header.guid.trim(),
+               voucher_guid:
+                    safeTrim(header.guid),
 
                 ledger_guid:
                     ledger.ledgerGuid ?? null,
@@ -28,8 +46,8 @@ function buildCostCentreRows({
 
                 tally_owner,
 
-                ledger_name:
-                    ledger.ledgerName?.trim() || null,
+               ledger_name:
+                    safeTrim(ledger.ledgerName) || null,
 
                 voucher_date:
                     header.voucherDate || null,

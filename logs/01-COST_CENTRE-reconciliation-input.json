@@ -1,0 +1,22 @@
+{
+  "table": "tally_sync_cost_centres",
+  "company_code": "C0035",
+  "tally_owner": "USER",
+  "module": "MASTER",
+  "entity_type": "COST_CENTRE",
+  "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+  "snapshotCount": 4,
+  "dbCount": 4,
+  "snapshotGuids": [
+    "755da616-c913-46c0-9ad0-de5499d071a0-000000de",
+    "755da616-c913-46c0-9ad0-de5499d071a0-000000df",
+    "755da616-c913-46c0-9ad0-de5499d071a0-000000f5",
+    "755da616-c913-46c0-9ad0-de5499d071a0-00000111"
+  ],
+  "dbGuids": [
+    "755da616-c913-46c0-9ad0-de5499d071a0-000000de",
+    "755da616-c913-46c0-9ad0-de5499d071a0-00000111",
+    "755da616-c913-46c0-9ad0-de5499d071a0-000000f5",
+    "755da616-c913-46c0-9ad0-de5499d071a0-000000df"
+  ]
+}

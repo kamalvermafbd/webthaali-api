@@ -21,6 +21,22 @@ const {
 } = require("./VoucherCostCentreRowBuilder");
 
 
+function safeTrim(value) {
+    if (value == null) return "";
+
+    if (typeof value === "string") {
+        return value.trim();
+    }
+
+    if (
+        typeof value === "number" ||
+        typeof value === "boolean"
+    ) {
+        return String(value).trim();
+    }
+
+    return "";
+}
 
 function buildVoucherRow({
 
@@ -42,7 +58,8 @@ function buildVoucherRow({
 
         tally_owner,
 
-        guid: header.guid.trim(),
+       guid:
+    safeTrim(header.guid),
 
         masterid: header.masterid ?? null,
 

@@ -11,6 +11,24 @@
 //
 // ======================================================
 
+function safeTrim(value) {
+    if (value == null) return "";
+
+    if (typeof value === "string") {
+        return value.trim();
+    }
+
+    if (
+        typeof value === "number" ||
+        typeof value === "boolean"
+    ) {
+        return String(value).trim();
+    }
+
+    return "";
+}
+
+
 class StockRowBuilder {
 
     build({
@@ -37,7 +55,7 @@ class StockRowBuilder {
             tally_owner,
 
             guid:
-                stock.guid?.trim() || null,
+    safeTrim(stock.guid) || null,
 
             masterid:
                 (
@@ -55,11 +73,11 @@ class StockRowBuilder {
                 ??
                 null,
 
-            name:
-                stock.name?.trim() || null,
+           name:
+    safeTrim(stock.name) || null,
 
             parent:
-                stock.parent?.trim() || null,
+    safeTrim(stock.parent) || null,
 
             parent_group_guid:
                 stock.parentGroupGuid || null,
@@ -71,22 +89,23 @@ class StockRowBuilder {
                 stock.parentGroupAlterId || null,
 
             base_unit:
-                stock.baseUnit?.trim() || null,
+    safeTrim(stock.baseUnit) || null,
 
             hsn_code:
-                stock.hsnCode?.trim() || null,
+    safeTrim(stock.hsnCode) || null,
 
-            gst_applicable:
-                stock.gstApplicable?.trim() || null,
+           gst_applicable:
+    safeTrim(stock.gstApplicable) || null,
 
             type_of_supply:
-                stock.typeOfSupply?.trim() || null,
+    safeTrim(stock.typeOfSupply) || null,
 
             taxability:
-                stock.taxability?.trim() || null,
+    safeTrim(stock.taxability) || null,
 
-            state_name:
-                stock.stateName?.trim() || null,
+
+           state_name:
+    safeTrim(stock.stateName) || null,
 
             applicable_from:
                 stock.applicableFrom || null,

@@ -35072,12 +35072,25 @@ if (
 
 ) {
 
+ const fromDate =
+    result.summary?.booksBeginningFrom;
+
+const toDate =
+    new Date()
+        .toISOString()
+        .slice(0, 10)
+        .replace(/-/g, "");
+
 voucherGuidResult =
     await sendChunkedToConnector(
         socket,
         "getMastersVoucherGuids",
         {
             company,
+
+            fromDate,
+
+            toDate,
 
             snapshot:true,
 

@@ -1,0 +1,18 @@
+{
+  "table": "tally_sync_godowns",
+  "company_code": "C0035",
+  "tally_owner": "USER",
+  "module": "MASTER",
+  "entity_type": "GODOWN",
+  "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+  "snapshotCount": 2,
+  "dbCount": 2,
+  "snapshotGuids": [
+    "755da616-c913-46c0-9ad0-de5499d071a0-00000063",
+    "755da616-c913-46c0-9ad0-de5499d071a0-000000dc"
+  ],
+  "dbGuids": [
+    "755da616-c913-46c0-9ad0-de5499d071a0-000000dc",
+    "755da616-c913-46c0-9ad0-de5499d071a0-00000063"
+  ]
+}

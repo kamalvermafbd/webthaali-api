@@ -1,0 +1,25 @@
+{
+  "entity": "UNIT",
+  "rowsReceived": 6,
+  "firstRow": {
+    "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+    "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+    "company_code": "C0035",
+    "tally_owner": "USER",
+    "module": "MASTER",
+    "entity_type": "UNIT",
+    "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fe",
+    "alter_id": "463",
+    "master_id": null,
+    "status": "COMPLETED",
+    "is_deleted": false
+  },
+  "guids": [
+    "755da616-c913-46c0-9ad0-de5499d071a0-000000fe",
+    "755da616-c913-46c0-9ad0-de5499d071a0-000000d6",
+    "755da616-c913-46c0-9ad0-de5499d071a0-000000f8",
+    "755da616-c913-46c0-9ad0-de5499d071a0-000000e0",
+    "755da616-c913-46c0-9ad0-de5499d071a0-000000ce",
+    "755da616-c913-46c0-9ad0-de5499d071a0-000000cf"
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+  "company_code": "C0035",
+  "tally_owner": "USER",
+  "entity_type": "COST_CENTRE",
+  "module": "MASTER",
+  "rowsReceived": 4,
+  "snapshotRows": 4,
+  "data": [
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "COST_CENTRE",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000de",
+      "alter_id": "369",
+      "master_id": "222"
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "COST_CENTRE",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-00000111",
+      "alter_id": "612",
+      "master_id": "273"
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "COST_CENTRE",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f5",
+      "alter_id": "371",
+      "master_id": "245"
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "COST_CENTRE",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000df",
+      "alter_id": "370",
+      "master_id": "223"
+    }
+  ]
+}

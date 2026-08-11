@@ -1,0 +1,71 @@
+{
+  "total": 6,
+  "rows": [
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "STOCK_GROUP",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-0000010c",
+      "alter_id": "602",
+      "master_id": "268"
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "STOCK_GROUP",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000e2",
+      "alter_id": "374",
+      "master_id": "226"
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "STOCK_GROUP",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fa",
+      "alter_id": "377",
+      "master_id": "250"
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "STOCK_GROUP",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000e3",
+      "alter_id": "375",
+      "master_id": "227"
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "STOCK_GROUP",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000f7",
+      "alter_id": "376",
+      "master_id": "247"
+    },
+    {
+      "sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "last_sync_batch_id": "67df2d93-86a4-4553-babe-647a3867e1e0",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "STOCK_GROUP",
+      "guid": "755da616-c913-46c0-9ad0-de5499d071a0-000000fd",
+      "alter_id": "589",
+      "master_id": "253"
+    }
+  ]
+}

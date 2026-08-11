@@ -1,3 +1,21 @@
+function safeTrim(value) {
+    if (value == null) return "";
+
+    if (typeof value === "string") {
+        return value.trim();
+    }
+
+    if (
+        typeof value === "number" ||
+        typeof value === "boolean"
+    ) {
+        return String(value).trim();
+    }
+
+    return "";
+}
+
+
 function buildLedgerRows({
 
     voucher,
@@ -17,14 +35,14 @@ function buildLedgerRows({
         rows.push({
 
             voucher_guid:
-                header.guid.trim(),
+             safeTrim(header.guid),
 
             company_code,
 
             tally_owner,
 
             ledger_name:
-                ledger.ledgerName?.trim() || null,
+                 safeTrim(ledger.ledgerName) || null,
 
             ledger_masterid:
                 ledger.ledgerMasterId ?? null,
