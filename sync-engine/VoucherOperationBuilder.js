@@ -196,6 +196,19 @@ function buildDeleteOperations({
 
     for (const [table, config] of childTables) {
 
+        const fs = require("fs");
+
+fs.appendFileSync(
+    "./logs/DEBUG-NORMAL-VOUCHER-DELETE.jsonl",
+    JSON.stringify({
+        source: "VoucherOperationBuilder.buildDeleteOperations",
+        table,
+        requestedGuidCount:
+    voucherGuids?.length || 0,
+        timestamp: new Date().toISOString()
+    }) + "\n"
+);
+
         operations.push(
 
             OperationBuilder.build({
@@ -410,12 +423,18 @@ function buildOperation(args) {
 
 function buildVoucherOperations(args) {
 
+    const deleteOperations =
+        args.changedVoucherGuids?.length > 0
+            ? buildDeleteOperations({
+                ...args,
+                voucherGuids:
+                    args.changedVoucherGuids
+            })
+            : [];
+
     return [
-
-        ...buildDeleteOperations(args),
-
+        ...deleteOperations,
         ...buildSaveOperations(args)
-
     ];
 
 }
@@ -531,6 +550,19 @@ function buildOrphanDeleteOperations({
         ) {
             continue;
         }
+
+    
+
+fs.appendFileSync(
+    "./logs/DEBUG-ORPHAN-DELETE.jsonl",
+    JSON.stringify({
+        source: "VoucherOperationBuilder.buildOrphanDeleteOperations",
+        table: childTable,
+        requestedGuidCount:
+    voucherGuids?.length || 0,
+        timestamp: new Date().toISOString()
+    }) + "\n"
+);
 
         const childConfig =
             VOUCHER_RECONCILIATION

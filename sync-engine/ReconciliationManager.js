@@ -156,6 +156,8 @@ buildGuidMap(rows = []) {
 
             });
 
+            /*
+
                 const {
 
                     data: dbRows,
@@ -196,18 +198,75 @@ buildGuidMap(rows = []) {
 
                     );
 
-                if (error) {
+                    */
 
-                    throw new Error(
+                const PAGE_SIZE = 1000;
 
-                        "Failed to load database rows : " +
+                const dbRows = [];
 
-                        error.message
+                let dbFrom = 0;
 
+                while (true) {
+
+                    const {
+                        data,
+                        error
+                    } = await supabase
+                        .from(table)
+                        .select(
+                            VALIDATION_SELECT_COLUMNS[table] || "*"
+                        )
+                        .eq(
+                            "company_code",
+                            company_code
+                        )
+                        .eq(
+                            "tally_owner",
+                            tally_owner
+                        )
+                        .eq(
+                            "is_deleted",
+                            false
+                        )
+                        .order(
+                            "guid",
+                            {
+                                ascending: true
+                            }
+                        )
+                        .range(
+                            dbFrom,
+                            dbFrom + PAGE_SIZE - 1
+                        );
+
+                    if (error) {
+
+                        throw new Error(
+                            `Failed to load DB rows from ${table}: ` +
+                            error.message
+                        );
+
+                    }
+
+                    const page =
+                        data || [];
+
+                    dbRows.push(
+                        ...page
                     );
+
+                    if (
+                        page.length < PAGE_SIZE
+                    ) {
+                        break;
+                    }
+
+                    dbFrom += PAGE_SIZE;
 
                 }
 
+               
+                
                 fs.writeFileSync(
 
               `./logs/01-${entity_type}-reconciliation-input.json`,
@@ -245,6 +304,7 @@ buildGuidMap(rows = []) {
                 )
 
             );
+            
 
             /* 080826
 
@@ -382,6 +442,9 @@ buildGuidMap(rows = []) {
 
         const alterChanged = [];
 
+        const traceFile =
+    `./logs/reconciliation-${entity_type}-${table}.json`;
+
                 
         const alterColumn =
             ALTER_ID_COLUMN[table];
@@ -423,10 +486,8 @@ buildGuidMap(rows = []) {
             null;
 
         const snapshotAlterId =
-
-            snapshot[alterColumn] ??
-
-            null;
+    snapshot.alter_id ??
+    null;
 
                 if (
 
@@ -470,6 +531,81 @@ buildGuidMap(rows = []) {
 
         }
 
+        fs.writeFileSync(
+
+    traceFile,
+
+    JSON.stringify(
+
+        {
+
+            stage:
+                "RECONCILIATION_RESULT",
+
+            table,
+
+            module,
+
+            entity_type,
+
+            sync_batch_id,
+
+            snapshotCount:
+                snapshotRows.length,
+
+            dbCount:
+                dbRows?.length || 0,
+
+            missingCount:
+                missingGuids.length,
+
+            extraCount:
+                extraGuids.length,
+
+            alterChangedCount:
+                alterChanged.length,
+
+            missingGuids:
+                missingGuids.map(
+                    row => ({
+                        guid:
+                            row.guid,
+
+                        alter_id:
+                            row[alterColumn],
+
+                        master_id:
+                            row.master_id
+                            ?? null
+                    })
+                ),
+
+            extraGuids:
+                extraGuids.map(
+                    row => ({
+                        guid:
+                            row.guid,
+
+                        alter_id:
+                            row[alterColumn],
+
+                        master_id:
+                            row.master_id
+                            ?? null
+                    })
+                )
+
+        },
+
+        null,
+
+        2
+
+    )
+
+);
+
+        
         fs.writeFileSync(
 
             `./logs/02-${entity_type}-reconciliation-result.json`,
@@ -585,6 +721,7 @@ buildGuidMap(rows = []) {
     )
 
 );
+
 /*080826
         return {
 

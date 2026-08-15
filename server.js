@@ -34616,6 +34616,10 @@ app.get("/getTrialBalance", async (req, res) => {
 
 app.get("/getMasters", async (req, res) => {
 
+  let sync_batch_id;
+  let httpWorkerId;
+  let batchCompletedSuccessfully = false;
+
   try {
 
     const company_code =
@@ -34827,65 +34831,58 @@ console.log(
 // SYNC BATCH ID
 // =========================
 
-let sync_batch_id;
+const requestId = crypto.randomUUID();
 
-const runningBatch =
+const httpBatchClaim =
 
-    await BatchStatusManager.loadRunningBatch({
+    await BatchStatusManager.claimOrCreateHttpBatch({
 
         company_code,
 
-        tally_owner
+        tally_owner,
+
+        request_id: requestId
 
     });
 
+if (httpBatchClaim.claimed !== true) {
 
-if (runningBatch) {
+    return res.status(409).json({
 
-    sync_batch_id = runningBatch.batch_id;
+        success: false,
 
-    console.log(
-        "Existing RUNNING batch:",
-        sync_batch_id
-    );
+        error: "Sync batch is already being processed",
 
-}
+        reason: httpBatchClaim.reason,
 
-else {
+        batch_id: httpBatchClaim.batch_id
 
-    sync_batch_id = crypto.randomUUID();
-
-    const { error: batchError } = await supabase
-        .from("sync_batches")
-        .insert({
-
-            batch_id: sync_batch_id,
-
-            company_code,
-
-            tally_owner,
-
-            batch_status: "RUNNING",
-
-            current_module: "MASTERS",
-
-            current_action:"PROCESSING"
-
-            //current_module: "INIT"
-
-        });
-
-
-    if (batchError) {
-
-        throw new Error(
-            "Failed to create sync batch : " +
-            batchError.message
-        );
-
-    }
+    });
 
 }
+
+sync_batch_id = httpBatchClaim.batch_id;
+httpWorkerId = httpBatchClaim.worker_id;
+
+const failHttpBatch = async (error) => {
+    await BatchStatusManager.markFailed({
+        batch_id: sync_batch_id,
+        error
+    });
+
+    await BatchStatusManager.releaseHttpBatch({
+        batch_id: sync_batch_id,
+        worker_id: httpWorkerId
+    });
+};
+
+const runningBatch =
+
+    await BatchStatusManager.loadBatch({
+
+        batch_id: sync_batch_id
+
+    });
 
 
 const sync =
@@ -35040,7 +35037,8 @@ const masterCollections = {
 
 if (!result.success) {
 
-  return res.json(result);
+  await failHttpBatch(result);
+return res.json(result);
 
 }
 
@@ -35323,36 +35321,43 @@ if (
 
 ) {
 if (!voucherGuidResult.success) {
-
+    await failHttpBatch(voucherGuidResult);
     return res.json(voucherGuidResult);
-
 }
 
 if (!groupGuidResult.success) {
+    await failHttpBatch(groupGuidResult);
     return res.json(groupGuidResult);
 }
 
+
 if (!ledgerGuidResult.success) {
+    await failHttpBatch(ledgerGuidResult);
     return res.json(ledgerGuidResult);
 }
 
 if (!stockGroupGuidResult.success) {
+    await failHttpBatch(stockGroupGuidResult);
     return res.json(stockGroupGuidResult);
 }
 
 if (!stockGuidResult.success) {
+    await failHttpBatch(stockGuidResult);
     return res.json(stockGuidResult);
 }
 
 if (!unitGuidResult.success) {
+    await failHttpBatch(unitGuidResult);
     return res.json(unitGuidResult);
 }
 
 if (!godownGuidResult.success) {
+    await failHttpBatch(godownGuidResult);
     return res.json(godownGuidResult);
 }
 
 if (!costCentreGuidResult.success) {
+    await failHttpBatch(costCentreGuidResult);
     return res.json(costCentreGuidResult);
 }
 
@@ -35920,9 +35925,9 @@ if(ledgerReconciliation?.missingGuids?.length){
 
 
     if(!missingResult.success){
-        return res.json(missingResult);
-    }
-
+    await failHttpBatch(missingResult);
+    return res.json(missingResult);
+}
 
     await saveLedgers({
 
@@ -36630,9 +36635,9 @@ if(stockReconciliation?.missingGuids?.length){
     );
 
     if(!missingResult.success){
-        return res.json(missingResult);
-    }
-
+    await failHttpBatch(missingResult);
+    return res.json(missingResult);
+}
 
     await saveStocks({
         company_code,
@@ -36722,7 +36727,7 @@ voucherResult = await saveVouchers({
 
 if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
 
-  
+
   fs.appendFileSync(
     "./logs/voucher-guid-debug.jsonl",
     JSON.stringify({
@@ -36761,9 +36766,10 @@ if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
 
     if (!missingResult.success) {
 
-        return res.json(missingResult);
+    await failHttpBatch(missingResult);
+    return res.json(missingResult);
 
-    }
+}
 
     voucherResult = await saveVouchers({
         company_code,
@@ -36843,6 +36849,16 @@ console.log(
     batchCompleted
 );
 
+batchCompletedSuccessfully = true;
+
+await BatchStatusManager.releaseHttpBatch({
+
+    batch_id: sync_batch_id,
+
+    worker_id: httpWorkerId
+
+});
+
 const cleanupResult =
 await CleanupManager.cleanup({
 
@@ -36896,6 +36912,41 @@ db: {
 }catch (err) {
 
     console.error(err);
+
+    if (
+      sync_batch_id &&
+      httpWorkerId &&
+      !batchCompletedSuccessfully
+    ) {
+
+      try {
+
+        await BatchStatusManager.markFailed({
+
+          batch_id: sync_batch_id,
+
+          error: err
+
+        });
+
+        await BatchStatusManager.releaseHttpBatch({
+
+          batch_id: sync_batch_id,
+
+          worker_id: httpWorkerId
+
+        });
+
+      } catch (failureUpdateError) {
+
+        console.error(
+          "Failed to finalize failed HTTP sync batch:",
+          failureUpdateError
+        );
+
+      }
+
+    }
 
     return res.status(500).json({
 

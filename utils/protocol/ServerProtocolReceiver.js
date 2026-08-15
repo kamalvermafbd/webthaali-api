@@ -110,9 +110,23 @@ registerChunkListener() {
 
             }
 
+            console.log(
+                "🔥 SERVER RECEIVED CHUNK:",
+                data.collection,
+                data.batchId,
+                data.chunkIndex
+            );
+
             this.session.addChunk(
                 data.data || []
             );
+
+            console.log(
+    "🔥 SERVER SENDING ACK:",
+    data.collection,
+    data.batchId,
+    data.chunkIndex
+);
 
             this.sendReceived(
 

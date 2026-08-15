@@ -27,12 +27,15 @@ class VoucherExecutionService {
 
         rowsToSave,
 
+        allVoucherRows,
+
         allVoucherGuids,
 
-        voucherGuids,
+       voucherGuids,
 
-        ledgerRows,
+changedVoucherGuids,
 
+ledgerRows,
         inventoryRows,
 
         stockVoucherRows,
@@ -54,6 +57,8 @@ class VoucherExecutionService {
                 sync_batch_id,
 
                 voucherGuids,
+
+                changedVoucherGuids,
 
                 voucherRows: rowsToSave,
 
@@ -117,7 +122,7 @@ class VoucherExecutionService {
         tally_owner,
         module: MODULE_TYPE.VOUCHER,
         entity_type: ENTITY_TYPE.VOUCHER,
-        rows: rowsToSave
+        rows: allVoucherRows
     });
 /*
     await SnapshotManager.saveSnapshotRows({
@@ -125,6 +130,42 @@ class VoucherExecutionService {
     });
 */
    
+
+    const fs =
+    require("fs");
+
+fs.writeFileSync(
+
+    `./logs/VOUCHER-01-before-postExecution-${sync_batch_id}.json`,
+
+    JSON.stringify({
+
+        stage:
+            "VOUCHER_EXECUTION_TO_BATCH_POST_EXECUTION",
+
+        sync_batch_id,
+
+        module:
+            MODULE_TYPE.VOUCHER,
+
+        entity:
+            ENTITY_TYPE.VOUCHER,
+
+        table:
+            TABLES.VOUCHERS,
+
+        snapshotRows:
+            snapshotRows.length,
+
+        snapshotGuids:
+            snapshotRows.map(
+                row => row.guid
+            )
+
+    }, null, 2)
+
+);
+
 
     return await BatchManager.postExecution({
 

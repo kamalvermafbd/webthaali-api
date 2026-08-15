@@ -184,25 +184,22 @@ function getVoucherGuids(rows) {
 }
 
 function getRowsToSave({
-
     voucherRows,
-
     newVoucherRows,
-
     changedVoucherRows
-
 }) {
 
+    const newVoucherGuidSet =
+        new Set(newVoucherRows);
+
+    const changedVoucherGuidSet =
+        new Set(changedVoucherRows);
+
     return voucherRows.filter(
-
         row =>
-
-            newVoucherRows.includes(row.guid) ||
-
-            changedVoucherRows.includes(row.guid)
-
+            newVoucherGuidSet.has(row.guid) ||
+            changedVoucherGuidSet.has(row.guid)
     );
-
 }
 
 
@@ -1149,9 +1146,13 @@ async function saveVoucherExecutionData({
 
     rowsToSave,
 
+    allVoucherRows,
+
     allVoucherGuids,
 
     voucherGuids,
+
+    changedVoucherGuids,
 
     ledgerRows,
 
@@ -1180,10 +1181,14 @@ async function saveVoucherExecutionData({
 
         rowsToSave,
 
+        allVoucherRows,
+
         allVoucherGuids,
 
         voucherGuids,
 
+        changedVoucherGuids,
+        
         ledgerRows,
 
         inventoryRows,
@@ -1352,61 +1357,61 @@ async function deleteMissingVouchers({
 */
 
 async function loadExistingVoucherMap({
-
     company_code,
-
     tally_owner
-
 }) {
 
     const voucherColumns =
-    VOUCHER_COLUMNS[TABLES.VOUCHERS];
+        VOUCHER_COLUMNS[TABLES.VOUCHERS];
 
-    const {
+    const pageSize = 1000;
+    let from = 0;
+    const existingVouchers = [];
 
-        data: existingVouchers,
+    while (true) {
 
-        error
+        const {
+            data,
+            error
+        } = await supabase
+            .from("tally_vouchers")
+            .select([
+                voucherColumns.GUID,
+                voucherColumns.ALTER_ID,
+                voucherColumns.IS_DELETED
+            ].join(", "))
+            .eq("company_code", company_code)
+            .eq("tally_owner", tally_owner)
+            .range(from, from + pageSize - 1);
 
-    } = await supabase
+        if (error) {
+            throw new Error(
+                "Failed to load existing vouchers: " +
+                error.message
+            );
+        }
 
-        .from("tally_vouchers")
+        existingVouchers.push(...(data || []));
 
-       .select([
-            voucherColumns.GUID,
-            voucherColumns.ALTER_ID,
-            voucherColumns.IS_DELETED
-        ].join(", "))
+        if (!data || data.length < pageSize) {
+            break;
+        }
 
-        .eq("company_code", company_code)
-
-        .eq("tally_owner", tally_owner);
-
-    if (error) {
-
-        throw new Error(
-
-            "Failed to load existing vouchers: " +
-
-            error.message
-
-        );
-
+        from += pageSize;
     }
 
-return new Map(
-    (existingVouchers || []).map(v => [
-        v[voucherColumns.GUID],
-        {
-            alterid:
-                Number(v[voucherColumns.ALTER_ID]),
+    return new Map(
+        existingVouchers.map(v => [
+            String(v[voucherColumns.GUID]).trim(),
+            {
+                alterid:
+                    Number(v[voucherColumns.ALTER_ID]),
 
-            is_deleted:
-                v[voucherColumns.IS_DELETED] === true
-        }
-    ])
-);
-
+                is_deleted:
+                    v[voucherColumns.IS_DELETED] === true
+            }
+        ])
+    );
 }
 
 /*29.07.26
@@ -1641,10 +1646,12 @@ const STOCK_DEBUG_FILE =
 
 console.log("===== SAVEVOUCHERS.JS LOADED =====");
 
+/*
 fs.appendFileSync(
     "./logs/test.log",
     "SAVEVOUCHERS.JS LOADED\n"
 );
+*/
 
 async function saveVouchers({
     company_code,
@@ -1654,7 +1661,7 @@ async function saveVouchers({
     vouchers = [],
      allVoucherGuids = []
 }) {
-
+/*
       fs.appendFileSync(
     "./logs/api-flow.jsonl",
     JSON.stringify({
@@ -1666,7 +1673,9 @@ async function saveVouchers({
         allVoucherGuids: allVoucherGuids.length
     }) + "\n"
 );
-/* 29.07.26
+
+
+ 29.07.26
     if (!Array.isArray(vouchers) || vouchers.length === 0) {
 
         return {
@@ -1691,6 +1700,8 @@ const runId =
     `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const voucherRows = [];
+
+const allVoucherRows = [];
 
 let ledgerRows = [];
 
@@ -1818,6 +1829,16 @@ for (const voucher of vouchers) {
                 header.guid.trim()
         );
 
+        allVoucherRows.push(
+            VoucherRowBuilder.build({
+                header,
+                company_code,
+                tally_owner,
+                sync_batch_id,
+                now
+            })
+        );
+
 // Validation pipeline:
 //
 // NEW_VOUCHER
@@ -1835,6 +1856,25 @@ try {
 
     console.log("BEFORE VALIDATE", header.guid);
 
+    const existingVoucher =
+    existingVoucherMap.get(header.guid.trim());
+
+integrityResult = {
+    action:
+        existingVoucher === undefined
+            ? VALIDATION_ACTION.INSERT
+            : existingVoucher.is_deleted
+                ? VALIDATION_ACTION.UPDATE
+                : Number(header.alterid) >
+                  Number(existingVoucher.alterid)
+                    ? VALIDATION_ACTION.UPDATE
+                    : VALIDATION_ACTION.SKIP,
+
+    reasons: []
+};
+
+
+/*
 integrityResult =
     await VoucherValidationService
         .validateNewVoucher({
@@ -1859,7 +1899,7 @@ integrityResult =
         reasons: integrityResult.reasons
     }) + "\n"
 );
-
+*/
 console.log("AFTER VALIDATE", header.guid);
 
 } catch (err) {
@@ -1938,6 +1978,7 @@ voucherRows.push(
 
 );
 
+
 ledgerRows.push(
     ...buildLedgerRows({
         voucher,
@@ -1983,7 +2024,7 @@ costCentreRows.push(
 
 console.log(
     "BILL ALLOCATION ROWS:",
-    billAllocationRows
+    billAllocationRows.length
 );
 
         }
@@ -2016,21 +2057,6 @@ if (voucherRows.length > 0){
 voucherGuids =
     getVoucherGuids(rowsToSave);
         
-fs.appendFileSync(
-    "./logs/delete-debug.jsonl",
-    JSON.stringify({
-        stage: "BEFORE_DELETE",
-        company_code,
-        tally_owner,
-        totalVoucherRows: voucherRows.length,
-        rowsToSave: rowsToSave.length,
-        newVoucherRows: newVoucherRows.length,
-        changedVoucherRows: changedVoucherRows.length,
-        unchangedVoucherGuids: unchangedVoucherGuids.length,
-        voucherGuids: voucherGuids.length,
-        first10VoucherGuids: voucherGuids.slice(0, 10)
-    }) + "\n"
-);
 
 
 ledgerRows =
@@ -2081,6 +2107,31 @@ costCentreRows =
 
 console.log(">>> CALLING saveVoucherExecutionData");
 
+fs.writeFileSync(
+    `./logs/VOUCHER-00-before-execution-${sync_batch_id}.json`,
+    JSON.stringify({
+        stage: "SAVE_VOUCHERS_TO_EXECUTION",
+
+        sync_batch_id,
+
+        vouchersCount:
+            vouchers.length,
+
+        allVoucherRowsCount:
+            allVoucherRows.length,
+
+        allVoucherGuidsCount:
+            allVoucherGuids.length,
+
+        firstVoucherGuid:
+            allVoucherRows[0]?.guid || null,
+
+        lastVoucherGuid:
+            allVoucherRows[allVoucherRows.length - 1]?.guid || null
+
+    }, null, 2)
+);
+
 const executionResult =
     await saveVoucherExecutionData({
 
@@ -2092,7 +2143,12 @@ const executionResult =
 
         rowsToSave,
 
+        allVoucherRows,
+
         allVoucherGuids,
+
+        changedVoucherGuids:
+             changedVoucherRows,
 
         voucherGuids,
 
@@ -2109,6 +2165,28 @@ const executionResult =
         STOCK_DEBUG_FILE
 
     });
+
+    fs.writeFileSync(
+    "./logs/voucher-execution-result.json",
+    JSON.stringify(
+        {
+            success:
+                executionResult?.success,
+
+            hasReconciliation:
+                !!executionResult?.reconciliation,
+
+            missingCount:
+                executionResult?.reconciliation?.missingGuids?.length || 0,
+
+            missingGuids:
+                executionResult?.reconciliation?.missingGuids || []
+
+        },
+        null,
+        2
+    )
+);
 
     success =
     executionResult.success;
@@ -2167,7 +2245,7 @@ await BatchStatusManager.updateFields({
 console.log(
     "INCREMENTAL POST COMPLETED UPDATED"
 );
-
+/*
     fs.appendFileSync(
     "./logs/api-flow.jsonl",
     JSON.stringify({
@@ -2176,7 +2254,7 @@ console.log(
         rowsToSave: rowsToSave.length
     }) + "\n"
 );
-
+*/
 
  /*   
 allVoucherGuids = [];
@@ -2268,6 +2346,7 @@ const { data: verify } = await supabase
 
 console.log("VERIFY AFTER UPDATE :", verify);
    
+/*
     fs.appendFileSync(
     "./logs/api-flow.jsonl",
     JSON.stringify({
@@ -2282,7 +2361,7 @@ fs.appendFileSync(
         stage: "ENGINE_RECONCILIATION_COMPLETED"
     }) + "\n"
 );
-
+*/
 console.log(
     "Voucher reconciliation already completed by Sync Engine."
 );
@@ -2305,21 +2384,20 @@ await supabase
 
     .eq("batch_id", sync_batch_id);
 
+    /*
 fs.appendFileSync(
     "./logs/api-flow.jsonl",
     JSON.stringify({
         stage: "BATCH_COMPLETED"
     }) + "\n"
 );
+*/
 
-
-    return {
+  return {
 
     total: vouchers.length,
 
-    success,
-
-    failed: vouchers.length - success
+    execution_status: success
 
 };
 

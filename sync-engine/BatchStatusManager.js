@@ -240,6 +240,150 @@ class BatchStatusManager {
 
         }
 
+        async claimOrCreateHttpBatch({
+
+            company_code,
+
+            tally_owner,
+
+            request_id
+
+        }) {
+
+            if (!company_code || !tally_owner || !request_id) {
+
+                throw new Error(
+                    "company_code, tally_owner, and request_id are required"
+                );
+
+            }
+
+            const {
+
+                data,
+
+                error
+
+            } = await supabase.rpc(
+
+                "claim_or_create_http_sync_batch",
+
+                {
+
+                    p_company_code: company_code,
+
+                    p_tally_owner: tally_owner,
+
+                    p_request_id: request_id
+
+                }
+
+            );
+
+            if (error) {
+
+                throw new Error(
+                    "Failed to claim HTTP sync batch : " +
+                    error.message
+                );
+
+            }
+
+            const result = Array.isArray(data) ? data[0] : data;
+
+            if (!result || !result.batch_id ||
+                typeof result.claimed !== "boolean" ||
+                typeof result.reason !== "string" ||
+                (result.worker_id !== null &&
+                 typeof result.worker_id !== "string")) {
+
+                throw new Error(
+                    "Invalid HTTP sync batch claim result"
+                );
+
+            }
+
+            return {
+
+                batch_id: result.batch_id,
+
+                claimed: result.claimed,
+
+                reason: result.reason,
+
+                worker_id: result.worker_id
+
+            };
+
+        }
+
+        async releaseHttpBatch({
+
+            batch_id,
+
+            worker_id
+
+        }) {
+
+            if (!batch_id || !worker_id) {
+
+                throw new Error(
+                    "batch_id and worker_id are required"
+                );
+
+            }
+
+            const {
+
+                data,
+
+                error
+
+            } = await supabase
+
+                .from(TABLES.SYNC_BATCHES)
+
+                .update({
+
+                    worker_status: "PENDING",
+
+                    worker_id: null,
+
+                    locked_at: null,
+
+                    heartbeat_at: null
+
+                })
+
+                .eq("batch_id", batch_id)
+
+                .eq("worker_id", worker_id)
+
+                .eq("worker_status", "HTTP_RUNNING")
+
+                .select("batch_id")
+
+                .maybeSingle();
+
+            if (error) {
+
+                throw new Error(
+                    "Failed to release HTTP sync batch : " +
+                    error.message
+                );
+
+            }
+
+            return {
+
+                released: Boolean(data?.batch_id),
+
+                batch_id: data?.batch_id || null
+
+            };
+
+        }
+
     // ----------------------------------
     // Update Batch Status
     // ----------------------------------

@@ -111,10 +111,12 @@ console.log("================================");
             row.guid,
 
 
-        alter_id:
+      alter_id:
             row.alterId
             ??
             row.alter_id
+            ??
+            row.alterid
             ??
             null,
 
@@ -124,6 +126,8 @@ console.log("================================");
             ??
             row.master_id
             ??
+            row.masterid
+            ??
             null
 
 
@@ -132,6 +136,7 @@ console.log("================================");
 
 const fs = require("fs");
 
+/*
 fs.writeFileSync(
 
     `./logs/01-${entity_type}-incoming-snapshot.json`,
@@ -163,6 +168,7 @@ tally_owner,
     )
 
 );
+*/
 
     if (snapshotRows.length === 0) {
 

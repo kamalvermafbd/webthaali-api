@@ -172,6 +172,7 @@ console.dir(rows[0], { depth: null });
 
 const snapshotRows = rows;
 
+/*
         fs.writeFileSync(
 
             `./logs/BEFORE_SAVE_${rows[0]?.entity_type || "UNKNOWN"}.json`,
@@ -193,6 +194,7 @@ const snapshotRows = rows;
             )
 
         );
+        */
 
         if (!Array.isArray(rows)) {
 
@@ -224,27 +226,29 @@ const snapshotRows = rows;
 
         callback: async (chunk) => {
 
+            /*
             fs.writeFileSync(
 
-    `./logs/02-before-upsert-${chunk[0]?.entity_type || "UNKNOWN"}.json`,
+                `./logs/02-before-upsert-${chunk[0]?.entity_type || "UNKNOWN"}.json`,
 
-    JSON.stringify(
+                JSON.stringify(
 
-        {
+                    {
 
-            total: chunk.length,
+                        total: chunk.length,
 
-            rows: chunk
+                        rows: chunk
 
-        },
+                    },
 
-        null,
+                    null,
 
-        2
+                    2
 
-    )
+                )
 
-);
+            );
+*/
 
             const {
 
@@ -275,28 +279,29 @@ const snapshotRows = rows;
 
 
                 console.log("SNAPSHOT UPSERT ERROR:", error);
-
+/*
                 fs.writeFileSync(
 
-    `./logs/03-after-upsert-${chunk[0]?.entity_type || "UNKNOWN"}.json`,
+                        `./logs/03-after-upsert-${chunk[0]?.entity_type || "UNKNOWN"}.json`,
 
-    JSON.stringify(
+                        JSON.stringify(
 
-        {
+                            {
 
-            total: chunk.length,
+                                total: chunk.length,
 
-            success: !error
+                                success: !error
 
-        },
+                            },
 
-        null,
+                            null,
 
-        2
+                            2
 
-    )
+                        )
 
-);
+                    );
+*/
 
                 const { data: verifyRows } = await supabase
 
@@ -314,6 +319,7 @@ const snapshotRows = rows;
 
                     .eq("is_deleted", false);
 
+                    /*
                 fs.writeFileSync(
 
                     `./logs/AFTER_SAVE_${chunk[0].entity_type}.json`,
@@ -335,6 +341,7 @@ const snapshotRows = rows;
                     )
 
                 );
+                */
                 
             if (error) {
 
@@ -432,51 +439,110 @@ const snapshotRows = rows;
 
         }
 
-        const {
+   const PAGE_SIZE = 1000;
 
-            data,
+const allRows = [];
 
-            error
+let from = 0;
 
-        } = await query;
+while (true) {
 
-        
+    const {
+        data,
+        error
+    } = await query
+        .order("guid", {
+            ascending: true
+        })
+        .range(
+            from,
+            from + PAGE_SIZE - 1
+        );
 
-        if (error) {
+    if (error) {
 
-            throw new Error(
+        throw new Error(
+            "Failed to load snapshot : " +
+            error.message
+        );
 
-                "Failed to load snapshot : " +
+    }
 
-                error.message
+    const page =
+        data || [];
 
-            );
+    allRows.push(
+        ...page
+    );
 
-        }
+    if (
+        page.length < PAGE_SIZE
+    ) {
+        break;
+    }
+
+    from += PAGE_SIZE;
+
+}
+
+        /*
+        fs.writeFileSync(
+        `./logs/00-${entity_type}-snapshot-loaded.json`,
+        JSON.stringify(
+                {
+                company_code,
+                tally_owner,
+                module,
+                entity_type,
+                rowsFound: data?.length || 0,
+                guids: (data || []).map(row => ({
+                    guid: row.guid,
+                    alter_id: row.alter_id,
+                    master_id: row.master_id,
+                    is_deleted: row.is_deleted
+                }))
+            },
+            null,
+            2
+        )
+    );
+    */
+
+
+        return allRows;
 
         fs.writeFileSync(
+
     `./logs/00-${entity_type}-snapshot-loaded.json`,
-    JSON.stringify(
-        {
-            company_code,
-            tally_owner,
-            module,
-            entity_type,
-            rowsFound: data?.length || 0,
-            guids: (data || []).map(row => ({
-                guid: row.guid,
-                alter_id: row.alter_id,
-                master_id: row.master_id,
-                is_deleted: row.is_deleted
+
+    JSON.stringify({
+
+        company_code,
+        tally_owner,
+        module,
+        entity_type,
+
+        rowsFound:
+            allRows.length,
+
+        guids:
+            allRows.map(row => ({
+                guid:
+                    row.guid,
+
+                alter_id:
+                    row.alter_id,
+
+                master_id:
+                    row.master_id,
+
+                is_deleted:
+                    row.is_deleted
             }))
-        },
-        null,
-        2
-    )
+
+    }, null, 2)
+
 );
-
-
-        return data || [];
 
     }
 
@@ -564,27 +630,29 @@ const snapshotRows = rows;
 
         } = await query;
         
+        /*
         fs.appendFileSync(
 
-    "./logs/snapshot-load-guids.jsonl",
+        "./logs/snapshot-load-guids.jsonl",
 
-    JSON.stringify({
+        JSON.stringify({
 
-        company_code,
+            company_code,
 
-        tally_owner,
+            tally_owner,
 
-        module,
+            module,
 
-        entity_type,
+            entity_type,
 
-        rowsFound: data?.length || 0,
+            rowsFound: data?.length || 0,
 
-        guids: (data || []).map(row => row.guid)
+            guids: (data || []).map(row => row.guid)
 
-    }) + "\n"
+        }) + "\n"
 
-);
+    );
+    */
 
         if (error) {
 
@@ -1059,7 +1127,7 @@ const snapshotRows = rows;
 
 
        
-
+/*
 fs.writeFileSync(
 
     `./logs/REMOVE_${entity_type}.json`,
@@ -1079,6 +1147,7 @@ fs.writeFileSync(
     }, null, 2)
 
 );
+*/
 
         const {
 
@@ -1112,6 +1181,7 @@ fs.writeFileSync(
 
     .eq("entity_type", entity_type);
 
+    /*
 fs.writeFileSync(
 
     `./logs/REMOVE_AFTER_${entity_type}.json`,
@@ -1119,6 +1189,8 @@ fs.writeFileSync(
     JSON.stringify(activeRows, null, 2)
 
 );
+
+*/
 
         return true;
 

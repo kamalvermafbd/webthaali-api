@@ -674,23 +674,15 @@ console.log("OPTIONS :", options);
 
                 console.log("================================");
                 console.log("BATCH DELETE");
-                console.log(
-                    "table :",
-                    table
-                );
-                console.log(
-                    "chunk size :",
-                    chunk.length
-                );
-                console.log(
-                    "total values :",
-                    inFilter.value.length
-                );
+                console.log("table :", table);
+                console.log("chunk size :", chunk.length);
+                console.log("total values :", inFilter.value.length);
                 console.log("================================");
 
                 const {
+                    data,
                     error
-                } = await query;
+                } = await query.select("voucher_guid");
 
                 if (error) {
 
@@ -699,6 +691,17 @@ console.log("OPTIONS :", options);
                     );
 
                 }
+
+                console.log(
+                    "DELETE RESULT:",
+                    table,
+                    "requested:",
+                    inFilter.value.length,
+                    "chunk:",
+                    chunk.length,
+                    "deleted:",
+                    data?.length || 0
+                );
 
             }
 

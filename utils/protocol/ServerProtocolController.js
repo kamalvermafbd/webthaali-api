@@ -37,6 +37,7 @@ class ServerProtocolController {
 
             const fs = require("fs");
 
+            /*
 fs.writeFileSync(
 
     `./logs/FINAL_${collection.key}.json`,
@@ -56,6 +57,7 @@ fs.writeFileSync(
     )
 
 );
+*/
 
             console.log(
 

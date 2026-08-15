@@ -1,6 +1,6 @@
-const VoucherIntegrityService =
+/*const VoucherIntegrityService =
     require("../services/VoucherIntegrityService");
-
+*/
 const {
 
     VALIDATION_ACTION
@@ -98,7 +98,7 @@ class VoucherValidationService {
             });
 
         }
-
+/*130826
         return this.runIntegrityValidation({
 
             company_code,
@@ -112,14 +112,24 @@ class VoucherValidationService {
         });
 
     }
+*/
+          // Same AlterID → SKIP
+    return this.buildValidationResult({
 
+        action:
+            VALIDATION_ACTION.SKIP
+
+    });
+
+}
+/*
     async runIntegrityValidation(args) {
 
         return VoucherIntegrityService
             .validateVoucher(args);
 
     }
-
+*/
     buildValidationResult({
 
         action,

@@ -72,13 +72,14 @@ async function sendToTally(xml) {
     fs.writeFileSync(DEBUG_FILE, "");
 
     // XML save
+/*
     fs.appendFileSync(
       DEBUG_FILE,
       "\n========== XML SENT ==========\n\n" +
       xml +
       "\n\n"
     );
-
+*/
     const response = await axios.post(
       TALLY_URL,
       xml,
@@ -90,23 +91,25 @@ async function sendToTally(xml) {
     );
 
     // Tally response save
+/*
     fs.appendFileSync(
       DEBUG_FILE,
       "\n========== TALLY RESPONSE ==========\n\n" +
       response.data +
       "\n"
     );
-
+*/
     return response.data;
 
   } catch (err) {
-
+/*
     fs.appendFileSync(
       DEBUG_FILE,
       "\n========== ERROR ==========\n\n" +
       (err.response?.data || err.message) +
       "\n"
     );
+    */
 
     throw err;
 
@@ -176,6 +179,7 @@ async function createTaxLedger({
 
     });
 
+    /*
   fs.writeFileSync(
 
     path.join(
@@ -193,6 +197,7 @@ async function createTaxLedger({
     "\n\n"
 
   );
+  */
 
   return xml;
 
@@ -634,7 +639,7 @@ async function createStockItem({
   // =========================
   // DEBUG XML
   // =========================
-
+/*
   fs.writeFileSync(
 
     path.join(
@@ -649,6 +654,7 @@ async function createStockItem({
     "\n\n"
 
   );
+  */
 
   // =========================
   // RETURN XML
@@ -729,7 +735,7 @@ async function createDebtorLedger({
   // =========================
   // DEBUG XML
   // =========================
-
+/*
   fs.writeFileSync(
 
     path.join(
@@ -747,6 +753,7 @@ async function createDebtorLedger({
     "\n\n"
 
   );
+  */
 
   // =========================
   // RETURN XML
@@ -775,7 +782,7 @@ async function createSalesLedger({
   // =========================
   // DEBUG XML
   // =========================
-
+/*
   fs.writeFileSync(
 
     path.join(
@@ -790,7 +797,7 @@ async function createSalesLedger({
     "\n\n"
 
   );
-
+*/
   // =========================
   // RETURN XML
   // =========================

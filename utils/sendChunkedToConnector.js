@@ -559,45 +559,11 @@ if (data.totalChunks !== expectedChunks) {
     return;
 }    
 
-fs.appendFileSync(
-    "./logs/snapshot-flag-debug.jsonl",
-    JSON.stringify({
-        entity: payload.entity_type,
-        module: payload.module,
-        snapshot: payload.snapshot,
-        chunk: data.chunkIndex,
-        rows: data.data.length
-    }) + "\n"
-);
+
 
 if (payload.snapshot === true) {
 
-    fs.writeFileSync(
-
-    `./logs/PROTO_${payload.entity_type}_${data.chunkIndex}.json`,
-
-    JSON.stringify(
-
-        {
-            entity: payload.entity_type,
-            module: payload.module,
-            chunkIndex: data.chunkIndex,
-            totalChunks: data.totalChunks,
-            rows: data.data.length,
-            guids: data.data.map(r => ({
-                guid: r.guid,
-                alterId: r.alterId ?? r.alter_id,
-                name: r.name
-            }))
-        },
-
-        null,
-
-        2
-
-    )
-
-);
+   
 console.log("EVENT :", event);
 console.log("SNAPSHOT :", payload.snapshot);
 console.log("ENTITY :", payload.entity_type);
@@ -753,27 +719,7 @@ if (
                 payload.snapshot === true
                 ? receivedItems
                 : collectionList.length;
-            fs.writeFileSync(
-
-                `./logs/PROTO_FINAL_${payload.entity_type}.json`,
-
-                JSON.stringify(
-
-                {
-                    entity: payload.entity_type,
-                    expectedItems,
-                    actualReceived,
-                    expectedChunks,
-                    snapshot: payload.snapshot
-                },
-
-        null,
-
-        2
-
-    )
-
-);
+           
 
         if (
             expectedItems !== null &&

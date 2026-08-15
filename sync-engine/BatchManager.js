@@ -26,11 +26,10 @@ const VoucherOperationBuilder =
     require("./VoucherOperationBuilder");
 
 const {
-
     ENTITY_METADATA,
-
-    MODULE_TYPE
-
+    MODULE_TYPE,
+    ENTITY_TYPE,
+    TABLES
 } = require("./constants");
 
 class BatchManager {
@@ -99,6 +98,8 @@ async execute({
 
             });
 
+            break;
+
         }
 
     }
@@ -129,6 +130,8 @@ finally {
 
 }
 
+
+
 // ----------------------------------
 // Post Execution
 // ----------------------------------
@@ -153,6 +156,18 @@ async postExecution({
 
 const fs = require("fs");
 
+fs.writeFileSync(
+    `./logs/TRACE-01-postExecution-start-${entity}-${batch_id}.json`,
+    JSON.stringify({
+        stage: "POST_EXECUTION_START",
+        batch_id,
+        module,
+        entity,
+        table,
+        failedCount: execution?.failedCount ?? null
+    }, null, 2)
+);
+
 if (snapshotRows.length > 0) {
 
     await SnapshotManager.saveSnapshotRows({
@@ -161,8 +176,8 @@ if (snapshotRows.length > 0) {
 
     });
 
-    const fs = require("fs");
-
+    
+/*
     fs.writeFileSync(
 
         `./logs/PRE_SAVE_${entity}.json`,
@@ -193,6 +208,7 @@ if (snapshotRows.length > 0) {
         )
 
     );
+    */
 
 }
 
@@ -222,6 +238,19 @@ if (snapshotRows.length > 0) {
 
         });
 
+        fs.writeFileSync(
+    `./logs/TRACE-02-after-retry-${entity}-${batch_id}.json`,
+    JSON.stringify({
+        stage: "AFTER_RETRY",
+        batch_id,
+        entity,
+        failedCount: execution?.failedCount ?? null,
+        retrySuccess: retryResult?.success ?? null,
+        retried: retryResult?.retried ?? null
+    }, null, 2)
+);
+
+
         if (!retryResult.success) {
 
             await BatchStatusManager.markFailed({
@@ -242,6 +271,19 @@ if (snapshotRows.length > 0) {
 
         }
 
+        fs.writeFileSync(
+    `./logs/TRACE-03-before-reconcile-${entity}-${batch_id}.json`,
+    JSON.stringify({
+        stage: "PASSED_RETRY_BEFORE_RECONCILE",
+        batch_id,
+        module,
+        entity,
+        table,
+        retrySuccess: retryResult?.success ?? null
+    }, null, 2)
+);
+
+
 /* 080826
         await SnapshotManager.removeMissingGuids({
 
@@ -257,6 +299,58 @@ if (snapshotRows.length > 0) {
 
 });
 */
+
+
+
+
+fs.writeFileSync(
+
+    `./logs/VOUCHER-01-before-postExecution-${sync_batch_id}.json`,
+
+    JSON.stringify({
+
+        stage:
+            "VOUCHER_EXECUTION_TO_BATCH_POST_EXECUTION",
+
+        sync_batch_id,
+
+        module:
+            MODULE_TYPE.VOUCHER,
+
+        entity:
+            ENTITY_TYPE.VOUCHER,
+
+        table:
+            TABLES.VOUCHERS,
+
+        snapshotRows:
+            snapshotRows.length,
+
+        snapshotGuids:
+            snapshotRows.map(
+                row => row.guid
+            )
+
+    }, null, 2)
+
+);
+
+fs.writeFileSync(
+    `./logs/RECON-01-before-reconcile-${entity}.json`,
+    JSON.stringify({
+        stage:
+            "BATCH_MANAGER_TO_RECONCILIATION_MANAGER",
+
+        batch_id,
+        module,
+        entity,
+        table,
+        company_code,
+        tally_owner,
+        sync_batch_id
+    }, null, 2)
+);
+
 const reconciliation =
 
     await ReconciliationManager.reconcile({
@@ -274,6 +368,60 @@ const reconciliation =
         sync_batch_id
 
     });
+    fs.writeFileSync(
+    `./logs/TRACE-04-after-reconcile-${entity}-${batch_id}.json`,
+    JSON.stringify({
+        stage: "AFTER_RECONCILE",
+        batch_id,
+        module,
+        entity,
+        table,
+        success: reconciliation?.success ?? null,
+        snapshotCount: reconciliation?.snapshotCount ?? null,
+        dbCount: reconciliation?.dbCount ?? null,
+        missing: reconciliation?.missingGuids?.length ?? null,
+        extra: reconciliation?.extraGuids?.length ?? null
+    }, null, 2)
+);
+
+    fs.writeFileSync(
+
+    `./logs/RECON-02-result-${entity}.json`,
+
+    JSON.stringify({
+
+        stage:
+            "RECONCILIATION_RESULT",
+
+        batch_id,
+
+        module,
+
+        entity,
+
+        table,
+
+        snapshotCount:
+            reconciliation.snapshotCount,
+
+        dbCount:
+            reconciliation.dbCount,
+
+        missingCount:
+            reconciliation.missingGuids?.length || 0,
+
+        missingGuids:
+            reconciliation.missingGuids || [],
+
+        extraCount:
+            reconciliation.extraGuids?.length || 0,
+
+        alterChangedCount:
+            reconciliation.alterChanged?.length || 0
+
+    }, null, 2)
+
+);
 
     console.log("================================");
     console.log("RECON RESULT");
@@ -282,7 +430,7 @@ const reconciliation =
     console.log("alter :", reconciliation.alterChanged.length);
     console.log("================================");
 
-
+    
 let reconciliationOperations = [];
 
 const ReconciliationOperationBuilder =
@@ -331,6 +479,27 @@ const ReconciliationOperationBuilder =
 
 if (entity === "VOUCHER") {
 
+  
+
+fs.writeFileSync(
+    `./logs/DEBUG-BATCHMANAGER-ORPHAN-DELETE-${batch_id}.json`,
+    JSON.stringify({
+        source: "BatchManager.postExecution",
+        entity,
+        orphanGuids:
+            reconciliation.orphanGuids || {},
+        orphanCounts:
+            Object.fromEntries(
+                Object.entries(
+                    reconciliation.orphanGuids || {}
+                ).map(
+                    ([table, guids]) =>
+                        [table, guids?.length || 0]
+                )
+            ),
+        timestamp: new Date().toISOString()
+    }, null, 2)
+);
     reconciliationOperations.push(
 
         ...VoucherOperationBuilder
@@ -793,7 +962,8 @@ const {
 
     validation,
 
-    execution
+    execution,
+  
 
 });
 
