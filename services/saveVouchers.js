@@ -1144,6 +1144,8 @@ async function saveVoucherExecutionData({
 
     sync_batch_id,
 
+     syncMode,
+
     rowsToSave,
 
     allVoucherRows,
@@ -1178,6 +1180,8 @@ async function saveVoucherExecutionData({
         tally_owner,
 
         sync_batch_id,
+
+        syncMode,
 
         rowsToSave,
 
@@ -1657,10 +1661,30 @@ async function saveVouchers({
     company_code,
     tally_owner,
     sync_batch_id,
+    syncMode,
     country,
     vouchers = [],
-     allVoucherGuids = []
+    allVoucherGuids = []
 }) {
+
+    console.log("=== SAVE VOUCHERS RECEIVED ===", {
+    vouchersCount: Array.isArray(vouchers) ? vouchers.length : 0,
+    allVoucherGuidsCount:
+        Array.isArray(allVoucherGuids)
+            ? allVoucherGuids.length
+            : 0,
+
+    targetGuidPresent:
+        Array.isArray(allVoucherGuids) &&
+        allVoucherGuids.some(
+            x =>
+                (typeof x === "string"
+                    ? x
+                    : x?.guid) ===
+                "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6a"
+        )
+});
+
 /*
       fs.appendFileSync(
     "./logs/api-flow.jsonl",
@@ -2042,7 +2066,7 @@ console.log("voucherRows:", voucherRows.length);
 console.log("voucherGuids:", voucherGuids.length);
 console.log("vouchers:", vouchers.length);
 
-if (voucherRows.length > 0){
+if (voucherRows.length > 0 || allVoucherGuids.length > 0) {
 
       rowsToSave = getRowsToSave({
 
@@ -2141,6 +2165,8 @@ const executionResult =
 
         sync_batch_id,
 
+        syncMode,
+
         rowsToSave,
 
         allVoucherRows,
@@ -2203,9 +2229,15 @@ const executionResult =
     return {
         status: "WAITING_FOR_MISSING_VOUCHERS",
 
-        missingVoucherGuids:
+     /*   missingVoucherGuids:
             executionResult.reconciliation.missingGuids,
+*/
 
+        missingVoucherGuids:
+    executionResult.reconciliation.missingGuids
+        .map(row => row.guid)
+        .filter(Boolean),
+        
         executionResult
     };
 }

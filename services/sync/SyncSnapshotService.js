@@ -83,7 +83,7 @@ console.log("================================");
     // PREPARE ROWS
     // =========================
 
-
+/* 180826
     const snapshotRows = rows
 
     .filter(
@@ -133,7 +133,57 @@ console.log("================================");
 
     }));
 
+*/
 
+
+const snapshotRows = rows
+    .filter(row =>
+        entity_type === "VOUCHER"
+            ? row.header?.guid
+            : row.guid
+    )
+    .map(row => ({
+
+        sync_batch_id,
+
+        last_sync_batch_id:
+            sync_batch_id,
+
+        company_code,
+
+        tally_owner,
+
+        module,
+
+        entity_type,
+
+        guid:
+            entity_type === "VOUCHER"
+                ? row.header?.guid
+                : row.guid,
+
+        alter_id:
+            entity_type === "VOUCHER"
+                ? row.header?.alterid
+                : (
+                    row.alterId ??
+                    row.alter_id ??
+                    row.alterid ??
+                    null
+                ),
+
+        master_id:
+            entity_type === "VOUCHER"
+                ? row.header?.masterid
+                : (
+                    row.masterId ??
+                    row.master_id ??
+                    row.masterid ??
+                    null
+                )
+
+    }));
+    
 const fs = require("fs");
 
 /*

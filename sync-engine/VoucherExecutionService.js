@@ -25,6 +25,8 @@ class VoucherExecutionService {
 
         sync_batch_id,
 
+        syncMode,
+
         rowsToSave,
 
         allVoucherRows,
@@ -33,9 +35,9 @@ class VoucherExecutionService {
 
        voucherGuids,
 
-changedVoucherGuids,
+        changedVoucherGuids,
 
-ledgerRows,
+        ledgerRows,
         inventoryRows,
 
         stockVoucherRows,
@@ -187,6 +189,7 @@ fs.writeFileSync(
 
         sync_batch_id,
 
+        syncMode,
         
         validation: null,
 

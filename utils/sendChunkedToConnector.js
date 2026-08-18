@@ -312,6 +312,9 @@ function waitForCompleteAck(batchId) {
                 fromDate: payload.fromDate,
                 toDate: payload.toDate,
 
+                booksBeginningFrom:
+    payload.booksBeginningFrom,
+
                 chunkIndex: chunk.chunkIndex,
 
                 totalChunks: chunk.totalChunks,
@@ -354,6 +357,9 @@ function waitForCompleteAck(batchId) {
             entity_type: payload.entity_type,
 
             totalChunks: chunks.length,
+
+            booksBeginningFrom:
+    payload.booksBeginningFrom, 
 
             totalItems: items.length,
 
@@ -751,37 +757,42 @@ if (
 
         
 
-if (payload.snapshot === true) {
+if (
+    payload.snapshot === true &&
+    payload.syncMode === "FULL"
+) {
 
-try{
-    await removeMissingSnapshotGuids({
+    try {
 
-        sync_batch_id:
-            payload.sync_batch_id,
+        await removeMissingSnapshotGuids({
 
-        company_code:
-            payload.company_code,
+            sync_batch_id:
+                payload.sync_batch_id,
 
-        tally_owner:
-            payload.tally_owner,
+            company_code:
+                payload.company_code,
 
-        module:
-            payload.module,
+            tally_owner:
+                payload.tally_owner,
 
-        entity_type:
-            payload.entity_type
+            module:
+                payload.module,
 
-                });
-                }
-                catch(error) {
+            entity_type:
+                payload.entity_type
 
-                    cleanup();
+        });
 
-                    return reject(error);
+    }
+    catch(error) {
 
-                }
+        cleanup();
 
-            }
+        return reject(error);
+
+    }
+
+}
 
             if (payload.snapshot === true) {
 

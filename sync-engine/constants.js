@@ -532,6 +532,24 @@ const VALIDATION_ACTION = {
 
 
 // ------------------------------------------------------
+// Voucher Sync Period
+// ------------------------------------------------------
+
+const SYNC_MODE = {
+    FULL: "FULL",
+    PERIODIC: "PERIODIC"
+};
+
+const VOUCHER_SYNC_PERIOD = {
+    DEFAULT: "WEEKLY",
+    WEEKLY: "WEEKLY",
+    THREE_MONTHS: "3_MONTHS",
+    SIX_MONTHS: "SIX_MONTHS",
+    CUSTOM: "CUSTOM"
+};
+
+
+// ------------------------------------------------------
 // Retry Configuration
 // ------------------------------------------------------
 
@@ -608,6 +626,10 @@ module.exports = {
     VALIDATION_ACTION,
 
     DB_CONFIG,
+
+     SYNC_MODE,
+
+    VOUCHER_SYNC_PERIOD,
 
     RETRY,
 

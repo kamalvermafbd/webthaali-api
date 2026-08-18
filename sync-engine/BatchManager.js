@@ -145,6 +145,7 @@ async postExecution({
     company_code,
     tally_owner,
     sync_batch_id,
+    syncMode,
     snapshotRows = [],
     validation,
     execution
@@ -584,15 +585,19 @@ if (!reconciliationRetryResult.success) {
 
 }
 
- await SnapshotManager.removeMissingGuids({
+ if (syncMode === "FULL") {
 
-    sync_batch_id,
-    company_code,
-    tally_owner,
-    module,
-    entity_type: entity
+    await SnapshotManager.removeMissingGuids({
+
+        sync_batch_id,
+        company_code,
+        tally_owner,
+        module,
+        entity_type: entity
 
     });
+
+}
 
 
 await BatchStatusManager.markReconciliationCompleted({
@@ -810,6 +815,14 @@ const {
 
             );
 
+            console.log("========== MASTER ROW BEFORE BUILDER ==========");
+console.dir(rows[0], { depth: null });
+
+console.log("========== DB ROW AFTER BUILDER ==========");
+console.dir(dbRows[0], { depth: null });
+
+console.log("==============================================");
+
         const validation =
 
             await ValidationPipeline.validate({
@@ -921,9 +934,10 @@ const {
             row.alterid ??
             null,
 
-        master_id:
-            row.master_id ??
-            null,
+       master_id:
+    row.master_id ??
+    row.masterid ??
+    null,
 
         status: "COMPLETED",
 

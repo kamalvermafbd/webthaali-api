@@ -101,7 +101,11 @@ const {
 
     ENTITY_METADATA,
 
-    ENTITY_TYPE
+    SYNC_MODE,
+
+    ENTITY_TYPE,
+    
+    VOUCHER_SYNC_PERIOD
 
 } = require("./sync-engine/constants");
 
@@ -34630,6 +34634,41 @@ app.get("/getMasters", async (req, res) => {
         .trim()
         .toUpperCase();
 
+    const syncPeriod =
+    String(req.query.sync_period || VOUCHER_SYNC_PERIOD.DEFAULT)
+        .trim()
+        .toUpperCase();
+
+    const syncMode =
+    String(req.query.sync_mode || SYNC_MODE.PERIODIC)
+        .trim()
+        .toUpperCase();
+
+    if (
+    syncMode !== SYNC_MODE.FULL &&
+    syncMode !== SYNC_MODE.PERIODIC
+) {
+    return res.json({
+        success: false,
+        error: "Invalid sync_mode"
+    });
+}
+
+if (
+    syncMode === SYNC_MODE.PERIODIC &&
+    ![
+        VOUCHER_SYNC_PERIOD.WEEKLY,
+        VOUCHER_SYNC_PERIOD.THREE_MONTHS,
+        VOUCHER_SYNC_PERIOD.SIX_MONTHS,
+        VOUCHER_SYNC_PERIOD.CUSTOM
+    ].includes(syncPeriod)
+) {
+    return res.json({
+        success: false,
+        error: "Invalid sync_period for PERIODIC sync"
+    });
+}
+
     console.log("================================");
     console.log("GET MASTERS");
     console.log("QUERY :", req.query);
@@ -34977,7 +35016,8 @@ const result = await sendChunkedToConnector(
         company,
         lastAlterId,
         lastStockAlterId,
-        lastLedgerAlterId
+        lastLedgerAlterId,
+        syncMode
     }
 );
 
@@ -35069,15 +35109,171 @@ if (
     )
 
 ) {
+/*
+  const hasPreviousCompletedSync =
+    await BatchStatusManager.hasCompletedSync({
+        company_code,
+        tally_owner,
+        exclude_batch_id: sync_batch_id
+    });
+*/
 
- const fromDate =
-    result.summary?.booksBeginningFrom;
-
-const toDate =
+ const toDate =
     new Date()
         .toISOString()
         .slice(0, 10)
         .replace(/-/g, "");
+
+/*
+if (!hasPreviousCompletedSync) {
+
+    // FIRST SYNC
+    fromDate =
+        result.summary?.booksBeginningFrom;
+
+} else {
+
+    // PERIODIC SYNC
+    switch (syncPeriod) {
+
+        case VOUCHER_SYNC_PERIOD.WEEKLY: {
+
+            const date =
+                new Date();
+
+            date.setDate(
+                date.getDate() - 7
+            );
+
+            fromDate =
+                date.toISOString()
+                    .slice(0, 10)
+                    .replace(/-/g, "");
+
+            break;
+        }
+
+        case VOUCHER_SYNC_PERIOD.THREE_MONTHS: {
+
+            const date =
+                new Date();
+
+            date.setMonth(
+                date.getMonth() - 3
+            );
+
+            fromDate =
+                date.toISOString()
+                    .slice(0, 10)
+                    .replace(/-/g, "");
+
+            break;
+        }
+
+        case VOUCHER_SYNC_PERIOD.SIX_MONTHS: {
+
+            const date =
+                new Date();
+
+            date.setMonth(
+                date.getMonth() - 6
+            );
+
+            fromDate =
+                date.toISOString()
+                    .slice(0, 10)
+                    .replace(/-/g, "");
+
+            break;
+        }
+
+        default:
+
+            fromDate =
+                result.summary?.booksBeginningFrom;
+
+    }
+
+}
+
+*/
+
+let fromDate;
+
+if (syncMode === SYNC_MODE.FULL) {
+
+    fromDate =
+        result.summary?.booksBeginningFrom;
+
+} else {
+
+    switch (syncPeriod) {
+
+        case VOUCHER_SYNC_PERIOD.WEEKLY: {
+
+            const date = new Date();
+
+            date.setDate(
+                date.getDate() - 7
+            );
+
+            fromDate =
+                date.toISOString()
+                    .slice(0, 10)
+                    .replace(/-/g, "");
+
+            break;
+        }
+
+        case VOUCHER_SYNC_PERIOD.THREE_MONTHS: {
+
+            const date = new Date();
+
+            date.setMonth(
+                date.getMonth() - 3
+            );
+
+            fromDate =
+                date.toISOString()
+                    .slice(0, 10)
+                    .replace(/-/g, "");
+
+            break;
+        }
+
+        case VOUCHER_SYNC_PERIOD.SIX_MONTHS: {
+
+            const date = new Date();
+
+            date.setMonth(
+                date.getMonth() - 6
+            );
+
+            fromDate =
+                date.toISOString()
+                    .slice(0, 10)
+                    .replace(/-/g, "");
+
+            break;
+        }
+
+        case VOUCHER_SYNC_PERIOD.CUSTOM:
+
+            // custom fromDate logic will be handled
+            // from the requested custom date range
+            fromDate =
+                req.query.from_date;
+
+            break;
+
+        default:
+
+            throw new Error(
+                `Invalid sync period: ${syncPeriod}`
+            );
+    }
+
+}
 
 voucherGuidResult =
     await sendChunkedToConnector(
@@ -35092,7 +35288,16 @@ voucherGuidResult =
 
             snapshot:true,
 
+            booksBeginningFrom:
+                result.summary?.booksBeginningFrom,
+
+           lastAlterId,
+
             sync_batch_id,
+
+            syncMode,
+
+            syncPeriod,
 
             company_code,
 
@@ -35112,6 +35317,8 @@ voucherGuidResult =
             company,
 
             snapshot:true,
+
+            syncMode,
 
             sync_batch_id,
 
@@ -35139,6 +35346,8 @@ ledgerGuidResult =
             company,
 
             snapshot:true,
+
+            syncMode,
 
             sync_batch_id,
 
@@ -35168,6 +35377,8 @@ stockGroupGuidResult =
 
             snapshot:true,
 
+            syncMode,
+
             sync_batch_id,
 
             company_code,
@@ -35195,6 +35406,8 @@ stockGuidResult =
             company,
 
             snapshot:true,
+
+            syncMode,
 
             sync_batch_id,
 
@@ -35224,6 +35437,8 @@ unitGuidResult =
 
             snapshot:true,
 
+            syncMode,
+
             sync_batch_id,
 
             company_code,
@@ -35252,6 +35467,8 @@ godownGuidResult =
 
             snapshot:true,
 
+            syncMode,
+
             sync_batch_id,
 
             company_code,
@@ -35279,6 +35496,8 @@ costCentreGuidResult =
             company,
 
             snapshot:true,
+
+            syncMode,
 
             sync_batch_id,
 
@@ -36712,6 +36931,16 @@ masterFlowDebug({
 
 });
 
+console.log("=== VOUCHER GUID BEFORE SAVE ===", {
+    count: voucherGuidResult?.items?.length || 0,
+    targetGuidPresent:
+        (voucherGuidResult?.items || []).some(
+            x =>
+                (typeof x === "string" ? x : x?.guid) ===
+                "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6a"
+        )
+});
+
 // =========================
 // SAVE VOUCHERS
 // =========================
@@ -36720,9 +36949,10 @@ voucherResult = await saveVouchers({
     company_code,
     tally_owner,
     sync_batch_id,
+    syncMode,
     vouchers: result.vouchers || [],
     allVoucherGuids:
-    voucherGuidResult?.items || []
+      voucherGuidResult?.items || []
 });
 
 if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
@@ -36744,14 +36974,30 @@ if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
         "voucherByGuid",
         {
             company,
+
             sync_batch_id,
+
+            company_code,
+
             tally_owner,
+
+            module: "VOUCHER",
+
+            entity_type: "VOUCHER",
+
+            snapshot: true,
+
+            syncMode,
+
+            booksBeginningFrom:
+                result.summary?.booksBeginningFrom,
+
+       //     toDate,
 
             requestItems:
                 voucherResult.missingVoucherGuids
         }
     );
-
 
         fs.appendFileSync(
           "./logs/voucher-guid-debug.jsonl",
@@ -36759,7 +37005,7 @@ if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
             stage: "AFTER_VOUCHER_BY_GUID_RESPONSE",
             success: missingResult.success,
             keys: Object.keys(missingResult || {}),
-            voucherCount: missingResult.vouchers?.length || 0
+            voucherCount: missingResult.items?.length || 0
         }) + "\n"
        );
 
@@ -36772,13 +37018,14 @@ if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
 }
 
     voucherResult = await saveVouchers({
-        company_code,
-        tally_owner,
-        sync_batch_id,
-        vouchers: missingResult.vouchers || [],
-        allVoucherGuids:
-          voucherGuidResult?.items || []
-    });
+    company_code,
+    tally_owner,
+    sync_batch_id,
+    syncMode,
+    vouchers: missingResult.items || [],
+    allVoucherGuids:
+      voucherGuidResult?.items || []
+});
 
 }
 

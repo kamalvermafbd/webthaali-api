@@ -240,6 +240,80 @@ class BatchStatusManager {
 
         }
 
+        // ----------------------------------
+// Check Previous Completed Sync
+// ----------------------------------
+
+async hasCompletedSync({
+
+    company_code,
+    tally_owner,
+    exclude_batch_id = null
+
+}) {
+
+    let query = supabase
+
+        .from(TABLES.SYNC_BATCHES)
+
+        .select("batch_id")
+
+        .eq(
+            "company_code",
+            company_code
+        )
+
+        .eq(
+            "tally_owner",
+            tally_owner
+        )
+
+        .eq(
+            "batch_status",
+            BATCH_STATUS.COMPLETED
+        )
+
+        .order(
+            "completed_at",
+            {
+                ascending: false
+            }
+        )
+
+        .limit(1);
+
+    if (exclude_batch_id) {
+
+        query = query.neq(
+            "batch_id",
+            exclude_batch_id
+        );
+
+    }
+
+    const {
+        data,
+        error
+    } = await query;
+
+    if (error) {
+
+        throw new Error(
+
+            "Failed to check previous completed sync : " +
+
+            error.message
+
+        );
+
+    }
+
+    return Boolean(
+        data?.length
+    );
+
+}
+
         async claimOrCreateHttpBatch({
 
             company_code,
