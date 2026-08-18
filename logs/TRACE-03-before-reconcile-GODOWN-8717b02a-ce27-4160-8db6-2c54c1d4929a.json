@@ -1,8 +1,0 @@
-{
-  "stage": "PASSED_RETRY_BEFORE_RECONCILE",
-  "batch_id": "8717b02a-ce27-4160-8db6-2c54c1d4929a",
-  "module": "MASTER",
-  "entity": "GODOWN",
-  "table": "tally_sync_godowns",
-  "retrySuccess": true
-}

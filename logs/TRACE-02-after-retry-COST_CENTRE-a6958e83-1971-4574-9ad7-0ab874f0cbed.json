@@ -1,8 +1,0 @@
-{
-  "stage": "AFTER_RETRY",
-  "batch_id": "a6958e83-1971-4574-9ad7-0ab874f0cbed",
-  "entity": "COST_CENTRE",
-  "failedCount": 0,
-  "retrySuccess": true,
-  "retried": 0
-}

@@ -1,8 +1,0 @@
-{
-  "stage": "POST_EXECUTION_START",
-  "batch_id": "a6958e83-1971-4574-9ad7-0ab874f0cbed",
-  "module": "MASTER",
-  "entity": "UNIT",
-  "table": "tally_sync_units",
-  "failedCount": 0
-}

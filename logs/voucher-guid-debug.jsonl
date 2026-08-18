@@ -1,8 +1,0 @@
-{"stage":"BEFORE_VOUCHER_BY_GUID_REQUEST","company":"Guru Kirpa Trading","totalMissing":1,"missingVoucherGuids":[{"masterid":11117,"guid":"b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6d","alterid":16652,"date":20260401,"voucherTypeName":"Journal","voucherNumber":2}]}
-{"stage":"AFTER_VOUCHER_BY_GUID_RESPONSE","success":true,"keys":["success","collectionName","voucherCount","snapshotSaved","totalItems","items"],"voucherCount":0}
-{"stage":"BEFORE_VOUCHER_BY_GUID_REQUEST","company":"Guru Kirpa Trading","totalMissing":1,"missingVoucherGuids":[{"masterid":11117,"guid":"b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6d","alterid":16652,"date":20260401,"voucherTypeName":"Journal","voucherNumber":2}]}
-{"stage":"AFTER_VOUCHER_BY_GUID_RESPONSE","success":true,"keys":["success","collectionName","voucherCount","snapshotSaved","totalItems","items"],"voucherCount":0}
-{"stage":"BEFORE_VOUCHER_BY_GUID_REQUEST","company":"Guru Kirpa Trading","totalMissing":1,"missingVoucherGuids":[{"masterid":11117,"guid":"b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6d","alterid":16652,"date":20260401,"voucherTypeName":"Journal","voucherNumber":2}]}
-{"stage":"AFTER_VOUCHER_BY_GUID_RESPONSE","success":true,"keys":["success","collectionName","voucherCount","snapshotSaved","totalItems","items"],"voucherCount":0}
-{"stage":"BEFORE_VOUCHER_BY_GUID_REQUEST","company":"Guru Kirpa Trading","totalMissing":1,"missingVoucherGuids":[{"masterid":11117,"guid":"b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6d","alterid":16652,"date":20260401,"voucherTypeName":"Journal","voucherNumber":2}]}
-{"stage":"AFTER_VOUCHER_BY_GUID_RESPONSE","success":true,"keys":["success","collectionName","voucherCount","snapshotSaved","totalItems","items"],"voucherCount":1}
