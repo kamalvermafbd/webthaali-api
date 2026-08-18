@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-08-18T03:47:09.092Z",
+  "sync_batch_id": "cc2d7332-3329-4282-b7be-5155ad12bcba",
+  "company_code": "C0035",
+  "tally_owner": "USER",
+  "module": "VOUCHER",
+  "entity_type": "VOUCHER",
+  "rowsReceived": 1,
+  "snapshotRowsCount": 0,
+  "snapshotRows": []
+}

@@ -2066,6 +2066,23 @@ console.log("voucherRows:", voucherRows.length);
 console.log("voucherGuids:", voucherGuids.length);
 console.log("vouchers:", vouchers.length);
 
+if (
+    allVoucherGuids?.length > 0 &&
+    vouchers.length === 0
+) {
+
+    console.log(
+        "⚠️ MISSING VOUCHER GUIDS:",
+        allVoucherGuids
+    );
+
+    return {
+        status: "WAITING_FOR_MISSING_VOUCHERS",
+        missingVoucherGuids: allVoucherGuids
+    };
+
+}
+
 if (voucherRows.length > 0 || allVoucherGuids.length > 0) {
 
       rowsToSave = getRowsToSave({

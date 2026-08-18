@@ -124,7 +124,8 @@ class VoucherExecutionService {
         tally_owner,
         module: MODULE_TYPE.VOUCHER,
         entity_type: ENTITY_TYPE.VOUCHER,
-        rows: allVoucherRows
+        rows: rowsToSave
+        //rows: allVoucherRows
     });
 /*
     await SnapshotManager.saveSnapshotRows({

@@ -1,0 +1,14 @@
+{
+  "table": "tally_vouchers",
+  "module": "VOUCHER",
+  "entity_type": "VOUCHER",
+  "snapshotCount": 6592,
+  "dbCount": 6592,
+  "matched": 6592,
+  "missingCount": 0,
+  "extraCount": 0,
+  "alterChangedCount": 0,
+  "missingGuids": [],
+  "extraGuids": [],
+  "alterChanged": []
+}

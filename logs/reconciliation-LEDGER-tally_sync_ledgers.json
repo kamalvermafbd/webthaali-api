@@ -1,0 +1,14 @@
+{
+  "stage": "RECONCILIATION_RESULT",
+  "table": "tally_sync_ledgers",
+  "module": "MASTER",
+  "entity_type": "LEDGER",
+  "sync_batch_id": "a6958e83-1971-4574-9ad7-0ab874f0cbed",
+  "snapshotCount": 409,
+  "dbCount": 409,
+  "missingCount": 0,
+  "extraCount": 0,
+  "alterChangedCount": 0,
+  "missingGuids": [],
+  "extraGuids": []
+}

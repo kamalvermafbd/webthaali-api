@@ -1,0 +1,10 @@
+{
+  "stage": "BATCH_MANAGER_TO_RECONCILIATION_MANAGER",
+  "batch_id": "cc2d7332-3329-4282-b7be-5155ad12bcba",
+  "module": "VOUCHER",
+  "entity": "VOUCHER",
+  "table": "tally_vouchers",
+  "company_code": "C0035",
+  "tally_owner": "USER",
+  "sync_batch_id": "cc2d7332-3329-4282-b7be-5155ad12bcba"
+}

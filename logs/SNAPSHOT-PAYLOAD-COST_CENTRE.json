@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-08-18T03:54:24.373Z",
+  "sync_batch_id": "a6958e83-1971-4574-9ad7-0ab874f0cbed",
+  "company_code": "C0035",
+  "tally_owner": "USER",
+  "module": "MASTER",
+  "entity_type": "COST_CENTRE",
+  "rowsReceived": 1,
+  "snapshotRowsCount": 1,
+  "snapshotRows": [
+    {
+      "sync_batch_id": "a6958e83-1971-4574-9ad7-0ab874f0cbed",
+      "last_sync_batch_id": "a6958e83-1971-4574-9ad7-0ab874f0cbed",
+      "company_code": "C0035",
+      "tally_owner": "USER",
+      "module": "MASTER",
+      "entity_type": "COST_CENTRE",
+      "guid": "b06ee43a-c023-4bfc-b8d9-3fd85283e679-000007b8",
+      "alter_id": "5208",
+      "master_id": "1976"
+    }
+  ]
+}

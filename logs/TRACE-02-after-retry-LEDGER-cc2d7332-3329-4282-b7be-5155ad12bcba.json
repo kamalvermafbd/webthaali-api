@@ -1,0 +1,8 @@
+{
+  "stage": "AFTER_RETRY",
+  "batch_id": "cc2d7332-3329-4282-b7be-5155ad12bcba",
+  "entity": "LEDGER",
+  "failedCount": 0,
+  "retrySuccess": true,
+  "retried": 0
+}

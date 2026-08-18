@@ -1,0 +1,12 @@
+{
+  "stage": "AFTER_RECONCILE",
+  "batch_id": "a6958e83-1971-4574-9ad7-0ab874f0cbed",
+  "module": "MASTER",
+  "entity": "STOCK_GROUP",
+  "table": "tally_sync_stock_groups",
+  "success": true,
+  "snapshotCount": 3,
+  "dbCount": 3,
+  "missing": 0,
+  "extra": 0
+}

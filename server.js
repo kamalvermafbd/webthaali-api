@@ -36955,6 +36955,14 @@ voucherResult = await saveVouchers({
       voucherGuidResult?.items || []
 });
 
+console.log("=== VOUCHER RESULT AFTER SAVE ===");
+console.dir(voucherResult, { depth: null });
+console.log("STATUS :", voucherResult?.status);
+console.log(
+    "MISSING GUIDS :",
+    voucherResult?.missingVoucherGuids
+);
+console.log("================================");
 if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
 
 

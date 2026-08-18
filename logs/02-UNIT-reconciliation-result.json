@@ -1,0 +1,14 @@
+{
+  "table": "tally_sync_units",
+  "module": "MASTER",
+  "entity_type": "UNIT",
+  "snapshotCount": 12,
+  "dbCount": 12,
+  "matched": 12,
+  "missingCount": 0,
+  "extraCount": 0,
+  "alterChangedCount": 0,
+  "missingGuids": [],
+  "extraGuids": [],
+  "alterChanged": []
+}

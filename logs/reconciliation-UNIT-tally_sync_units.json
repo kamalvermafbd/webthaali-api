@@ -1,0 +1,14 @@
+{
+  "stage": "RECONCILIATION_RESULT",
+  "table": "tally_sync_units",
+  "module": "MASTER",
+  "entity_type": "UNIT",
+  "sync_batch_id": "a6958e83-1971-4574-9ad7-0ab874f0cbed",
+  "snapshotCount": 12,
+  "dbCount": 12,
+  "missingCount": 0,
+  "extraCount": 0,
+  "alterChangedCount": 0,
+  "missingGuids": [],
+  "extraGuids": []
+}

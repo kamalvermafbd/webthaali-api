@@ -1,0 +1,10 @@
+{
+  "stage": "BATCH_MANAGER_TO_RECONCILIATION_MANAGER",
+  "batch_id": "a6958e83-1971-4574-9ad7-0ab874f0cbed",
+  "module": "MASTER",
+  "entity": "GROUP",
+  "table": "tally_sync_groups",
+  "company_code": "C0035",
+  "tally_owner": "USER",
+  "sync_batch_id": "a6958e83-1971-4574-9ad7-0ab874f0cbed"
+}

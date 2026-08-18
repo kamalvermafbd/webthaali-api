@@ -1,0 +1,12 @@
+{
+  "stage": "AFTER_RECONCILE",
+  "batch_id": "dc6ead9c-557b-449a-93cd-d3fb673fbce6",
+  "module": "MASTER",
+  "entity": "LEDGER",
+  "table": "tally_sync_ledgers",
+  "success": true,
+  "snapshotCount": 409,
+  "dbCount": 409,
+  "missing": 0,
+  "extra": 0
+}

@@ -1,0 +1,8 @@
+{
+  "stage": "PASSED_RETRY_BEFORE_RECONCILE",
+  "batch_id": "a6958e83-1971-4574-9ad7-0ab874f0cbed",
+  "module": "MASTER",
+  "entity": "GROUP",
+  "table": "tally_sync_groups",
+  "retrySuccess": true
+}

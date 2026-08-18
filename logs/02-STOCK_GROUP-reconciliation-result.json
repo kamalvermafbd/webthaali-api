@@ -1,0 +1,14 @@
+{
+  "table": "tally_sync_stock_groups",
+  "module": "MASTER",
+  "entity_type": "STOCK_GROUP",
+  "snapshotCount": 3,
+  "dbCount": 3,
+  "matched": 3,
+  "missingCount": 0,
+  "extraCount": 0,
+  "alterChangedCount": 0,
+  "missingGuids": [],
+  "extraGuids": [],
+  "alterChanged": []
+}

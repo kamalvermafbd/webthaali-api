@@ -1,0 +1,12 @@
+{
+  "stage": "AFTER_RECONCILE",
+  "batch_id": "cc2d7332-3329-4282-b7be-5155ad12bcba",
+  "module": "MASTER",
+  "entity": "GROUP",
+  "table": "tally_sync_groups",
+  "success": true,
+  "snapshotCount": 30,
+  "dbCount": 30,
+  "missing": 0,
+  "extra": 0
+}

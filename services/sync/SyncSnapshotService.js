@@ -135,7 +135,7 @@ console.log("================================");
 
 */
 
-
+/*180826 08:44
 const snapshotRows = rows
     .filter(row =>
         entity_type === "VOUCHER"
@@ -183,8 +183,77 @@ const snapshotRows = rows
                 )
 
     }));
+*/
+
+const snapshotRows = rows
+    .filter(row => row.guid)
+    .map(row => ({
+
+        sync_batch_id,
+
+        last_sync_batch_id:
+            sync_batch_id,
+
+        company_code,
+
+        tally_owner,
+
+        module,
+
+        entity_type,
+
+        guid:
+            row.guid,
+
+        alter_id:
+            entity_type === "VOUCHER"
+                ? row.alterid
+                : (
+                    row.alterId ??
+                    row.alter_id ??
+                    row.alterid ??
+                    null
+                ),
+
+        master_id:
+            entity_type === "VOUCHER"
+                ? row.masterid
+                : (
+                    row.masterId ??
+                    row.master_id ??
+                    row.masterid ??
+                    null
+                )
+
+    }));
+
     
 const fs = require("fs");
+
+fs.writeFileSync(
+    `./logs/SNAPSHOT-PAYLOAD-${entity_type}.json`,
+    JSON.stringify(
+        {
+            timestamp: new Date().toISOString(),
+
+            sync_batch_id,
+            company_code,
+            tally_owner,
+            module,
+            entity_type,
+
+            rowsReceived: rows.length,
+
+            snapshotRowsCount:
+                snapshotRows.length,
+
+            snapshotRows
+
+        },
+        null,
+        2
+    )
+);
 
 /*
 fs.writeFileSync(
