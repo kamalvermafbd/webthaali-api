@@ -431,6 +431,25 @@ const reconciliation =
     console.log("alter :", reconciliation.alterChanged.length);
     console.log("================================");
 
+    fs.writeFileSync(
+    `./logs/RECON-EXTRA-GUIDS-${batch_id}.json`,
+    JSON.stringify({
+        batch_id,
+        extraCount:
+            reconciliation.extraGuids?.length || 0,
+        extraGuids:
+            (reconciliation.extraGuids || []).map(
+                row => ({
+                    guid: row.guid,
+                    alterid: row.alterid,
+                    masterid: row.masterid,
+                    is_deleted: row.is_deleted,
+                    sync_batch_id: row.sync_batch_id
+                })
+            )
+    }, null, 2)
+);
+
     
 let reconciliationOperations = [];
 

@@ -36937,7 +36937,7 @@ console.log("=== VOUCHER GUID BEFORE SAVE ===", {
         (voucherGuidResult?.items || []).some(
             x =>
                 (typeof x === "string" ? x : x?.guid) ===
-                "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6a"
+                "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6e"
         )
 });
 
@@ -36965,6 +36965,9 @@ console.log(
 console.log("================================");
 if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
 
+const recoveredVoucherGuids =
+    voucherResult.missingVoucherGuids;
+
 
   fs.appendFileSync(
     "./logs/voucher-guid-debug.jsonl",
@@ -36975,6 +36978,7 @@ if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
         missingVoucherGuids: voucherResult.missingVoucherGuids
     }) + "\n"
     );
+
 
    const missingResult =
     await sendChunkedToConnector(
@@ -37003,7 +37007,7 @@ if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
        //     toDate,
 
             requestItems:
-                voucherResult.missingVoucherGuids
+               recoveredVoucherGuids
         }
     );
 
@@ -37017,6 +37021,55 @@ if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
         }) + "\n"
        );
 
+       const requestedGuidSet = new Set(
+    recoveredVoucherGuids
+        .map(g =>
+            typeof g === "string"
+                ? g.trim()
+                : g?.guid?.trim()
+        )
+        .filter(Boolean)
+);
+
+const returnedGuidSet = new Set(
+    (missingResult.items || [])
+        .map(v =>
+            (
+                v?.header?.guid ||
+                v?.guid
+            )?.trim()
+        )
+        .filter(Boolean)
+);
+
+const stillMissingAfterRecovery = [
+    ...requestedGuidSet
+].filter(
+    guid => !returnedGuidSet.has(guid)
+);
+
+fs.writeFileSync(
+    `./logs/VOUCHER-RECOVERY-CHECK-${sync_batch_id}.json`,
+    JSON.stringify({
+        requestedCount: requestedGuidSet.size,
+        returnedCount: returnedGuidSet.size,
+        stillMissingCount:
+            stillMissingAfterRecovery.length,
+
+        targetRequested:
+            requestedGuidSet.has(
+                "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6e"
+            ),
+
+        targetReturned:
+            returnedGuidSet.has(
+                "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6e"
+            ),
+
+        stillMissing:
+            stillMissingAfterRecovery
+    }, null, 2)
+);
 
     if (!missingResult.success) {
 
@@ -37025,20 +37078,53 @@ if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
 
 }
 
-    voucherResult = await saveVouchers({
-    company_code,
-    tally_owner,
-    sync_batch_id,
-    syncMode,
-    vouchers: missingResult.items || [],
-    allVoucherGuids:
-      voucherGuidResult?.items || []
+const allFetchedVouchers = [
+    ...(result.vouchers || []),
+    ...(missingResult.items || [])
+];
+
+console.log("===== BEFORE SECOND SAVE VOUCHERS =====", {
+    vouchers: allFetchedVouchers.length,
+    first: allFetchedVouchers[0]?.header?.guid,
+    last: allFetchedVouchers[allFetchedVouchers.length - 1]?.header?.guid,
+    firstItemKeys:
+    Object.keys(allFetchedVouchers[0] || {}),
+    firstItem:
+        allFetchedVouchers[0]
 });
 
-}
+    voucherResult = await saveVouchers({
+      company_code,
+      tally_owner,
+      sync_batch_id,
+      syncMode,
+      vouchers: allFetchedVouchers,
+      //vouchers: missingResult.items || [],
+      allVoucherGuids:
+        voucherGuidResult?.items || []
+  });
+
+  }
 
 
 console.log("VOUCHER SAVE :", voucherResult);
+
+fs.writeFileSync(
+    `./logs/VOUCHER-SECOND-SAVE-${sync_batch_id}.json`,
+    JSON.stringify({
+        batch_id: sync_batch_id,
+
+        voucherResult: {
+            status: voucherResult?.status,
+
+            missingCount:
+                voucherResult?.missingVoucherGuids?.length || 0,
+
+            missingGuids:
+                voucherResult?.missingVoucherGuids || []
+        }
+    }, null, 2)
+);
 
 await BatchStatusManager.updateModule({
 

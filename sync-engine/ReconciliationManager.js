@@ -364,6 +364,34 @@ buildGuidMap(rows = []) {
 
             );
 
+            const TARGET_GUID =
+    "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6e";
+
+fs.writeFileSync(
+    `./logs/TARGET-RECON-${entity_type}-${sync_batch_id}.json`,
+    JSON.stringify({
+        targetGuid: TARGET_GUID,
+
+        snapshotHasTarget:
+            snapshotMap.has(TARGET_GUID),
+
+        dbHasTarget:
+            dbMap.has(TARGET_GUID),
+
+        snapshotTarget:
+            snapshotMap.get(TARGET_GUID) || null,
+
+        dbTarget:
+            dbMap.get(TARGET_GUID) || null,
+
+        snapshotCount:
+            snapshotRows.length,
+
+        dbCount:
+            dbRows?.length || 0
+    }, null, 2)
+);
+
 // ----------------------------------
 // Child Orphan Detection
 // ----------------------------------
@@ -485,6 +513,7 @@ buildGuidMap(rows = []) {
 
             null;
 
+            
         const snapshotAlterId =
     snapshot.alter_id ??
     null;

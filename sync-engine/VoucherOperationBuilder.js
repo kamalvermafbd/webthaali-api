@@ -9,7 +9,7 @@ const {
     VOUCHER_RECONCILIATION
 } = require("./constants");
 
-
+const fs = require("fs");
 /*
 function buildDeleteOperations({
 
@@ -196,7 +196,7 @@ function buildDeleteOperations({
 
     for (const [table, config] of childTables) {
 
-        const fs = require("fs");
+        
 
 fs.appendFileSync(
     "./logs/DEBUG-NORMAL-VOUCHER-DELETE.jsonl",
@@ -629,6 +629,19 @@ function buildSoftDeleteOperations({
     sync_batch_id,
     extraGuids = []
 }) {
+
+    fs.appendFileSync(
+    "./logs/DEBUG-SOFT-DELETE.jsonl",
+    JSON.stringify({
+        source: "buildSoftDeleteOperations",
+        sync_batch_id,
+        extraGuidCount: extraGuids?.length || 0,
+        extraGuids: (extraGuids || [])
+            .map(item => item?.guid)
+            .filter(Boolean),
+        timestamp: new Date().toISOString()
+    }) + "\n"
+);
 
     const operations = [];
 

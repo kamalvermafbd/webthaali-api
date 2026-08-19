@@ -349,9 +349,18 @@ console.log("OPTIONS :", options);
         }
 
         const {
+            data,
             error
-        } = await query;
+        } = await query.select("*");
 
+        console.log(
+            "UPDATE RESULT:",
+            table,
+            "updated:",
+            data?.length || 0
+        );
+
+            
         if (error) {
 
             throw new Error(

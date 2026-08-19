@@ -15,6 +15,10 @@ const {
 
     TABLES
 } = require("./constants");
+
+const fs = require("fs");
+
+
 class VoucherExecutionService {
 
     async execute({
@@ -117,15 +121,50 @@ class VoucherExecutionService {
 
     console.log(">>> BatchManager FINISHED");
 
-    const snapshotRows =
+const snapshotSourceRows =
+    syncMode === "FULL"
+        ? allVoucherRows
+        : rowsToSave;
+
+
+const targetGuid =
+    "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6e";
+
+fs.writeFileSync(
+    `./logs/TRACE-TARGET-GUID-${sync_batch_id}.json`,
+    JSON.stringify({
+        sync_batch_id,
+
+        inAllVoucherRows:
+            allVoucherRows?.some(
+                row =>
+                    row.guid === targetGuid ||
+                    row.header?.guid === targetGuid
+            ),
+
+        inRowsToSave:
+            rowsToSave?.some(
+                row =>
+                    row.guid === targetGuid ||
+                    row.header?.guid === targetGuid
+            ),
+
+        allVoucherRowsCount:
+            allVoucherRows?.length || 0,
+
+        rowsToSaveCount:
+            rowsToSave?.length || 0
+    }, null, 2)
+);
+
+const snapshotRows =
     SnapshotManager.buildSnapshotRows({
         sync_batch_id,
         company_code,
         tally_owner,
         module: MODULE_TYPE.VOUCHER,
         entity_type: ENTITY_TYPE.VOUCHER,
-        rows: rowsToSave
-        //rows: allVoucherRows
+        rows: snapshotSourceRows
     });
 /*
     await SnapshotManager.saveSnapshotRows({
@@ -134,9 +173,7 @@ class VoucherExecutionService {
 */
    
 
-    const fs =
-    require("fs");
-
+    
 fs.writeFileSync(
 
     `./logs/VOUCHER-01-before-postExecution-${sync_batch_id}.json`,

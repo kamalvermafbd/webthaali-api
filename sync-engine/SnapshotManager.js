@@ -1059,6 +1059,42 @@ while (true) {
 
         }
 
+        const { data: candidates, error: candidateError } =
+    await supabase
+        .from(TABLES.SNAPSHOT)
+        .select(
+            "guid,last_sync_batch_id,is_deleted"
+        )
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .eq("module", module)
+        .eq("entity_type", entity_type)
+        .neq("last_sync_batch_id", sync_batch_id)
+        .eq("is_deleted", false);
+
+fs.writeFileSync(
+    `./logs/SNAPSHOT-REMOVE-MISSING-${sync_batch_id}.json`,
+    JSON.stringify({
+        sync_batch_id,
+        company_code,
+        tally_owner,
+        module,
+        entity_type,
+
+        candidateCount:
+            candidates?.length || 0,
+
+        candidates:
+            (candidates || []).map(row => ({
+                guid: row.guid,
+                last_sync_batch_id:
+                    row.last_sync_batch_id,
+                is_deleted:
+                    row.is_deleted
+            }))
+    }, null, 2)
+);
+
         let query = supabase
 
             .from(
@@ -1067,6 +1103,7 @@ while (true) {
 
             )
 
+            
             .update({
 
                 is_deleted: true,

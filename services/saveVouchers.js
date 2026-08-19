@@ -1723,6 +1723,8 @@ const now = new Date().toISOString();
 const runId =
     `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+const isFullSync = syncMode === "FULL";
+
 const voucherRows = [];
 
 const allVoucherRows = [];
@@ -1888,9 +1890,9 @@ integrityResult = {
         existingVoucher === undefined
             ? VALIDATION_ACTION.INSERT
             : existingVoucher.is_deleted
-                ? VALIDATION_ACTION.UPDATE
+            ? VALIDATION_ACTION.UPDATE
                 : Number(header.alterid) >
-                  Number(existingVoucher.alterid)
+                Number(existingVoucher.alterid)
                     ? VALIDATION_ACTION.UPDATE
                     : VALIDATION_ACTION.SKIP,
 
@@ -1940,6 +1942,19 @@ console.log(
     integrityResult.action
 );
 
+if (isFullSync) {
+
+    fs.appendFileSync(
+        `./logs/FULL-VOUCHER-VALIDATION-${sync_batch_id}.jsonl`,
+        JSON.stringify({
+            guid: header.guid,
+            voucherNumber: header.voucherNumber,
+            alterid: header.alterid,
+            action: integrityResult.action
+        }) + "\n"
+    );
+
+}
 // Queue nomination happens here.
 // These arrays are temporary and will be replaced
 // by Queue Executor in the final architecture.
@@ -2066,21 +2081,88 @@ console.log("voucherRows:", voucherRows.length);
 console.log("voucherGuids:", voucherGuids.length);
 console.log("vouchers:", vouchers.length);
 
+
+
+const incomingGuidSet =
+    new Set(
+        vouchers
+            .map(v => v?.header?.guid?.trim())
+            .filter(Boolean)
+    );
+
+const missingVoucherGuids =
+    isFullSync
+        ? allVoucherGuids
+            .map(item =>
+                typeof item === "string"
+                    ? item.trim()
+                    : item?.guid?.trim()
+            )
+            .filter(
+                guid =>
+                    guid &&
+                    !incomingGuidSet.has(guid)
+            )
+        : [];
+
+
+        fs.writeFileSync(
+    `./logs/FULL-VOUCHER-GUID-DEBUG-${sync_batch_id}.json`,
+    JSON.stringify(
+        {
+            stage: "FULL_VOUCHER_GUID_VALIDATION",
+
+            sync_batch_id,
+
+            allVoucherGuids:
+                allVoucherGuids.length,
+
+            incomingVouchers:
+                vouchers.length,
+
+            incomingGuidSet:
+                incomingGuidSet.size,
+
+            missingVoucherGuids:
+                missingVoucherGuids.length,
+
+            firstMissing:
+                missingVoucherGuids.slice(0, 20),
+
+            lastMissing:
+                missingVoucherGuids.slice(-20)
+
+        },
+        null,
+        2
+    )
+);
+
+console.log(
+    "FULL GUID CHECK:",
+    {
+        allVoucherGuids: allVoucherGuids.length,
+        incomingVouchers: vouchers.length,
+        missingVoucherGuids: missingVoucherGuids.length
+    }
+);
 if (
+    isFullSync &&
     allVoucherGuids?.length > 0 &&
-    vouchers.length === 0
-) {
+    missingVoucherGuids.length > 0
+)  {
 
     console.log(
         "⚠️ MISSING VOUCHER GUIDS:",
-        allVoucherGuids
+        missingVoucherGuids.length
     );
 
     return {
         status: "WAITING_FOR_MISSING_VOUCHERS",
-        missingVoucherGuids: allVoucherGuids
-    };
 
+        missingVoucherGuids
+
+    };
 }
 
 if (voucherRows.length > 0 || allVoucherGuids.length > 0) {
