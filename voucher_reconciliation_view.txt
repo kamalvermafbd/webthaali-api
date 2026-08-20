@@ -1,0 +1,11 @@
+voucher_reconciliation_view
+
+[{"idx":7,"company_code":"C0018","tally_owner":"USER","guid":"755da616-c913-46c0-9ad0-de5499d071a0-0000001a","status":"MISSING"}]
+
+voucher_ledger_reconciliation_view
+
+[{"idx":0,"company_code":"C0035","tally_owner":"USER","voucher_guid":"b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002958","status":"MISSING"}]
+
+
+voucher_invoice_reconciliation_view
+[{"idx":0,"company_code":"C0035","tally_owner":"USER","voucher_guid":"b06ee43a-c023-4bfc-b8d9-3fd85283e679-00001f62","status":"MISSING"}]

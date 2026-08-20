@@ -125,6 +125,9 @@ const { saveGodowns } = require("./services/saveGodowns");
 const { saveCostCentres } = require("./services/saveCostCentres");
 const { saveStockGroups } = require("./services/saveStockGroups");
 const { saveStocks } = require("./services/saveStocks");
+const {
+    runChildVoucherReconciliation
+} = require("./sync-engine/ChildVoucherReconciliationService")
 
 /*
 const {
@@ -36944,6 +36947,9 @@ console.log("=== VOUCHER GUID BEFORE SAVE ===", {
 // =========================
 // SAVE VOUCHERS
 // =========================
+const childRepairVoucherCache = [
+    ...(result.vouchers || [])
+];
 
 voucherResult = await saveVouchers({
     company_code,
@@ -36967,14 +36973,41 @@ if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
 
 const recoveredVoucherGuids =
     voucherResult.missingVoucherGuids;
+fs.appendFileSync(
+    "./logs/voucher-by-guid-source-debug.jsonl",
+    JSON.stringify({
+        stage: "BEFORE_VOUCHER_BY_GUID",
+        sync_batch_id,
+        company_code,
+        tally_owner,
 
+        voucherResultStatus:
+            voucherResult?.status,
+
+        allDiscoveredVoucherGuids:
+            voucherGuidResult?.items?.length || 0,
+
+        missingVoucherGuids:
+            voucherResult?.missingVoucherGuids?.length || 0,
+
+        recoveredVoucherGuids:
+            recoveredVoucherGuids?.length || 0,
+
+        firstRecoveredGuids:
+            recoveredVoucherGuids?.slice(0, 10) || [],
+
+        lastRecoveredGuids:
+            recoveredVoucherGuids?.slice(-10) || []
+    }) + "\n"
+);
 
   fs.appendFileSync(
     "./logs/voucher-guid-debug.jsonl",
     JSON.stringify({
         stage: "BEFORE_VOUCHER_BY_GUID_REQUEST",
         company,
-        totalMissing: voucherResult.missingVoucherGuids.length,
+        totalMissing:
+        voucherResult?.missingVoucherGuids?.length || 0,
         missingVoucherGuids: voucherResult.missingVoucherGuids
     }) + "\n"
     );
@@ -37011,6 +37044,22 @@ const recoveredVoucherGuids =
         }
     );
 
+    fs.appendFileSync(
+    "./logs/voucher-by-guid-source-debug.jsonl",
+    JSON.stringify({
+        stage: "SENDING_VOUCHER_BY_GUID",
+        sync_batch_id,
+
+        requestItemsCount:
+            recoveredVoucherGuids?.length || 0,
+
+        requestItemsFirst10:
+            recoveredVoucherGuids?.slice(0, 10) || [],
+
+        requestItemsLast10:
+            recoveredVoucherGuids?.slice(-10) || []
+    }) + "\n"
+);
         fs.appendFileSync(
           "./logs/voucher-guid-debug.jsonl",
           JSON.stringify({
@@ -37083,6 +37132,10 @@ const allFetchedVouchers = [
     ...(missingResult.items || [])
 ];
 
+childRepairVoucherCache.push(
+    ...(missingResult.items || [])
+);
+
 console.log("===== BEFORE SECOND SAVE VOUCHERS =====", {
     vouchers: allFetchedVouchers.length,
     first: allFetchedVouchers[0]?.header?.guid,
@@ -37126,6 +37179,76 @@ fs.writeFileSync(
     }, null, 2)
 );
 
+// =========================
+// PARENT VOUCHER RECONCILIATION GATE
+// =========================
+
+const {
+    data: parentReconciliationRows,
+    error: parentReconciliationError
+} = await supabase
+    .from("voucher_reconciliation_view")
+    .select("guid, status")
+    .eq("company_code", company_code)
+    .eq("tally_owner", tally_owner);
+
+if (parentReconciliationError) {
+
+    throw new Error(
+        `Voucher reconciliation check failed: ${
+            parentReconciliationError.message
+        }`
+    );
+
+}
+
+const parentMissingRows =
+    (parentReconciliationRows || [])
+        .filter(
+            row => row.status === "MISSING"
+        );
+
+const parentExtraRows =
+    (parentReconciliationRows || [])
+        .filter(
+            row => row.status === "EXTRA"
+        );
+
+console.log(
+    "===================================="
+);
+
+console.log(
+    "PARENT VOUCHER RECONCILIATION"
+);
+
+console.log(
+    "MISSING:",
+    parentMissingRows.length
+);
+
+console.log(
+    "EXTRA:",
+    parentExtraRows.length
+);
+
+console.log(
+    "===================================="
+);
+
+if (
+    parentMissingRows.length > 0 ||
+    parentExtraRows.length > 0
+) {
+
+    throw new Error(
+        `Parent voucher reconciliation not clean. ` +
+        `MISSING: ${parentMissingRows.length}, ` +
+        `EXTRA: ${parentExtraRows.length}`
+    );
+
+}
+
 await BatchStatusManager.updateModule({
 
     batch_id: sync_batch_id,
@@ -37136,6 +37259,8 @@ await BatchStatusManager.updateModule({
 
 });
 
+
+
 masterFlowDebug({
 
     stage:"VOUCHER_COMPLETED",
@@ -37145,7 +37270,461 @@ masterFlowDebug({
 });
 
 
+
+// =========================
+// PHASE-2 CHILD RECONCILIATION
+// =========================
+
+let childReconciliationResult =
+    await runChildVoucherReconciliation({
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+
+console.log(
+    "CHILD RECONCILIATION INITIAL RESULT:",
+    childReconciliationResult
+);
+
+
+// =========================================
+// CHILD REPAIR LOOP
+// =========================================
+
+const MAX_CHILD_REPAIR_ROUNDS = 10;
+
+let childRepairRound = 0;
+
+while (
+    !childReconciliationResult.completed &&
+    childRepairRound < MAX_CHILD_REPAIR_ROUNDS
+) {
+
+    childRepairRound++;
+
+    console.log(
+        "===================================="
+    );
+
+    console.log(
+        "CHILD REPAIR ROUND:",
+        childRepairRound,
+        "/",
+        MAX_CHILD_REPAIR_ROUNDS
+    );
+
+    console.log(
+        "===================================="
+    );
+
+
+    const missingByChildTable =
+        childReconciliationResult.missingByChildTable || {};
+
+    const extraByChildTable =
+        childReconciliationResult.extraByChildTable || {};
+
+
+    // =========================================
+    // COLLECT UNIQUE MISSING VOUCHER GUIDS
+    // =========================================
+
+    const childMissingVoucherGuids = [
+        ...new Set(
+
+            Object.values(
+                missingByChildTable
+            )
+            .flat()
+            .map(row =>
+                (
+                    row.voucher_guid ||
+                    row.guid
+                )?.trim()
+            )
+            .filter(Boolean)
+
+        )
+    ];
+
+
+    console.log(
+        "CHILD MISSING VOUCHER GUIDS:",
+        childMissingVoucherGuids.length
+    );
+
+
+    // =========================================
+    // FETCH MISSING VOUCHERS
+    // =========================================
+
+    if (
+        childMissingVoucherGuids.length > 0
+    ) {
+
+      const cachedVoucherMap = new Map(
+    childRepairVoucherCache.map(voucher => {
+
+        const guid =
+            (
+                voucher?.header?.guid ||
+                voucher?.guid
+            )?.trim();
+
+        return [
+            guid,
+            voucher
+        ];
+
+    }).filter(
+        ([guid]) => Boolean(guid)
+    )
+);
+
+const cachedMissingVouchers =
+    childMissingVoucherGuids
+        .map(guid =>
+            cachedVoucherMap.get(guid)
+        )
+        .filter(Boolean);
+
+const uncachedMissingVoucherGuids =
+    childMissingVoucherGuids.filter(
+        guid =>
+            !cachedVoucherMap.has(guid)
+    );
+
+console.log(
+    "CHILD REPAIR CACHE:",
+    {
+        requested:
+            childMissingVoucherGuids.length,
+
+        cached:
+            cachedMissingVouchers.length,
+
+        uncached:
+            uncachedMissingVoucherGuids.length
+    }
+);
+
+    let childMissingResult = {
+    success: true,
+    items: []
+};
+
+if (uncachedMissingVoucherGuids.length > 0) {
+         childMissingResult =
+            await sendChunkedToConnector(
+
+                socket,
+
+                "voucherByGuid",
+
+                {
+
+                    company,
+
+                    sync_batch_id,
+
+                    company_code,
+
+                    tally_owner,
+
+                    module: "VOUCHER",
+
+                    entity_type: "VOUCHER",
+
+                    snapshot: true,
+
+                    syncMode,
+
+                    booksBeginningFrom:
+                        result.summary?.booksBeginningFrom,
+
+                   requestItems:
+                      uncachedMissingVoucherGuids
+
+                }
+
+            );
+
+          
+
+        if (!childMissingResult.success) {
+
+            await failHttpBatch(
+                childMissingResult
+            );
+
+            return res.json(
+                childMissingResult
+            );
+
+        }
+
+
+        childRepairVoucherCache.push(
+            ...(childMissingResult.items || [])
+        );
+
+        for (const voucher of childMissingResult.items || []) {
+
+            const guid =
+                (
+                    voucher?.header?.guid ||
+                    voucher?.guid
+                )?.trim();
+
+            if (guid) {
+                cachedVoucherMap.set(guid, voucher);
+            }
+
+        }
 }
+        // =========================================
+        // REPAIR EACH CHILD TABLE SEPARATELY
+        // =========================================
+
+        for (
+            const [childTable, rows]
+            of Object.entries(
+                missingByChildTable
+            )
+        ) {
+
+            if (!rows?.length) {
+
+                continue;
+
+            }
+
+
+            const repairVoucherGuids = [
+                ...new Set(
+
+                    rows
+                        .map(row =>
+                            (
+                                row.voucher_guid ||
+                                row.guid
+                            )?.trim()
+                        )
+                        .filter(Boolean)
+
+                )
+            ];
+
+
+           const fetchedVouchers =
+              repairVoucherGuids
+                  .map(guid =>
+                      cachedVoucherMap.get(guid)
+                  )
+                  .filter(Boolean);
+
+            console.log(
+                "CHILD REPAIR TARGET:",
+                childTable,
+                "| GUIDS:",
+                repairVoucherGuids.length,
+                "| VOUCHERS:",
+                fetchedVouchers.length
+            );
+
+
+            if (
+                fetchedVouchers.length === 0
+            ) {
+
+                console.log(
+                    "NO VOUCHERS FOUND FOR CHILD TABLE:",
+                    childTable
+                );
+
+                continue;
+
+            }
+
+
+            // =========================================
+            // SAVE CHILD REPAIR
+            // =========================================
+
+            const childRepairResult =
+                await saveVouchers({
+
+                    company_code,
+
+                    tally_owner,
+
+                    sync_batch_id,
+
+                    syncMode,
+
+                    vouchers:
+                        fetchedVouchers,
+
+                    allVoucherGuids:
+                        voucherGuidResult?.items || [],
+
+                    executionMode:
+                        "CHILD_RECONCILIATION",
+
+                    childRepairTables: [
+                        childTable
+                    ]
+
+                });
+
+
+            console.log(
+                "CHILD REPAIR SAVE:",
+                {
+
+                    childTable,
+
+                    status:
+                        childRepairResult?.status,
+
+                    success:
+                        childRepairResult?.success,
+
+                    result:
+                        childRepairResult
+
+                }
+            );
+
+        }
+
+    }
+
+
+    // =========================================
+    // EXTRA CHILD REPAIR
+    // =========================================
+
+    if (
+        Object.keys(
+            extraByChildTable
+        ).length > 0
+    ) {
+
+        const childExtraResult =
+            await saveVouchers({
+
+                company_code,
+
+                tally_owner,
+
+                sync_batch_id,
+
+                syncMode,
+
+                vouchers: [],
+
+                allVoucherGuids:
+                    voucherGuidResult?.items || [],
+
+                executionMode:
+                    "CHILD_RECONCILIATION",
+
+                childRepairTables: [],
+
+                orphanGuids:
+                    extraByChildTable
+
+            });
+
+
+        console.log(
+            "CHILD EXTRA DELETE:",
+            childExtraResult
+        );
+
+    }
+
+
+    // =========================================
+    // RE-CHECK AFTER THIS REPAIR ROUND
+    // =========================================
+
+    childReconciliationResult =
+        await runChildVoucherReconciliation({
+
+            company_code,
+
+            tally_owner,
+
+            sync_batch_id
+
+        });
+
+
+    console.log(
+        "CHILD RECONCILIATION AFTER ROUND:",
+        childRepairRound,
+
+        childReconciliationResult
+    );
+
+}
+
+
+// =========================================
+// FINAL RESULT
+// =========================================
+
+if (
+    !childReconciliationResult.completed
+) {
+
+    throw new Error(
+        `Child voucher reconciliation is still not clean after ${childRepairRound} repair rounds`
+    );
+
+}
+
+
+console.log(
+    "CHILD VOUCHER RECONCILIATION COMPLETED IN ROUND:",
+    childRepairRound
+);
+
+// =========================
+// CHILD VOUCHER STATUS COMPLETE
+// =========================
+
+const childVoucherStatusResult =
+    await BatchStatusManager.updateModule({
+
+        batch_id: sync_batch_id,
+
+        module: "VOUCHER",
+        entity: "VOUCHER",
+        action: "COMPLETED"
+
+    });
+
+console.log(
+    "CHILD VOUCHER STATUS :",
+    childVoucherStatusResult
+);
+
+
+
+
+}
+
+
+
+
 // =========================
 // MASTER STATUS COMPLETE
 // =========================

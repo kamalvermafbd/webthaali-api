@@ -172,25 +172,30 @@ class BatchExecutor {
             console.log("total rows :", rows.length);
             console.log("================================");
 
-        const {
+       const {
+    data,
+    error
+} = await supabase
+    .from(table)
+    .insert(chunk)
+    .select("voucher_guid");
 
-            error
+if (error) {
 
-        } = await supabase
+    throw new Error(
+        `INSERT failed (${table}) : ${error.message}`
+    );
 
-            .from(table)
+}
 
-            .insert(chunk);
-
-        if (error) {
-
-            throw new Error(
-
-                `INSERT failed (${table}) : ${error.message}`
-
-            );
-
-        }
+console.log(
+    "INSERT RESULT:",
+    table,
+    "requested:",
+    chunk.length,
+    "inserted:",
+    data?.length || 0
+);
 
     }
 

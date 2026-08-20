@@ -547,7 +547,46 @@ const VOUCHER_SYNC_PERIOD = {
     SIX_MONTHS: "SIX_MONTHS",
     CUSTOM: "CUSTOM"
 };
+/*
+const VOUCHER_CHILD_RECONCILIATION_VIEWS = [
+    "voucher_ledger_reconciliation_view",
+    "voucher_invoice_reconciliation_view",
+    "stock_voucher_reconciliation_view"
+];*/
 
+
+const VOUCHER_CHILD_RECONCILIATION_VIEWS = [
+
+    "voucher_ledger_reconciliation_view",
+
+    "voucher_invoice_reconciliation_view",
+
+    "stock_voucher_reconciliation_view",
+
+    "voucher_bill_allocation_reconciliation_view",
+
+    "voucher_costcentre_reconciliation_view"
+
+];
+
+const VOUCHER_CHILD_RECONCILIATION_MAP = {
+
+    voucher_ledger_reconciliation_view:
+        TABLES.VOUCHER_LEDGERS,
+
+    voucher_invoice_reconciliation_view:
+        TABLES.VOUCHER_INVENTORY,
+
+    stock_voucher_reconciliation_view:
+        TABLES.STOCK_VOUCHERS,
+
+    voucher_bill_allocation_reconciliation_view:
+        TABLES.BILL_ALLOCATIONS,
+
+    voucher_costcentre_reconciliation_view:
+        TABLES.COST_CENTRE_ALLOCATIONS
+
+};
 
 // ------------------------------------------------------
 // Retry Configuration
@@ -627,7 +666,11 @@ module.exports = {
 
     DB_CONFIG,
 
-     SYNC_MODE,
+    SYNC_MODE,
+
+    VOUCHER_CHILD_RECONCILIATION_VIEWS,
+
+    VOUCHER_CHILD_RECONCILIATION_MAP,
 
     VOUCHER_SYNC_PERIOD,
 

@@ -8,6 +8,7 @@ const {
     buildVoucherOperations
 } = require("./VoucherOperationBuilder");
 
+
 const {
     MODULE_TYPE,
 
@@ -37,7 +38,7 @@ class VoucherExecutionService {
 
         allVoucherGuids,
 
-       voucherGuids,
+        voucherGuids,
 
         changedVoucherGuids,
 
@@ -48,9 +49,15 @@ class VoucherExecutionService {
 
         billAllocationRows,
 
-        costCentreRows
+        costCentreRows,
+
+        executionMode = "NORMAL",
+
+        orphanGuids = {},
+
 
     }) {
+
         console.log(">>> VoucherExecutionService START");
 
         const operations =
@@ -66,6 +73,8 @@ class VoucherExecutionService {
 
                 changedVoucherGuids,
 
+                orphanGuids,
+
                 voucherRows: rowsToSave,
 
                 ledgerRows,
@@ -76,7 +85,10 @@ class VoucherExecutionService {
 
                 billAllocationRows,
 
-                costCentreRows
+                costCentreRows,
+                
+                includeParent:
+                    executionMode !== "CHILD_RECONCILIATION"
 
             });
 
@@ -206,6 +218,14 @@ fs.writeFileSync(
 
 );
 
+    if (
+        executionMode ===
+        "CHILD_RECONCILIATION"
+            ) {
+
+                return execution;
+
+            }
 
     return await BatchManager.postExecution({
 

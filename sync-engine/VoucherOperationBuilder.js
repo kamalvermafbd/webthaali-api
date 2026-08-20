@@ -286,28 +286,73 @@ function buildSaveOperations({
 
     billAllocationRows,
 
-    costCentreRows
+    costCentreRows,
+
+    includeParent = true
 
 }) {
 
-    return [
+    const operations = [];
+
+       console.log(
+    "CHILD REPAIR LEDGER OP ROWS:",
+    ledgerRows?.length || 0
+);
+
+    if (includeParent !== false) {
+
+     
+
+        operations.push(
+
+            OperationBuilder.build({
+
+                entity:
+                    ENTITY_TYPE.VOUCHER,
+
+                table:
+                    TABLES.VOUCHERS,
+
+                operation:
+                    OPERATION_TYPE.UPSERT,
+
+                rows:
+                    voucherRows,
+
+                options: {
+
+                    onConflict:
+                        CONFLICT_KEYS[TABLES.VOUCHERS]
+
+                },
+
+                company_code,
+
+                tally_owner,
+
+                sync_batch_id
+
+            })
+
+        );
+
+    }
+
+    operations.push(
 
         OperationBuilder.build({
 
-            entity: ENTITY_TYPE.VOUCHER,
+            entity:
+                ENTITY_TYPE.VOUCHER,
 
-            table: TABLES.VOUCHERS,
+            table:
+                TABLES.VOUCHER_LEDGERS,
 
-            operation: OPERATION_TYPE.UPSERT,
+            operation:
+                OPERATION_TYPE.INSERT,
 
-            rows: voucherRows,
-
-           options: {
-
-                onConflict:
-                    CONFLICT_KEYS[TABLES.VOUCHERS]
-
-            },
+            rows:
+                ledgerRows,
 
             company_code,
 
@@ -319,31 +364,17 @@ function buildSaveOperations({
 
         OperationBuilder.build({
 
-            entity: ENTITY_TYPE.VOUCHER,
+            entity:
+                ENTITY_TYPE.VOUCHER,
 
-            table: TABLES.VOUCHER_LEDGERS,
+            table:
+                TABLES.VOUCHER_INVENTORY,
 
-            operation: OPERATION_TYPE.INSERT,
+            operation:
+                OPERATION_TYPE.INSERT,
 
-            rows: ledgerRows,
-
-            company_code,
-
-            tally_owner,
-
-            sync_batch_id
-
-        }),
-
-        OperationBuilder.build({
-
-            entity: ENTITY_TYPE.VOUCHER,
-
-            table: TABLES.VOUCHER_INVENTORY,
-
-            operation: OPERATION_TYPE.INSERT,
-
-            rows: inventoryRows,
+            rows:
+                inventoryRows,
 
             company_code,
 
@@ -355,31 +386,17 @@ function buildSaveOperations({
 
         OperationBuilder.build({
 
-            entity: ENTITY_TYPE.VOUCHER,
+            entity:
+                ENTITY_TYPE.VOUCHER,
 
-            table: TABLES.STOCK_VOUCHERS,
+            table:
+                TABLES.STOCK_VOUCHERS,
 
-            operation: OPERATION_TYPE.INSERT,
+            operation:
+                OPERATION_TYPE.INSERT,
 
-            rows: stockVoucherRows,
-
-            company_code,
-
-            tally_owner,
-
-            sync_batch_id
-
-        }),
-
-        OperationBuilder.build({
-
-            entity: ENTITY_TYPE.VOUCHER,
-
-            table: TABLES.BILL_ALLOCATIONS,
-
-            operation: OPERATION_TYPE.INSERT,
-
-            rows: billAllocationRows,
+            rows:
+                stockVoucherRows,
 
             company_code,
 
@@ -391,13 +408,39 @@ function buildSaveOperations({
 
         OperationBuilder.build({
 
-            entity: ENTITY_TYPE.VOUCHER,
+            entity:
+                ENTITY_TYPE.VOUCHER,
 
-            table: TABLES.COST_CENTRE_ALLOCATIONS,
+            table:
+                TABLES.BILL_ALLOCATIONS,
 
-            operation: OPERATION_TYPE.INSERT,
+            operation:
+                OPERATION_TYPE.INSERT,
 
-            rows: costCentreRows,
+            rows:
+                billAllocationRows,
+
+            company_code,
+
+            tally_owner,
+
+            sync_batch_id
+
+        }),
+
+        OperationBuilder.build({
+
+            entity:
+                ENTITY_TYPE.VOUCHER,
+
+            table:
+                TABLES.COST_CENTRE_ALLOCATIONS,
+
+            operation:
+                OPERATION_TYPE.INSERT,
+
+            rows:
+                costCentreRows,
 
             company_code,
 
@@ -407,7 +450,9 @@ function buildSaveOperations({
 
         })
 
-    ];
+    );
+
+    return operations;
 
 }
 
@@ -432,8 +477,28 @@ function buildVoucherOperations(args) {
             })
             : [];
 
+    const orphanDeleteOperations =
+        args.orphanGuids
+            ? buildOrphanDeleteOperations({
+
+                company_code:
+                    args.company_code,
+
+                tally_owner:
+                    args.tally_owner,
+
+                sync_batch_id:
+                    args.sync_batch_id,
+
+                orphanGuids:
+                    args.orphanGuids
+
+            })
+            : [];
+
     return [
         ...deleteOperations,
+        ...orphanDeleteOperations,
         ...buildSaveOperations(args)
     ];
 

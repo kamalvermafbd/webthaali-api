@@ -250,35 +250,51 @@ const snapshotRows = rows;
             );
 */
 
-            const {
+           const MAX_RETRIES = 3;
+let error = null;
 
-                error
+for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
 
-            } = await supabase
+    const result = await supabase
+        .from(TABLES.SNAPSHOT)
+        .upsert(
+            chunk,
+            {
+                onConflict
+            }
+        );
 
-                .from(
+    error = result.error;
 
-                    TABLES.SNAPSHOT
+    console.log(
+        `SNAPSHOT UPSERT ATTEMPT ${attempt}/${MAX_RETRIES}:`,
+        error
+    );
 
+    if (!error) {
+        break;
+    }
+
+    if (attempt < MAX_RETRIES) {
+
+        const delay =
+            attempt * 2000;
+
+        console.log(
+            `SNAPSHOT UPSERT RETRYING IN ${delay}ms`
+        );
+
+        await new Promise(
+            resolve =>
+                setTimeout(
+                    resolve,
+                    delay
                 )
+        );
 
-                
+    }
 
-                .upsert(
-
-                    chunk,
-
-                    {
-
-                        onConflict
-
-                    }
-
-                );
-
-
-
-                console.log("SNAPSHOT UPSERT ERROR:", error);
+}
 /*
                 fs.writeFileSync(
 

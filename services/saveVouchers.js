@@ -1144,7 +1144,13 @@ async function saveVoucherExecutionData({
 
     sync_batch_id,
 
-     syncMode,
+    syncMode,
+
+    executionMode = "NORMAL",
+
+    orphanGuids = {},
+
+    childRepairTables,
 
     rowsToSave,
 
@@ -1182,6 +1188,12 @@ async function saveVoucherExecutionData({
         sync_batch_id,
 
         syncMode,
+
+        executionMode,
+
+        orphanGuids,
+
+        childRepairTables,
 
         rowsToSave,
 
@@ -1664,7 +1676,14 @@ async function saveVouchers({
     syncMode,
     country,
     vouchers = [],
-    allVoucherGuids = []
+    allVoucherGuids = [],
+
+    // PHASE 2 CHILD RECONCILIATION
+    executionMode = "NORMAL",
+
+    // Child tables that actually need repair
+    childRepairTables = [],
+     orphanGuids = {}
 }) {
 
     console.log("=== SAVE VOUCHERS RECEIVED ===", {
@@ -1724,6 +1743,12 @@ const runId =
     `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const isFullSync = syncMode === "FULL";
+
+const isChildReconciliation =
+    executionMode === "CHILD_RECONCILIATION";
+
+const repairChildTables =
+    new Set(childRepairTables || []);
 
 const voucherRows = [];
 
@@ -1986,11 +2011,20 @@ switch (integrityResult.action) {
 
     case VALIDATION_ACTION.SKIP:
 
+    if (!isChildReconciliation) {
+
         unchangedVoucherGuids.push(
             header.guid.trim()
         );
 
         continue;
+
+    }
+
+    // CHILD RECONCILIATION:
+    // Parent already exists and may have same AlterID,
+    // but missing child rows still need to be rebuilt.
+    break;
 
     default:
 
@@ -2082,7 +2116,6 @@ console.log("voucherGuids:", voucherGuids.length);
 console.log("vouchers:", vouchers.length);
 
 
-
 const incomingGuidSet =
     new Set(
         vouchers
@@ -2090,21 +2123,16 @@ const incomingGuidSet =
             .filter(Boolean)
     );
 
-const missingVoucherGuids =
-    isFullSync
-        ? allVoucherGuids
-            .map(item =>
-                typeof item === "string"
-                    ? item.trim()
-                    : item?.guid?.trim()
-            )
-            .filter(
-                guid =>
-                    guid &&
-                    !incomingGuidSet.has(guid)
-            )
-        : [];
+// =====================================================
+// FULL GUID DISCOVERY MUST NOT USE INCOMING VOUCHERS
+// AS THE "MISSING" BASE.
+//
+// Tally full GUID scan = snapshot/discovery list.
+// Genuine missing vouchers are determined by the
+// ReconciliationManager against DB active GUIDs.
+// =====================================================
 
+const missingVoucherGuids = [];
 
         fs.writeFileSync(
     `./logs/FULL-VOUCHER-GUID-DEBUG-${sync_batch_id}.json`,
@@ -2146,16 +2174,13 @@ console.log(
         missingVoucherGuids: missingVoucherGuids.length
     }
 );
-if (
-    isFullSync &&
-    allVoucherGuids?.length > 0 &&
-    missingVoucherGuids.length > 0
-)  {
+// =====================================================
+// DO NOT TRIGGER voucherByGuid FROM FULL GUID DISCOVERY.
+// Genuine missing vouchers are returned later by the
+// Sync Engine reconciliation result.
+// =====================================================
 
-    console.log(
-        "⚠️ MISSING VOUCHER GUIDS:",
-        missingVoucherGuids.length
-    );
+if (missingVoucherGuids.length > 0) {
 
     return {
         status: "WAITING_FOR_MISSING_VOUCHERS",
@@ -2163,19 +2188,28 @@ if (
         missingVoucherGuids
 
     };
+
 }
 
 if (voucherRows.length > 0 || allVoucherGuids.length > 0) {
 
-      rowsToSave = getRowsToSave({
+      if (isChildReconciliation) {
 
-    voucherRows,
+    rowsToSave = voucherRows;
 
-    newVoucherRows,
+} else {
 
-    changedVoucherRows
+    rowsToSave = getRowsToSave({
 
-});
+        voucherRows,
+
+        newVoucherRows,
+
+        changedVoucherRows
+
+    });
+
+}
 
 voucherGuids =
     getVoucherGuids(rowsToSave);
@@ -2228,6 +2262,61 @@ costCentreRows =
 
     });
 
+if (isChildReconciliation) {
+
+    if (
+        !repairChildTables.has(
+            TABLES.VOUCHER_LEDGERS
+        )
+    ) {
+        ledgerRows = [];
+    }
+
+    if (
+        !repairChildTables.has(
+            TABLES.VOUCHER_INVENTORY
+        )
+    ) {
+        inventoryRows = [];
+    }
+
+    if (
+        !repairChildTables.has(
+            TABLES.STOCK_VOUCHERS
+        )
+    ) {
+        stockVoucherRows = [];
+    }
+
+    if (
+        !repairChildTables.has(
+            TABLES.BILL_ALLOCATIONS
+        )
+    ) {
+        billAllocationRows = [];
+    }
+
+    if (
+        !repairChildTables.has(
+            TABLES.COST_CENTRE_ALLOCATIONS
+        )
+    ) {
+        costCentreRows = [];
+    }
+
+    console.log(
+    "CHILD REPAIR FILTERED ROWS:",
+    {
+        ledger: ledgerRows?.length || 0,
+        inventory: inventoryRows?.length || 0,
+        stock: stockVoucherRows?.length || 0,
+        bill: billAllocationRows?.length || 0,
+        costCentre: costCentreRows?.length || 0
+    }
+);
+
+}
+
 console.log(">>> CALLING saveVoucherExecutionData");
 
 fs.writeFileSync(
@@ -2266,6 +2355,11 @@ const executionResult =
 
         syncMode,
 
+        executionMode,
+
+        orphanGuids:
+            orphanGuids || {},
+
         rowsToSave,
 
         allVoucherRows,
@@ -2276,6 +2370,8 @@ const executionResult =
              changedVoucherRows,
 
         voucherGuids,
+
+        childRepairTables,
 
         ledgerRows,
 
@@ -2360,6 +2456,20 @@ console.log(
     "INCREMENTAL POST COMPLETED UPDATED"
 );
 */
+
+if (isChildReconciliation) {
+
+    return {
+
+        total: vouchers.length,
+
+        execution_status: success,
+
+        childReconciliation: true
+
+    };
+
+}
 
 await BatchStatusManager.updateFields({
 
