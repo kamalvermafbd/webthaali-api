@@ -83,6 +83,22 @@ class BatchExecutor {
 
     async execute(operation) {
 
+        console.log("=== BATCH EXECUTOR RECEIVED OPERATION ===");
+
+console.log({
+    operation: operation?.operation,
+    table: operation?.table,
+    entity: operation?.entity,
+    rows: operation?.rows?.length || 0
+});
+
+if (operation?.table === "tally_vouchers") {
+    console.dir(
+        operation.rows?.[0],
+        { depth: null }
+    );
+}
+
             if (!operation) {
 
         throw new Error(
@@ -248,32 +264,40 @@ return true;
 
 console.log("OPTIONS :", options);
 
-            const {
-
+           const {
+                data,
                 error
-
             } = await supabase
-
                 .from(table)
-
-                
-
                 .upsert(
-
                     chunk,
-
                     options
+                )
+                .select("*");
 
+            console.log(
+                "=== UPSERT RESULT ===",
+                {
+                    table,
+                    requested: chunk.length,
+                    returned: data?.length || 0,
+                    error: error?.message || null
+                }
+            );
+
+            if (data?.length) {
+
+                console.dir(
+                    data[0],
+                    { depth: null }
                 );
 
-                console.log("UPSERT DONE :", table, chunk.length);
+            }
 
             if (error) {
 
                 throw new Error(
-
                     `UPSERT failed (${table}) : ${error.message}`
-
                 );
 
             }

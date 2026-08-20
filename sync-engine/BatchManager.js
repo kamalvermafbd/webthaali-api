@@ -38,7 +38,7 @@ class BatchManager {
 // ----------------------------------
 // Execute Prebuilt Operations
 // ----------------------------------
-
+/*
 async execute({
 
     operations = []
@@ -130,7 +130,85 @@ finally {
 
 }
 
+*/
 
+async execute({
+
+    operations = []
+
+}) {
+
+    if (!Array.isArray(operations)) {
+
+        throw new Error(
+            "operations must be an array"
+        );
+
+    }
+
+    let successCount = 0;
+
+    let failedCount = 0;
+
+    const failedOperations = [];
+
+    for (const operation of operations) {
+
+        console.log("=== BATCH MANAGER OPERATION ===");
+console.log({
+    operation: operation?.operation,
+    table: operation?.table,
+    rows: operation?.rows?.length || 0
+});
+console.dir(operation?.rows?.[0], { depth: null });
+
+        try {
+
+            await BatchExecutor.execute(
+                operation
+            );
+
+            successCount++;
+
+        }
+
+        catch (error) {
+
+            console.error(
+                "BATCH EXECUTION ERROR:",
+                error
+            );
+
+            failedCount++;
+
+            failedOperations.push({
+
+                operation,
+
+                error: error.message
+
+            });
+
+        }
+
+    }
+
+    
+
+    return {
+
+        success:
+            failedCount === 0,
+
+        successCount,
+
+        failedCount,
+
+        failedOperations
+
+    };
+
+}
 
 // ----------------------------------
 // Post Execution

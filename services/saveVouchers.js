@@ -1747,6 +1747,9 @@ const isFullSync = syncMode === "FULL";
 const isChildReconciliation =
     executionMode === "CHILD_RECONCILIATION";
 
+const isAlterRecovery =
+    executionMode === "ALTER_RECOVERY";
+
 const repairChildTables =
     new Set(childRepairTables || []);
 
@@ -1763,6 +1766,8 @@ let stockVoucherRows = [];
 let billAllocationRows = [];
 
 let costCentreRows = [];
+
+
 
 let existingVoucherMap = new Map();
 
@@ -1797,6 +1802,9 @@ function getExistingAlterId(guid) {
     */
 // Temporary collections.
 // These will be removed after Queue Executor is implemented.
+const billAllocationVoucherGuids = new Set();
+
+const costCentreAllocationVoucherGuids = new Set();
 
 const newVoucherRows = [];
 
@@ -2011,6 +2019,15 @@ switch (integrityResult.action) {
 
     case VALIDATION_ACTION.SKIP:
 
+    if (isAlterRecovery) {
+
+        changedVoucherRows.push(
+            header.guid.trim()
+        );
+
+        break;
+    }
+
     if (!isChildReconciliation) {
 
         unchangedVoucherGuids.push(
@@ -2018,12 +2035,8 @@ switch (integrityResult.action) {
         );
 
         continue;
-
     }
 
-    // CHILD RECONCILIATION:
-    // Parent already exists and may have same AlterID,
-    // but missing child rows still need to be rebuilt.
     break;
 
     default:
@@ -2087,6 +2100,19 @@ billAllocationRows.push(
     })
 );
 
+for (
+    const row of billAllocationRows
+) {
+    if (
+        row.voucher_guid ===
+        header.guid.trim()
+    ) {
+        billAllocationVoucherGuids.add(
+            row.voucher_guid
+        );
+    }
+}
+
 costCentreRows.push(
     ...buildCostCentreRows({
         voucher,
@@ -2094,6 +2120,32 @@ costCentreRows.push(
         tally_owner
     })
 );
+
+for (
+    const row of costCentreRows
+) {
+    if (
+        row.voucher_guid ===
+        header.guid.trim()
+    ) {
+        costCentreAllocationVoucherGuids.add(
+            row.voucher_guid
+        );
+    }
+}
+
+const currentVoucherRow =
+    voucherRows[voucherRows.length - 1];
+
+currentVoucherRow.has_bill_allocation =
+    billAllocationVoucherGuids.has(
+        header.guid.trim()
+    );
+
+currentVoucherRow.has_costcentre_allocation =
+    costCentreAllocationVoucherGuids.has(
+        header.guid.trim()
+    );
 
 console.log(
     "BILL ALLOCATION ROWS:",
@@ -2208,6 +2260,40 @@ if (voucherRows.length > 0 || allVoucherGuids.length > 0) {
         changedVoucherRows
 
     });
+
+
+    fs.writeFileSync(
+    `./logs/VOUCHER-SAVE-DEBUG-${sync_batch_id}.json`,
+    JSON.stringify({
+        stage: "ROWS_TO_SAVE",
+        sync_batch_id,
+
+        targetGuid:
+            "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b73",
+
+        targetVoucher:
+            vouchers.find(v =>
+                v?.header?.guid?.trim() ===
+                "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b73"
+            ) || null,
+
+        targetVoucherRow:
+            rowsToSave.find(row =>
+                row?.guid?.trim() ===
+                "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b73"
+            ) || null,
+
+        rowsToSaveCount:
+            rowsToSave.length,
+
+        changedVoucherRows:
+            changedVoucherRows.length,
+
+        newVoucherRows:
+            newVoucherRows.length
+    }, null, 2),
+    "utf8"
+);
 
 }
 
@@ -2412,27 +2498,36 @@ const executionResult =
     success =
     executionResult.success;
 
-    if (
-    executionResult?.reconciliation?.missingGuids?.length > 0
+  const missingVoucherGuids =
+    (executionResult?.reconciliation?.missingGuids || [])
+        .map(row => row.guid)
+        .filter(Boolean);
+
+const changedVoucherGuids =
+    (executionResult?.reconciliation?.alterChanged || [])
+        .map(row => row.guid)
+        .filter(Boolean);
+
+if (
+    missingVoucherGuids.length > 0 ||
+    changedVoucherGuids.length > 0
 ) {
 
     console.log(
-        "Missing vouchers from engine reconciliation:",
-        executionResult.reconciliation.missingGuids.length
+        "VOUCHER RECOVERY REQUIRED:",
+        {
+            missing: missingVoucherGuids.length,
+            changed: changedVoucherGuids.length
+        }
     );
 
     return {
         status: "WAITING_FOR_MISSING_VOUCHERS",
 
-     /*   missingVoucherGuids:
-            executionResult.reconciliation.missingGuids,
-*/
+        missingVoucherGuids,
 
-        missingVoucherGuids:
-    executionResult.reconciliation.missingGuids
-        .map(row => row.guid)
-        .filter(Boolean),
-        
+        changedVoucherGuids,
+
         executionResult
     };
 }

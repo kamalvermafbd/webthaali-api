@@ -301,7 +301,16 @@ function buildSaveOperations({
 
     if (includeParent !== false) {
 
-     
+     console.log("=== VOUCHER UPSERT PAYLOAD ===");
+
+console.dir(
+    voucherRows?.find(
+        row =>
+            row.guid ===
+            "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b73"
+    ),
+    { depth: null }
+);
 
         operations.push(
 
@@ -318,6 +327,8 @@ function buildSaveOperations({
 
                 rows:
                     voucherRows,
+
+                    
 
                 options: {
 

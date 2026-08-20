@@ -36944,6 +36944,71 @@ console.log("=== VOUCHER GUID BEFORE SAVE ===", {
         )
 });
 
+// ========================================
+// DETECT CHANGED VOUCHERS - SINGLE DB QUERY
+// ========================================
+
+const discoveredVoucherItems =
+    voucherGuidResult?.items || [];
+
+const { data: existingVoucherRows, error: existingVoucherError } =
+    await supabase
+        .from("tally_vouchers")
+        .select("guid, alterid")
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner);
+
+if (existingVoucherError) {
+    throw existingVoucherError;
+}
+
+const existingVoucherMap = new Map(
+    (existingVoucherRows || []).map(row => [
+        row.guid?.trim(),
+        Number(row.alterid || 0)
+    ])
+);
+
+const changedVoucherGuidRows =
+    discoveredVoucherItems
+        .map(item => ({
+            guid:
+                typeof item === "string"
+                    ? item
+                    : item?.guid,
+
+            alterid:
+                typeof item === "string"
+                    ? null
+                    : item?.alterId ??
+                      item?.alterid
+        }))
+        .filter(item => item.guid)
+        .filter(item => {
+            const dbAlterId =
+                existingVoucherMap.get(item.guid.trim());
+
+            return (
+                dbAlterId !== undefined &&
+                item.alterid != null &&
+                Number(item.alterid) > dbAlterId
+            );
+        });
+
+console.log(
+    "=== CHANGED VOUCHERS BEFORE FULL FETCH ==="
+);
+
+console.dir(
+    changedVoucherGuidRows,
+    { depth: null }
+);
+
+console.log(
+    "CHANGED VOUCHER COUNT:",
+    changedVoucherGuidRows.length
+);
+
 // =========================
 // SAVE VOUCHERS
 // =========================
@@ -36958,7 +37023,9 @@ voucherResult = await saveVouchers({
     syncMode,
     vouchers: result.vouchers || [],
     allVoucherGuids:
-      voucherGuidResult?.items || []
+      voucherGuidResult?.items || [],
+
+    executionMode: "ALTER_RECOVERY"
 });
 
 console.log("=== VOUCHER RESULT AFTER SAVE ===");
@@ -36968,14 +37035,38 @@ console.log(
     "MISSING GUIDS :",
     voucherResult?.missingVoucherGuids
 );
+
+
 console.log("================================");
-if (voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS") {
+const recoveryVoucherGuids = [
+    ...(voucherResult?.missingVoucherGuids || []),
+    ...(voucherResult?.changedVoucherGuids || [])
+];
+
+const uniqueRecoveryVoucherGuids = [
+    ...new Set(recoveryVoucherGuids)
+];
+
+
+console.log(
+    "CHANGED VOUCHER GUIDS :",
+    voucherResult?.changedVoucherGuids
+);
+
+console.log(
+    "RECOVERY GUID COUNT :",
+    uniqueRecoveryVoucherGuids.length
+);
+if (
+    voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS" &&
+    uniqueRecoveryVoucherGuids.length > 0
+) {
 
 const recoveredVoucherGuids =
-    voucherResult.missingVoucherGuids;
+    uniqueRecoveryVoucherGuids;
 fs.appendFileSync(
     "./logs/voucher-by-guid-source-debug.jsonl",
-    JSON.stringify({
+      JSON.stringify({
         stage: "BEFORE_VOUCHER_BY_GUID",
         sync_batch_id,
         company_code,
@@ -37154,7 +37245,9 @@ console.log("===== BEFORE SECOND SAVE VOUCHERS =====", {
       vouchers: allFetchedVouchers,
       //vouchers: missingResult.items || [],
       allVoucherGuids:
-        voucherGuidResult?.items || []
+        voucherGuidResult?.items || [],
+       executionMode:
+    "ALTER_RECOVERY" 
   });
 
   }
