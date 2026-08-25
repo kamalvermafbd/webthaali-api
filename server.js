@@ -34558,6 +34558,13 @@ app.get("/getSyncMasterData", async (req, res) => {
 });
 
 
+// ======================================================
+// RECONCILIATION CHECK
+// balance_difference_view must be checked.
+// If balance_difference_view returns 0 rows,
+// ledger balance reconciliation is COMPLETE.
+// ======================================================
+
 // =========================
 // GET TRIAL BALANCE
 // =========================
@@ -37422,6 +37429,8 @@ while (
     const extraByChildTable =
         childReconciliationResult.extraByChildTable || {};
 
+    const amountMismatchByChildTable =
+        childReconciliationResult.amountMismatchByChildTable || {};
 
     // =========================================
     // COLLECT UNIQUE MISSING VOUCHER GUIDS
@@ -37445,6 +37454,29 @@ while (
         )
     ];
 
+    const childMismatchVoucherGuids = [
+    ...new Set(
+        Object.values(
+            amountMismatchByChildTable
+        )
+        .flat()
+        .map(row =>
+            (
+                row.voucher_guid ||
+                row.guid
+            )?.trim()
+        )
+        .filter(Boolean)
+    )
+];
+
+
+const childRepairVoucherGuids = [
+    ...new Set([
+        ...childMissingVoucherGuids,
+        ...childMismatchVoucherGuids
+    ])
+];
 
     console.log(
         "CHILD MISSING VOUCHER GUIDS:",
@@ -37456,9 +37488,10 @@ while (
     // FETCH MISSING VOUCHERS
     // =========================================
 
-    if (
-        childMissingVoucherGuids.length > 0
-    ) {
+   if (
+    childMissingVoucherGuids.length > 0 ||
+    childMismatchVoucherGuids.length > 0
+) {
 
       const cachedVoucherMap = new Map(
     childRepairVoucherCache.map(voucher => {
@@ -37486,11 +37519,15 @@ const cachedMissingVouchers =
         )
         .filter(Boolean);
 
-const uncachedMissingVoucherGuids =
-    childMissingVoucherGuids.filter(
-        guid =>
-            !cachedVoucherMap.has(guid)
-    );
+const uncachedMissingVoucherGuids = [
+    ...new Set([
+        ...childMissingVoucherGuids,
+        ...childMismatchVoucherGuids
+    ])
+].filter(
+    guid =>
+        !cachedVoucherMap.has(guid)
+);
 
 console.log(
     "CHILD REPAIR CACHE:",
@@ -37505,6 +37542,8 @@ console.log(
             uncachedMissingVoucherGuids.length
     }
 );
+
+
 
     let childMissingResult = {
     success: true,
@@ -37663,6 +37702,9 @@ if (uncachedMissingVoucherGuids.length > 0) {
                     vouchers:
                         fetchedVouchers,
 
+                    repairVoucherGuids:
+                        repairVoucherGuids,
+
                     allVoucherGuids:
                         voucherGuidResult?.items || [],
 
@@ -37699,6 +37741,97 @@ if (uncachedMissingVoucherGuids.length > 0) {
     }
 
 
+        // =========================================
+    // AMOUNT MISMATCH CHILD REPAIR
+    // =========================================
+
+    for (
+        const [childTable, rows]
+        of Object.entries(
+            amountMismatchByChildTable
+        )
+    ) {
+
+        if (!rows?.length) {
+            continue;
+        }
+
+        const repairVoucherGuids = [
+            ...new Set(
+                rows
+                    .map(row =>
+                        (
+                            row.voucher_guid ||
+                            row.guid
+                        )?.trim()
+                    )
+                    .filter(Boolean)
+            )
+        ];
+
+        const fetchedVouchers =
+            repairVoucherGuids
+                .map(guid =>
+                    childRepairVoucherCache.find(voucher => {
+
+                        const voucherGuid =
+                            (
+                                voucher?.header?.guid ||
+                                voucher?.guid
+                            )?.trim();
+
+                        return voucherGuid === guid;
+
+                    })
+                )
+                .filter(Boolean);
+
+        console.log(
+            "AMOUNT MISMATCH REPAIR:",
+            childTable,
+            "| GUIDS:",
+            repairVoucherGuids.length,
+            "| VOUCHERS:",
+            fetchedVouchers.length
+        );
+
+        if (!fetchedVouchers.length) {
+            continue;
+        }
+
+        const childRepairResult =
+            await saveVouchers({
+
+                company_code,
+                tally_owner,
+                sync_batch_id,
+                syncMode,
+
+                vouchers:
+                    fetchedVouchers,
+                
+                repairVoucherGuids:
+                   repairVoucherGuids,
+
+                allVoucherGuids:
+                    voucherGuidResult?.items || [],
+
+                executionMode:
+                    "CHILD_RECONCILIATION",
+
+                childRepairTables: [
+                    childTable
+                ]
+            });
+
+        console.log(
+            "AMOUNT MISMATCH REPAIR RESULT:",
+            childRepairResult
+        );
+
+    }
+
+    
     // =========================================
     // EXTRA CHILD REPAIR
     // =========================================

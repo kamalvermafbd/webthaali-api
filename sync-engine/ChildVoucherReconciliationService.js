@@ -115,8 +115,8 @@ async function checkChildVoucherReconciliation({
     const results = [];
 
     let totalMissing = 0;
-
     let totalExtra = 0;
+    let totalAmountMismatch = 0;
 
 
     for (const viewName of views) {
@@ -139,6 +139,11 @@ async function checkChildVoucherReconciliation({
                     row.status === "MISSING"
             );
 
+        const amountMismatchRows =
+            rows.filter(
+                row =>
+                    row.status === "AMOUNT_MISMATCH"
+            );
 
         const extraRows =
             rows.filter(
@@ -152,6 +157,9 @@ async function checkChildVoucherReconciliation({
 
         totalExtra +=
             extraRows.length;
+
+        totalAmountMismatch +=
+            amountMismatchRows.length;
     
 
     const childTable =
@@ -171,25 +179,15 @@ async function checkChildVoucherReconciliation({
         
 
         results.push({
-
             view: viewName,
-
-            table:
-                childTable,
-
-            total:
-                rows.length,
-
-            missing:
-                missingRows.length,
-
-            extra:
-                extraRows.length,
-
+            table: childTable,
+            total: rows.length,
+            missing: missingRows.length,
+            extra: extraRows.length,
+            amountMismatch: amountMismatchRows.length,
             missingRows,
-
-            extraRows
-
+            extraRows,
+            amountMismatchRows
         });
 
 
@@ -207,7 +205,8 @@ async function checkChildVoucherReconciliation({
 
     const clean =
         totalMissing === 0 &&
-        totalExtra === 0;
+        totalExtra === 0 &&
+        totalAmountMismatch === 0;
 
 
     console.log(
@@ -234,6 +233,11 @@ async function checkChildVoucherReconciliation({
     );
 
     console.log(
+        "Total Amount Mismatch:",
+        totalAmountMismatch
+    );
+
+    console.log(
         "CLEAN:",
         clean
     );
@@ -243,9 +247,11 @@ async function checkChildVoucherReconciliation({
     );
 
 
-    const missingByChildTable = {};
+const missingByChildTable = {};
 
 const extraByChildTable = {};
+
+const amountMismatchByChildTable = {};
 
 for (const item of results) {
 
@@ -263,6 +269,11 @@ for (const item of results) {
 
     }
 
+    if (item.amountMismatchRows?.length > 0) {
+        amountMismatchByChildTable[item.table] =
+            item.amountMismatchRows;
+    }
+
 }
 
     return {
@@ -275,9 +286,13 @@ for (const item of results) {
 
             totalExtra,
 
+            totalAmountMismatch,
+
             views: results,
 
             missingByChildTable,
+
+            amountMismatchByChildTable,
 
             extraByChildTable
 

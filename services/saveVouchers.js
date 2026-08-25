@@ -1150,6 +1150,8 @@ async function saveVoucherExecutionData({
 
     orphanGuids = {},
 
+    repairVoucherGuids = [],
+
     childRepairTables,
 
     rowsToSave,
@@ -1192,6 +1194,8 @@ async function saveVoucherExecutionData({
         executionMode,
 
         orphanGuids,
+
+        repairVoucherGuids,
 
         childRepairTables,
 
@@ -1683,7 +1687,8 @@ async function saveVouchers({
 
     // Child tables that actually need repair
     childRepairTables = [],
-     orphanGuids = {}
+    orphanGuids = {},
+    repairVoucherGuids = []
 }) {
 
     console.log("=== SAVE VOUCHERS RECEIVED ===", {
@@ -1756,6 +1761,17 @@ const repairChildTables =
 const voucherRows = [];
 
 const allVoucherRows = [];
+
+const mismatchGuidSet =
+    new Set(
+        (repairVoucherGuids || [])
+            .map(x =>
+                typeof x === "string"
+                    ? x.trim()
+                    : x?.guid?.trim()
+            )
+            .filter(Boolean)
+    );
 
 let ledgerRows = [];
 
@@ -2445,6 +2461,9 @@ const executionResult =
 
         orphanGuids:
             orphanGuids || {},
+
+        repairVoucherGuids:
+            repairVoucherGuids || [],
 
         rowsToSave,
 

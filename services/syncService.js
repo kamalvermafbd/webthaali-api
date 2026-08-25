@@ -264,6 +264,8 @@ async function getTrialBalance({
                 id,
                 guid,
                 nature,
+                 opening_balance,
+                opening_balance_type,
                 tally_balance,
                 db_balance
             `)
@@ -295,6 +297,55 @@ async function getTrialBalance({
             ledger
         );
     }
+
+    // =========================
+// CALCULATE DB BALANCE
+// FROM VOUCHER LEDGERS
+// =========================
+
+// =========================
+// LOOKUP DB BALANCE FROM VIEW
+// =========================
+
+const { data: dbBalances, error: dbBalanceError } =
+    await supabase
+        .from("tally_ledger_db_balances")
+        .select(`
+            company_code,
+            tally_owner,
+            ledger_guid,
+            ledger_name,
+            db_balance
+        `)
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner);
+
+if (dbBalanceError) {
+    throw dbBalanceError;
+}
+
+const dbBalanceMap = new Map();
+
+for (const row of dbBalances || []) {
+
+    const guid =
+        String(row.ledger_guid || "").trim();
+
+    if (!guid) {
+        continue;
+    }
+
+    dbBalanceMap.set(
+        guid,
+        Number(row.db_balance || 0)
+    );
+}
+
+console.log("======================================");
+console.log("DB BALANCE VIEW LOOKUP");
+console.log("ROWS :", dbBalances?.length || 0);
+console.log("MAP  :", dbBalanceMap.size);
+console.log("======================================");
 
         // =========================
     // PREPARE DB UPDATES
@@ -338,20 +389,40 @@ async function getTrialBalance({
                 tallyLedger.closingBalance || 0
             );
 
-        const dbBalance =
+       const dbBalance =
             Number(
-                dbLedger.db_balance || 0
+                dbBalanceMap.get(guid) || 0
             );
 
-        const balanceDifference =
-            tallyBalance - dbBalance;
+        const openingBalance =
+    Number(
+        dbLedger.opening_balance || 0
+    );
 
-        updates.push({
-            id: dbLedger.id,
-            tally_balance: tallyBalance,
-            balance_difference: balanceDifference,
-            updated_at: new Date().toISOString()
-        });
+const openingType =
+    String(
+        dbLedger.opening_balance_type || ""
+    ).trim().toUpperCase();
+
+const openingImpact =
+    openingType === "CR"
+        ? openingBalance
+        : openingType === "DR"
+            ? -openingBalance
+            : 0;
+
+const balanceDifference =
+    tallyBalance -
+    dbBalance -
+    openingImpact;
+
+       updates.push({
+    id: dbLedger.id,
+    tally_balance: tallyBalance,
+    db_balance: dbBalance,
+    balance_difference: balanceDifference,
+    updated_at: new Date().toISOString()
+});
     }
 
     console.log("======================================");

@@ -184,15 +184,24 @@ function buildDeleteOperations({
     company_code,
     tally_owner,
     sync_batch_id,
-    voucherGuids
+    voucherGuids,
+    childRepairTables
 }) {
 
     const operations = [];
 
-    const childTables =
-        Object.entries(
-            VOUCHER_RECONCILIATION.CHILDREN
-        );
+   const allChildTables =
+    Object.entries(
+        VOUCHER_RECONCILIATION.CHILDREN
+    );
+
+const childTables =
+    childRepairTables?.length > 0
+        ? allChildTables.filter(
+            ([table]) =>
+                childRepairTables.includes(table)
+        )
+        : allChildTables;
 
     for (const [table, config] of childTables) {
 
@@ -477,6 +486,8 @@ function buildOperation(args) {
 
 }
 
+
+
 function buildVoucherOperations(args) {
 
     const deleteOperations =
@@ -487,6 +498,18 @@ function buildVoucherOperations(args) {
                     args.changedVoucherGuids
             })
             : [];
+
+    const repairDeleteOperations =
+    args.repairVoucherGuids?.length > 0 &&
+    args.childRepairTables?.length > 0
+        ? buildDeleteOperations({
+            ...args,
+            voucherGuids:
+                args.repairVoucherGuids,
+            childRepairTables:
+                args.childRepairTables
+        })
+        : [];
 
     const orphanDeleteOperations =
         args.orphanGuids
@@ -507,11 +530,12 @@ function buildVoucherOperations(args) {
             })
             : [];
 
-    return [
-        ...deleteOperations,
-        ...orphanDeleteOperations,
-        ...buildSaveOperations(args)
-    ];
+        return [
+            ...deleteOperations,
+            ...repairDeleteOperations,
+            ...orphanDeleteOperations,
+            ...buildSaveOperations(args)
+        ];
 
 }
 
