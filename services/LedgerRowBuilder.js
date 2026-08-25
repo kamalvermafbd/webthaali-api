@@ -63,7 +63,13 @@ class LedgerRowBuilder {
                 ledger.parentGroupAlterId || null,
 
             root_group:
-                null,
+                ledger.nature || null,
+
+            nature:
+                ledger.nature || null,
+
+            parent_group_reserved_name:
+                ledger.parentGroupReservedName?.trim() || null,
 
             reserved_name:
                 ledger.reservedName?.trim() || null,
