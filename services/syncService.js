@@ -1,6 +1,11 @@
 const registry = require("../socketio/connectorRegistry");
 const { sendToConnector } = require("../socketio/sendToConnector");
 const { createClient } = require("@supabase/supabase-js");
+const {
+    saveStockGodownBalances
+} = require("./saveStockGodownBalances");
+
+const fs = require("fs");
 
 const supabase = createClient(
     process.env.SUPABASE_URL,
@@ -225,7 +230,7 @@ async function getTrialBalance({
     // DATE IS CONTROLLED
     // INSIDE CONNECTOR
     // =========================
-
+/*
     const tbResult =
         await sendToConnector(
             socket,
@@ -243,7 +248,52 @@ async function getTrialBalance({
         Array.isArray(tbResult.data)
             ? tbResult.data
             : [];
+*/
 
+// =========================
+// WAIT FOR TRIAL BALANCE PROTOCOL DATA
+// =========================
+
+const tbRowsPromise =
+    socket.protocolReceiver.waitForCollection();
+
+
+// =========================
+// REQUEST TRIAL BALANCE
+// =========================
+
+const tbResult =
+    await sendToConnector(
+        socket,
+        "getTrialBalance",
+        {
+            company: tallyCompany
+        }
+    );
+
+if (!tbResult?.success) {
+
+    return tbResult;
+
+}
+
+
+// =========================
+// ALLOW CONNECTOR TO SEND CHUNKS
+// =========================
+
+socket.protocolReceiver.sendReady(
+    "getTrialBalance"
+);
+
+
+// =========================
+// WAIT FOR ALL TRIAL BALANCE CHUNKS
+// =========================
+
+const tallyLedgers =
+    await tbRowsPromise;
+    
     console.log("======================================");
     console.log("TRIAL BALANCE RECEIVED");
     console.log("COMPANY CODE :", company_code);
@@ -483,7 +533,241 @@ if (updates.length > 0) {
     };
 }
 
+// ==========================================
+// GET STOCK GODOWN BALANCE
+// ==========================================
+
+async function getStockGodownBalance({
+    company_code,
+    tally_owner
+}) {
+
+    const socket =
+        registry.get(company_code);
+
+    if (!socket) {
+
+        return {
+            success: false,
+            error: "Connector offline"
+        };
+
+    }
+
+
+    // =========================
+    // GET TALLY COMPANY
+    // =========================
+
+    const {
+        data: company,
+        error: companyError
+    } =
+        await supabase
+            .from("company")
+            .select(
+                "ca_tally_company, client_tally_company"
+            )
+            .eq("company_code", company_code)
+            .single();
+
+
+    if (companyError || !company) {
+
+        return {
+            success: false,
+            error: "Company not found"
+        };
+
+    }
+
+
+    const tallyCompany =
+        tally_owner === "CA"
+            ? company.ca_tally_company
+            : company.client_tally_company;
+
+
+    // =========================
+    // GET BOOKS BEGINNING
+    // =========================
+
+    const masterResult =
+        await sendToConnector(
+            socket,
+            "getMasters",
+            {
+                company: tallyCompany
+            }
+        );
+
+
+    const booksBeginningFrom =
+        masterResult
+            ?.summary
+            ?.booksBeginningFrom;
+
+
+    if (!booksBeginningFrom) {
+
+        return {
+            success: false,
+            error:
+                "Books Beginning date not available"
+        };
+
+    }
+
+
+    // =========================
+    // GET GODOWN-WISE STOCK
+    // =========================
+
+    // =========================
+// WAIT FOR GODOWN PROTOCOL DATA
+// =========================
+
+const stockRowsPromise =
+    socket.protocolReceiver.waitForCollection();
+
+const stockResult =
+    await sendToConnector(
+        socket,
+        "getStockGodownSummary",
+        {
+            company: tallyCompany,
+            booksBeginningFrom
+        }
+    );
+
+if (!stockResult?.success) {
+
+    return stockResult;
+
+}
+
+socket.protocolReceiver.sendReady(
+    "getStockGodownSummary"
+);
+
+
+// =========================
+// WAIT FOR ALL CHUNKS
+// =========================
+
+const stock =
+    await stockRowsPromise;
+
+// =========================
+// SAVE GODOWN STOCK TO DB
+// =========================
+
+const saveResult =
+    await saveStockGodownBalances({
+
+        company_code,
+
+        tally_owner,
+
+        stockGodownBalances:
+            stock
+
+    });
+
+console.log(
+    "STOCK GODOWN DB SAVE:",
+    saveResult
+);
+
+fs.writeFileSync(
+    "./stock-godown-server-result.json",
+    JSON.stringify(
+        stock,
+        null,
+        2
+    ),
+    "utf8"
+);
+
+console.log(
+    "======================================"
+);
+
+console.log(
+    "STOCK GODOWN DATA FROM CONNECTOR"
+);
+
+console.dir(
+    stock,
+    {
+        depth: null
+    }
+);
+
+console.log(
+    "TOTAL STOCK GODOWN ROWS:",
+    stock.length
+);
+
+console.log(
+    "======================================"
+);
+    console.log(
+        "======================================"
+    );
+
+    console.log(
+        "STOCK GODOWN BALANCE RECEIVED"
+    );
+
+    console.log(
+        "COMPANY CODE :",
+        company_code
+    );
+
+    console.log(
+        "TALLY OWNER  :",
+        tally_owner
+    );
+
+    console.log(
+        "TALLY COMPANY:",
+        tallyCompany
+    );
+
+    console.log(
+        "ROWS         :",
+        stock.length
+    );
+
+    console.log(
+        "======================================"
+    );
+
+
+    return {
+
+        success: true,
+
+        data: stock,
+
+        summary: {
+
+            stockGodownRows:
+                stock.length,
+
+            dbSaved:
+                saveResult?.total || 0
+
+        }
+
+    };
+
+}
+
+
 module.exports = {
     getSyncMasterData,
-    getTrialBalance
+    getTrialBalance,
+    getStockGodownBalance
 };

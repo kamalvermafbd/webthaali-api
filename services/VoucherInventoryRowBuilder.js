@@ -171,6 +171,14 @@ function buildInventoryRows({
 
                 item.transactionType ?? null,
 
+            is_deemed_positive:
+
+                item.isDeemedPositive ?? null,
+
+            material_movement:
+
+                item.materialMovement ?? null,
+
             ledger_name:
 
                 item.ledgerName ?? null,

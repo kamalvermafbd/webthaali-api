@@ -49,12 +49,11 @@ const rateLimit =
 
 const { Resend } = require("resend");
 
-
 const {
     getSyncMasterData,
-    getTrialBalance
+    getTrialBalance,
+    getStockGodownBalance
 } = require("./services/syncService");
-
 const {
 
   sendToTally,
@@ -34557,6 +34556,78 @@ app.get("/getSyncMasterData", async (req, res) => {
 
 });
 
+
+app.get("/getStockGodownBalance", async (req, res) => {
+
+    try {
+
+        const company_code =
+            String(
+                req.query.company_code || ""
+            ).trim();
+
+        const tally_owner =
+            String(
+                req.query.tally_owner || ""
+            ).trim();
+
+
+        if (!company_code) {
+
+            return res.json({
+                success: false,
+                error: "company_code missing"
+            });
+
+        }
+
+
+        if (!tally_owner) {
+
+            return res.json({
+                success: false,
+                error: "tally_owner missing"
+            });
+
+        }
+
+
+        const result =
+            await getStockGodownBalance({
+
+                company_code,
+
+                tally_owner
+
+            });
+
+
+        return res.json(
+            result
+        );
+
+    }
+
+    catch (err) {
+
+        console.error(
+            "GET STOCK GODOWN BALANCE ERROR:",
+            err
+        );
+
+
+        return res.status(500).json({
+
+            success: false,
+
+            error:
+                err.message
+
+        });
+
+    }
+
+});
 
 // ======================================================
 // RECONCILIATION CHECK
