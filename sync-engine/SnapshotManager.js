@@ -318,7 +318,7 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
 
                     );
 */
-
+/* 270826
                 const { data: verifyRows } = await supabase
 
                     .from(TABLES.SNAPSHOT)
@@ -334,7 +334,7 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                     .eq("entity_type", chunk[0].entity_type)
 
                     .eq("is_deleted", false);
-
+*/
                     /*
                 fs.writeFileSync(
 

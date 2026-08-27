@@ -117,6 +117,7 @@ async function checkChildVoucherReconciliation({
     let totalMissing = 0;
     let totalExtra = 0;
     let totalAmountMismatch = 0;
+    let totalStockMismatch = 0;
 
 
     for (const viewName of views) {
@@ -151,6 +152,20 @@ async function checkChildVoucherReconciliation({
                     row.status === "EXTRA"
             );
 
+            // 27.08.26
+// RECO STATUS COLLECTION
+// View-specific repair action yahan nahi hoga.
+// View -> targetTable mapping constants.js se aayegi.
+
+        const stockMismatchRows =
+            viewName === "stock_voucher_rows_reco"
+                ? rows.filter(
+                    row =>
+                        row.status === "MISMATCH"
+                )
+                : [];
+                
+
 
         totalMissing +=
             missingRows.length;
@@ -160,12 +175,20 @@ async function checkChildVoucherReconciliation({
 
         totalAmountMismatch +=
             amountMismatchRows.length;
+
+        totalStockMismatch +=
+             stockMismatchRows.length;
     
 
     const childTable =
             VOUCHER_CHILD_RECONCILIATION_MAP[
                 viewName
             ];
+
+            // 27.08.26
+// Generic repair mapping:
+// Every configured reconciliation view must resolve
+// to exactly one target child table.
 
         if (!childTable) {
 
@@ -187,9 +210,14 @@ async function checkChildVoucherReconciliation({
             amountMismatch: amountMismatchRows.length,
             missingRows,
             extraRows,
-            amountMismatchRows
+            amountMismatchRows,
+            stockMismatchRows,
         });
 
+        // 27.08.26
+// GENERIC REPAIR PLAN
+// Current reconciliation result is converted into
+// view -> GUID -> targetTable -> action mapping.
 
         console.log(
             "CHILD RECONCILIATION:",
@@ -206,7 +234,60 @@ async function checkChildVoucherReconciliation({
     const clean =
         totalMissing === 0 &&
         totalExtra === 0 &&
-        totalAmountMismatch === 0;
+        totalAmountMismatch === 0 &&
+        totalStockMismatch === 0;
+
+        // 27.08.26 GENERIC REPAIR PLAN
+// One combined plan from all configured reconciliation views.
+// Each entry retains source view + target table + action.
+
+const genericRepairPlan = results.flatMap(item => [
+
+    ...(item.missingRows || []).map(row => ({
+        guid: (
+            row.voucher_guid ||
+            row.guid
+        )?.trim(),
+        sourceView: item.view,
+        targetTable: item.table,
+        status: "MISSING",
+        action: "INSERT"
+    })),
+
+    ...(item.extraRows || []).map(row => ({
+        guid: (
+            row.voucher_guid ||
+            row.guid
+        )?.trim(),
+        sourceView: item.view,
+        targetTable: item.table,
+        status: "EXTRA",
+        action: "DELETE"
+    })),
+
+    ...(item.amountMismatchRows || []).map(row => ({
+        guid: (
+            row.voucher_guid ||
+            row.guid
+        )?.trim(),
+        sourceView: item.view,
+        targetTable: item.table,
+        status: "AMOUNT_MISMATCH",
+        action: "REPLACE"
+    })),
+
+    ...(item.stockMismatchRows || []).map(row => ({
+        guid: (
+            row.voucher_guid ||
+            row.guid
+        )?.trim(),
+        sourceView: item.view,
+        targetTable: item.table,
+        status: "MISMATCH",
+        action: "REPLACE"
+    }))
+
+]).filter(item => item.guid);
 
 
     console.log(
@@ -253,6 +334,14 @@ const extraByChildTable = {};
 
 const amountMismatchByChildTable = {};
 
+const stockMismatchByChildTable = {};
+
+// 27.08.26 OLD REPAIR PLAN BUILDER
+// Kept temporarily for rollback/reference.
+// Generic repair-plan flow will replace this block.
+
+const repairPlan = [];
+
 for (const item of results) {
 
     if (item.missingRows.length > 0) {
@@ -274,6 +363,117 @@ for (const item of results) {
             item.amountMismatchRows;
     }
 
+    if (item.stockMismatchRows?.length > 0) {
+        stockMismatchByChildTable[item.table] =
+            item.stockMismatchRows;
+    }   
+
+    // 27.08.26 OLD MISSING REPAIR PLAN
+// Kept for rollback/reference.
+
+    for (const row of item.missingRows || []) {
+
+    repairPlan.push({
+        guid:
+            (
+                row.voucher_guid ||
+                row.guid
+            )?.trim(),
+
+        sourceView:
+            item.view,
+
+        status:
+            "MISSING",
+
+        targetTable:
+            item.table,
+
+        action:
+            "INSERT"
+    });
+
+}
+
+// 27.08.26 OLD EXTRA REPAIR PLAN - KEEP FOR ROLLBACK
+
+for (const row of item.extraRows || []) {
+
+    repairPlan.push({
+        guid:
+            (
+                row.voucher_guid ||
+                row.guid
+            )?.trim(),
+
+        sourceView:
+            item.view,
+
+        status:
+            "EXTRA",
+
+        targetTable:
+            item.table,
+
+        action:
+            "DELETE"
+    });
+
+}
+
+// 27.08.26 OLD AMOUNT MISMATCH REPAIR PLAN
+// Kept for rollback/reference.
+
+for (const row of item.amountMismatchRows || []) {
+
+    repairPlan.push({
+        guid:
+            (
+                row.voucher_guid ||
+                row.guid
+            )?.trim(),
+
+        sourceView:
+            item.view,
+
+        status:
+            "AMOUNT_MISMATCH",
+
+        targetTable:
+            item.table,
+
+        action:
+            "REPLACE"
+    });
+
+}
+
+// 27.08.26 OLD STOCK MISMATCH REPAIR PLAN - KEEP FOR ROLLBACK
+
+for (const row of item.stockMismatchRows || []) {
+
+    repairPlan.push({
+        guid:
+            (
+                row.voucher_guid ||
+                row.guid
+            )?.trim(),
+
+        sourceView:
+            item.view,
+
+        status:
+            "MISMATCH",
+
+        targetTable:
+            item.table,
+
+        action:
+            "REPLACE"
+    });
+
+}
+
 }
 
     return {
@@ -288,11 +488,20 @@ for (const item of results) {
 
             totalAmountMismatch,
 
+            totalStockMismatch,
+
             views: results,
+
+            repairPlan,
+
+            // 27.08.26 GENERIC REPAIR PLAN
+            genericRepairPlan,
 
             missingByChildTable,
 
             amountMismatchByChildTable,
+
+            stockMismatchByChildTable,
 
             extraByChildTable
 

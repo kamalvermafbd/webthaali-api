@@ -277,6 +277,7 @@ fs.appendFileSync(
     return operations;
 }
 
+/* 27082026
 function buildSaveOperations({
 
     company_code,
@@ -491,6 +492,141 @@ fs.appendFileSync(
     return operations;
 
 }
+*/
+
+
+function buildSaveOperations({
+
+    company_code,
+    tally_owner,
+    sync_batch_id,
+
+    voucherRows,
+
+    ledgerRows,
+    inventoryRows,
+    stockVoucherRows,
+    billAllocationRows,
+    costCentreRows,
+
+    includeParent = true,
+
+    childRepairTables = []
+
+}) {
+
+    const operations = [];
+
+    // =========================================
+    // PARENT VOUCHER
+    // =========================================
+
+    if (includeParent !== false) {
+
+        operations.push(
+
+            OperationBuilder.build({
+
+                entity:
+                    ENTITY_TYPE.VOUCHER,
+
+                table:
+                    TABLES.VOUCHERS,
+
+                operation:
+                    OPERATION_TYPE.UPSERT,
+
+                rows:
+                    voucherRows,
+
+                options: {
+
+                    onConflict:
+                        CONFLICT_KEYS[TABLES.VOUCHERS]
+
+                },
+
+                company_code,
+
+                tally_owner,
+
+                sync_batch_id
+
+            })
+
+        );
+
+    }
+
+
+    // =========================================
+    // CHILD TABLES
+    // =========================================
+
+    const childOperations = {
+
+        [TABLES.VOUCHER_LEDGERS]: ledgerRows,
+
+        [TABLES.VOUCHER_INVENTORY]: inventoryRows,
+
+        [TABLES.STOCK_VOUCHERS]: stockVoucherRows,
+
+        [TABLES.BILL_ALLOCATIONS]: billAllocationRows,
+
+        [TABLES.COST_CENTRE_ALLOCATIONS]: costCentreRows
+
+    };
+
+
+    const isChildRepair =
+        childRepairTables?.length > 0;
+
+
+    for (
+        const [table, rows]
+        of Object.entries(childOperations)
+    ) {
+
+        if (
+            isChildRepair &&
+            !childRepairTables.includes(table)
+        ) {
+            continue;
+        }
+
+
+        operations.push(
+
+            OperationBuilder.build({
+
+                entity:
+                    ENTITY_TYPE.VOUCHER,
+
+                table,
+
+                operation:
+                    OPERATION_TYPE.INSERT,
+
+                rows:
+                    rows || [],
+
+                company_code,
+
+                tally_owner,
+
+                sync_batch_id
+
+            })
+
+        );
+
+    }
+
+
+    return operations;
+
+}
+
 
 function buildOperation(args) {
 
@@ -503,7 +639,7 @@ function buildOperation(args) {
 }
 
 
-
+/*
 function buildVoucherOperations(args) {
 
     const deleteOperations =
@@ -554,7 +690,71 @@ function buildVoucherOperations(args) {
         ];
 
 }
+*/
 
+function buildVoucherOperations(args) {
+
+    const deleteOperations =
+        args.changedVoucherGuids?.length > 0
+            ? buildDeleteOperations({
+                ...args,
+                voucherGuids:
+                    args.changedVoucherGuids
+            })
+            : [];
+
+    const repairDeleteOperations =
+        args.repairVoucherGuids?.length > 0 &&
+        args.childRepairTables?.length > 0
+            ? buildDeleteOperations({
+                ...args,
+                voucherGuids:
+                    args.repairVoucherGuids,
+                childRepairTables:
+                    args.childRepairTables
+            })
+            : [];
+
+    const orphanDeleteOperations =
+        args.orphanGuids
+            ? buildOrphanDeleteOperations({
+
+                company_code:
+                    args.company_code,
+
+                tally_owner:
+                    args.tally_owner,
+
+                sync_batch_id:
+                    args.sync_batch_id,
+
+                orphanGuids:
+                    args.orphanGuids
+
+            })
+            : [];
+
+    return [
+
+        ...deleteOperations,
+
+        ...repairDeleteOperations,
+
+        ...orphanDeleteOperations,
+
+        ...buildSaveOperations({
+
+            ...args,
+
+            includeParent:
+                args.executionMode !==
+                "CHILD_RECONCILIATION"
+
+        })
+
+    ];
+
+}
 
 function buildAlterUpdateOperations({
     table,

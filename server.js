@@ -37510,6 +37510,62 @@ console.log(
     childReconciliationResult
 );
 
+fs.writeFileSync(
+    `./logs/CHILD-REPAIR-PLAN-${sync_batch_id}.json`,
+    JSON.stringify(
+        childReconciliationResult?.repairPlan || [],
+        null,
+        2
+    )
+);
+
+fs.writeFileSync(
+    `./logs/CHILD-RECON-GATE-${sync_batch_id}.json`,
+    JSON.stringify({
+        stage: "INITIAL_CHILD_RECONCILIATION",
+
+        sync_batch_id,
+
+        completed:
+            childReconciliationResult?.completed,
+
+        totalMissing:
+            childReconciliationResult?.totalMissing,
+
+        totalExtra:
+            childReconciliationResult?.totalExtra,
+
+        totalAmountMismatch:
+            childReconciliationResult?.totalAmountMismatch,
+
+        totalStockMismatch:
+            childReconciliationResult?.totalStockMismatch,
+
+        missingTables:
+            Object.keys(
+                childReconciliationResult?.missingByChildTable || {}
+            ),
+
+        amountMismatchTables:
+            Object.keys(
+                childReconciliationResult?.amountMismatchByChildTable || {}
+            ),
+
+        extraTables:
+            Object.keys(
+                childReconciliationResult?.extraByChildTable || {}
+            ),
+
+        stockMismatchTables:
+            Object.keys(
+                childReconciliationResult?.stockMismatchByChildTable || {}
+            ),
+
+        stockMismatchRows:
+            childReconciliationResult?.stockMismatchByChildTable || {}
+
+    }, null, 2)
+);
 
 // =========================================
 // CHILD REPAIR LOOP
@@ -37551,6 +37607,28 @@ while (
     const amountMismatchByChildTable =
         childReconciliationResult.amountMismatchByChildTable || {};
 
+    const stockMismatchByChildTable =
+    childReconciliationResult.stockMismatchByChildTable || {};
+
+    // 27.08.26
+    // GENERIC REPAIR PLAN
+    const childRepairPlan =
+    childReconciliationResult.genericRepairPlan || [];
+
+        const repairByTable = {};
+
+for (const repair of childRepairPlan) {
+    if (!repairByTable[repair.targetTable]) {
+        repairByTable[repair.targetTable] = [];
+    }
+
+    repairByTable[repair.targetTable].push(repair);
+}
+
+console.log(
+    "GENERIC CHILD REPAIR TABLES:",
+    Object.keys(repairByTable)
+);
     // =========================================
     // COLLECT UNIQUE MISSING VOUCHER GUIDS
     // =========================================
@@ -37589,11 +37667,27 @@ while (
     )
 ];
 
+const stockMismatchVoucherGuids = [
+    ...new Set(
+        Object.values(
+            stockMismatchByChildTable
+        )
+        .flat()
+        .map(row =>
+            (
+                row.voucher_guid ||
+                row.guid
+            )?.trim()
+        )
+        .filter(Boolean)
+    )
+];
 
 const childRepairVoucherGuids = [
     ...new Set([
         ...childMissingVoucherGuids,
-        ...childMismatchVoucherGuids
+        ...childMismatchVoucherGuids,
+        ...stockMismatchVoucherGuids
     ])
 ];
 
@@ -37603,16 +37697,51 @@ const childRepairVoucherGuids = [
     );
 
 
+// =========================================
+// STOCK VOUCHER ROW COUNT RECONCILIATION
+// =========================================
+/*
+const {
+    data: stockVoucherRecoRows,
+    error: stockVoucherRecoError
+} = await supabase
+    .from("stock_voucher_rows_reco")
+    .select("guid")
+    .eq("company_code", company_code)
+    .eq("tally_owner", tally_owner);
+
+if (stockVoucherRecoError) {
+    throw new Error(
+        `Stock voucher reconciliation failed: ${
+            stockVoucherRecoError.message
+        }`
+    );
+}
+
+const stockVoucherRepairGuids = [
+    ...new Set(
+        (stockVoucherRecoRows || [])
+            .map(row => row.guid?.trim())
+            .filter(Boolean)
+    )
+];
+
+console.log(
+    "STOCK VOUCHER COUNT MISMATCH GUIDS:",
+    stockVoucherRepairGuids.length
+);
+
+console.log(
+    "STOCK VOUCHER REPAIR GUIDS:",
+    stockVoucherRepairGuids
+);
+*/
+
     // =========================================
     // FETCH MISSING VOUCHERS
     // =========================================
 
-   if (
-    childMissingVoucherGuids.length > 0 ||
-    childMismatchVoucherGuids.length > 0
-) {
-
-      const cachedVoucherMap = new Map(
+ const cachedVoucherMap = new Map(
     childRepairVoucherCache.map(voucher => {
 
         const guid =
@@ -37631,116 +37760,226 @@ const childRepairVoucherGuids = [
     )
 );
 
-const cachedMissingVouchers =
-    childMissingVoucherGuids
-        .map(guid =>
-            cachedVoucherMap.get(guid)
-        )
-        .filter(Boolean);
+if (
+    childMissingVoucherGuids.length > 0 ||
+    childMismatchVoucherGuids.length > 0 ||
+    stockMismatchVoucherGuids.length > 0
+) {
 
-const uncachedMissingVoucherGuids = [
-    ...new Set([
-        ...childMissingVoucherGuids,
-        ...childMismatchVoucherGuids
-    ])
-].filter(
-    guid =>
-        !cachedVoucherMap.has(guid)
-);
+    const cachedMissingVouchers =
+        childMissingVoucherGuids
+            .map(guid =>
+                cachedVoucherMap.get(guid)
+            )
+            .filter(Boolean);
 
-console.log(
-    "CHILD REPAIR CACHE:",
-    {
-        requested:
-            childMissingVoucherGuids.length,
+    const uncachedMissingVoucherGuids = [
+        ...new Set([
+            ...childMissingVoucherGuids,
+            ...childMismatchVoucherGuids,
+            ...stockMismatchVoucherGuids
+        ])
+    ].filter(
+        guid =>
+            !cachedVoucherMap.has(guid)
+    );
 
-        cached:
-            cachedMissingVouchers.length,
+    console.log(
+        "CHILD REPAIR CACHE:",
+        {
+            requested:
+                childMissingVoucherGuids.length,
 
-        uncached:
-            uncachedMissingVoucherGuids.length
-    }
-);
+            cached:
+                cachedMissingVouchers.length,
 
-
+            uncached:
+                uncachedMissingVoucherGuids.length
+        }
+    );
 
     let childMissingResult = {
-    success: true,
-    items: []
-};
-
+        success: true,
+        items: []
+    };
 if (uncachedMissingVoucherGuids.length > 0) {
-         childMissingResult =
-            await sendChunkedToConnector(
 
-                socket,
+    childMissingResult =
+        await sendChunkedToConnector(
 
-                "voucherByGuid",
+            socket,
 
-                {
+            "voucherByGuid",
 
-                    company,
+            {
 
-                    sync_batch_id,
+                company,
 
-                    company_code,
+                sync_batch_id,
 
-                    tally_owner,
+                company_code,
 
-                    module: "VOUCHER",
+                tally_owner,
 
-                    entity_type: "VOUCHER",
+                module: "VOUCHER",
 
-                    snapshot: true,
+                entity_type: "VOUCHER",
 
-                    syncMode,
+                snapshot: true,
 
-                    booksBeginningFrom:
-                        result.summary?.booksBeginningFrom,
+                syncMode,
 
-                   requestItems:
-                      uncachedMissingVoucherGuids
+                booksBeginningFrom:
+                    result.summary?.booksBeginningFrom,
 
-                }
+                requestItems:
+                    uncachedMissingVoucherGuids
 
-            );
-
-          
-
-        if (!childMissingResult.success) {
-
-            await failHttpBatch(
-                childMissingResult
-            );
-
-            return res.json(
-                childMissingResult
-            );
-
-        }
-
-
-        childRepairVoucherCache.push(
-            ...(childMissingResult.items || [])
-        );
-
-        for (const voucher of childMissingResult.items || []) {
-
-            const guid =
-                (
-                    voucher?.header?.guid ||
-                    voucher?.guid
-                )?.trim();
-
-            if (guid) {
-                cachedVoucherMap.set(guid, voucher);
             }
 
+        );
+
+
+    if (!childMissingResult.success) {
+
+        await failHttpBatch(
+            childMissingResult
+        );
+
+        return res.json(
+            childMissingResult
+        );
+
+    }
+
+
+    childRepairVoucherCache.push(
+        ...(childMissingResult.items || [])
+    );
+
+
+    for (
+        const voucher
+        of childMissingResult.items || []
+    ) {
+
+        const guid =
+            (
+                voucher?.header?.guid ||
+                voucher?.guid
+            )?.trim();
+
+        if (guid) {
+
+            cachedVoucherMap.set(
+                guid,
+                voucher
+            );
+
         }
+
+    }
+
+}
+
+
+// =========================================
+// 27.08.26 GENERIC CHILD REPAIR EXECUTION
+// =========================================
+
+for (
+    const [childTable, repairs]
+    of Object.entries(repairByTable)
+) {
+
+    if (!repairs?.length) {
+        continue;
+    }
+
+
+    const repairVoucherGuids = [
+        ...new Set(
+            repairs
+                .map(repair => repair.guid)
+                .filter(Boolean)
+        )
+    ];
+
+
+    const fetchedVouchers =
+        repairVoucherGuids
+            .map(guid =>
+                cachedVoucherMap.get(guid)
+            )
+            .filter(Boolean);
+
+
+    console.log(
+        "GENERIC CHILD REPAIR:",
+        childTable,
+        "| GUIDS:",
+        repairVoucherGuids.length,
+        "| VOUCHERS:",
+        fetchedVouchers.length
+    );
+
+
+    if (!fetchedVouchers.length) {
+        continue;
+    }
+
+
+    const childRepairResult =
+        await saveVouchers({
+
+            company_code,
+
+            tally_owner,
+
+            sync_batch_id,
+
+            syncMode,
+
+            vouchers:
+                fetchedVouchers,
+
+            repairVoucherGuids:
+                repairVoucherGuids,
+
+            allVoucherGuids:
+                voucherGuidResult?.items || [],
+
+            executionMode:
+                "CHILD_RECONCILIATION",
+
+            childRepairTables: [
+                childTable
+            ]
+
+        });
+
+
+    console.log(
+        "GENERIC CHILD REPAIR RESULT:",
+        {
+            childTable,
+
+            status:
+                childRepairResult?.status,
+
+            success:
+                childRepairResult?.success
+        }
+    );
+
 }
         // =========================================
         // REPAIR EACH CHILD TABLE SEPARATELY
         // =========================================
+
+        // 27.08.26 OLD TABLE-WISE MISSING REPAIR LOOP
+// Replaced by generic repairPlan flow.
+// Kept temporarily for rollback/reference.
 
         for (
             const [childTable, rows]
@@ -37748,7 +37987,7 @@ if (uncachedMissingVoucherGuids.length > 0) {
                 missingByChildTable
             )
         ) {
-
+/*27.08.26 OLD TABLE-WISE MISSING REPAIR LOOP
             if (!rows?.length) {
 
                 continue;
@@ -37854,7 +38093,7 @@ if (uncachedMissingVoucherGuids.length > 0) {
 
                 }
             );
-
+*/
         }
 
     }
@@ -37870,7 +38109,10 @@ if (uncachedMissingVoucherGuids.length > 0) {
             amountMismatchByChildTable
         )
     ) {
-
+// 27.08.26 OLD AMOUNT MISMATCH TABLE-WISE REPAIR
+// Replaced by generic repairPlan flow.
+// Kept temporarily for rollback/reference.
+/*
         if (!rows?.length) {
             continue;
         }
@@ -37947,10 +38189,114 @@ if (uncachedMissingVoucherGuids.length > 0) {
             "AMOUNT MISMATCH REPAIR RESULT:",
             childRepairResult
         );
-
+*/
     }
 
-    
+    // =========================================
+// STOCK ROW COUNT MISMATCH REPAIR
+// =========================================
+
+for (
+    const [childTable, rows]
+    of Object.entries(
+        stockMismatchByChildTable
+    )
+) {
+/*
+// 27.08.26 OLD STOCK MISMATCH TABLE-WISE REPAIR
+// Replaced by generic repairPlan flow.
+// Kept temporarily for rollback/reference.
+
+    if (!rows?.length) {
+        continue;
+    }
+
+    const repairVoucherGuids = [
+        ...new Set(
+            rows
+                .map(row =>
+                    (
+                        row.voucher_guid ||
+                        row.guid
+                    )?.trim()
+                )
+                .filter(Boolean)
+        )
+    ];
+
+    const fetchedVouchers =
+        repairVoucherGuids
+            .map(guid =>
+                childRepairVoucherCache.find(
+                    voucher => {
+
+                        const voucherGuid =
+                            (
+                                voucher?.header?.guid ||
+                                voucher?.guid
+                            )?.trim();
+
+                        return voucherGuid === guid;
+
+                    }
+                )
+            )
+            .filter(Boolean);
+
+    console.log(
+        "STOCK ROW COUNT REPAIR:",
+        childTable,
+        "| GUIDS:",
+        repairVoucherGuids.length,
+        "| VOUCHERS:",
+        fetchedVouchers.length
+    );
+
+    if (!fetchedVouchers.length) {
+        continue;
+    }
+
+    const stockRepairResult =
+        await saveVouchers({
+
+            company_code,
+            tally_owner,
+            sync_batch_id,
+            syncMode,
+
+            vouchers:
+                fetchedVouchers,
+
+            repairVoucherGuids:
+                repairVoucherGuids,
+
+            allVoucherGuids:
+                voucherGuidResult?.items || [],
+
+            executionMode:
+                "CHILD_RECONCILIATION",
+
+            childRepairTables: [
+                childTable
+            ]
+
+        });
+
+    console.log(
+        "STOCK ROW COUNT REPAIR RESULT:",
+        {
+            childTable,
+            status:
+                stockRepairResult?.status,
+            success:
+                stockRepairResult?.success,
+            result:
+                stockRepairResult
+        }
+    );
+*/
+}
+
     // =========================================
     // EXTRA CHILD REPAIR
     // =========================================
