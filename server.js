@@ -34542,20 +34542,6 @@ app.get(
 
 
 
-app.get("/getSyncMasterData", async (req, res) => {
-
-    const { company_code, tally_owner, master_type } = req.query;
-
-    const result = await getSyncMasterData({
-        company_code,
-        tally_owner,
-        master_type
-    });
-
-    res.json(result);
-
-});
-
 
 app.get("/getStockGodownBalance", async (req, res) => {
 
@@ -34569,6 +34555,11 @@ app.get("/getStockGodownBalance", async (req, res) => {
         const tally_owner =
             String(
                 req.query.tally_owner || ""
+            ).trim();
+
+        const sync_batch_id =
+            String(
+                req.query.sync_batch_id || ""
             ).trim();
 
 
@@ -34597,7 +34588,9 @@ app.get("/getStockGodownBalance", async (req, res) => {
 
                 company_code,
 
-                tally_owner
+                tally_owner,
+
+                sync_batch_id
 
             });
 
@@ -34650,8 +34643,11 @@ app.get("/getTrialBalance", async (req, res) => {
         const tally_owner =
             String(req.query.tally_owner || "").trim();
 
-            const asOnDate =
-    String(req.query.as_on_date || "").trim();
+        const asOnDate =
+            String(req.query.as_on_date || "").trim();
+
+        const sync_batch_id =
+            String(req.query.sync_batch_id || "").trim();
 
         if (!company_code) {
 
@@ -34672,10 +34668,11 @@ app.get("/getTrialBalance", async (req, res) => {
         }
 
         const result = await getTrialBalance({
-    company_code,
-    tally_owner,
-    asOnDate
-});
+          company_code,
+          tally_owner,
+          asOnDate,
+          sync_batch_id
+        });
 
         return res.json(result);
 
@@ -37087,6 +37084,57 @@ console.log(
     changedVoucherGuidRows.length
 );
 
+
+// 270826 start
+
+// TEMP DEBUG — NEW GUID CHECK
+const targetGuid =
+    "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b79";
+
+const targetItem =
+    discoveredVoucherItems.find(item =>
+        (
+            typeof item === "string"
+                ? item
+                : item?.guid
+        )?.trim() === targetGuid
+    );
+
+const targetDbAlterId =
+    existingVoucherMap.get(targetGuid);
+
+fs.appendFileSync(
+    "./logs/DEBUG-NEW-VOUCHER-CHECK.jsonl",
+    JSON.stringify({
+        targetGuid,
+
+        foundInSnapshotGuidList:
+            !!targetItem,
+
+        snapshotAlterId:
+            typeof targetItem === "string"
+                ? null
+                : targetItem?.alterId ??
+                  targetItem?.alterid,
+
+        foundInDB:
+            targetDbAlterId !== undefined,
+
+        dbAlterId:
+            targetDbAlterId ?? null,
+
+        includedInChangedVoucherGuidRows:
+            changedVoucherGuidRows.some(
+                item =>
+                    item.guid?.trim() === targetGuid
+            ),
+
+        timestamp:
+            new Date().toISOString()
+    }) + "\n"
+);
+
+// 270826 end
 // =========================
 // SAVE VOUCHERS
 // =========================
@@ -38066,6 +38114,106 @@ console.log(
     batchCompleted
 );
 
+// ==================================================
+// POST-SYNC RECONCILIATION
+// ==================================================
+
+const ledgerReconResponse =
+    await fetch(
+        `${req.protocol}://${req.get("host")}` +
+        `/getTrialBalance` +
+        `?company_code=${encodeURIComponent(company_code)}` +
+        `&tally_owner=${encodeURIComponent(tally_owner)}` +
+        `&sync_batch_id=${encodeURIComponent(sync_batch_id)}`
+    );
+
+const ledgerReconResult =
+    await ledgerReconResponse.json();
+
+
+const stockReconResponse =
+    await fetch(
+        `${req.protocol}://${req.get("host")}` +
+        `/getStockGodownBalance` +
+        `?company_code=${encodeURIComponent(company_code)}` +
+        `&tally_owner=${encodeURIComponent(tally_owner)}` +
+        `&sync_batch_id=${encodeURIComponent(sync_batch_id)}`
+    );
+
+const stockReconResult =
+    await stockReconResponse.json();
+
+
+console.log(
+    "POST-SYNC RECONCILIATION:",
+    {
+        ledger: ledgerReconResult,
+        stock: stockReconResult
+    }
+);
+
+// ==================================================
+// CLOSE BATCH AFTER RECONCILIATION
+// ==================================================
+
+const {
+    data: finalBatch,
+    error: finalBatchError
+} = await supabase
+    .from("sync_batches")
+    .select(
+        "ledger_reconciliation_completed, stock_reconciliation_completed"
+    )
+    .eq(
+        "batch_id",
+        sync_batch_id
+    )
+    .single();
+
+if (finalBatchError) {
+    throw finalBatchError;
+}
+
+const ledgerPassed =
+    finalBatch?.ledger_reconciliation_completed === true;
+
+const stockPassed =
+    finalBatch?.stock_reconciliation_completed === true;
+
+if (
+    ledgerPassed &&
+    stockPassed
+) {
+
+    await supabase
+        .from("sync_batches")
+        .update({
+            batch_status: "CLOSED",
+            batch_closed: true
+        })
+        .eq(
+            "batch_id",
+            sync_batch_id
+        );
+
+    console.log(
+        "BATCH CLOSED: RECONCILIATION PASS"
+    );
+
+} else {
+
+    console.log(
+        "BATCH NOT CLOSED: RECONCILIATION FAILED",
+        {
+            ledgerPassed,
+            stockPassed
+        }
+    );
+
+}
+
+
+
 batchCompletedSuccessfully = true;
 
 await BatchStatusManager.releaseHttpBatch({
@@ -38177,6 +38325,7 @@ db: {
   }
 
 });
+
 
 
 // =========================

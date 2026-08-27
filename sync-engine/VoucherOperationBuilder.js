@@ -321,6 +321,22 @@ console.dir(
     { depth: null }
 );
 
+fs.appendFileSync(
+    "./logs/STOCK-COUNT-TRACE.jsonl",
+    JSON.stringify({
+        stage: "VOUCHER_OPERATION_BUILDER",
+        targetGuid:
+            "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b79",
+
+        targetRow:
+            voucherRows?.find(
+                row =>
+                    row.guid ===
+                    "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b79"
+            ) || null
+    }) + "\n"
+);
+
         operations.push(
 
             OperationBuilder.build({

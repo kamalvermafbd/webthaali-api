@@ -128,69 +128,11 @@ if (master_type === "TAX_LEDGER") {
 }
 
 
-/*
 async function getTrialBalance({
     company_code,
     tally_owner,
-    asOnDate
+    sync_batch_id
 }) {
-
-    const socket = registry.get(company_code);
-
-    if (!socket) {
-        return {
-            success: false,
-            error: "Connector offline"
-        };
-    }
-
-    const { data: company } = await supabase
-        .from("company")
-        .select("ca_tally_company, client_tally_company")
-        .eq("company_code", company_code)
-        .single();
-
-    const tallyCompany =
-        tally_owner === "CA"
-            ? company.ca_tally_company
-            : company.client_tally_company;
-
-    // Get Books Beginning from existing connector/master flow
-    const masterResult = await sendToConnector(
-        socket,
-        "getMasters",
-        {
-            company: tallyCompany
-        }
-    );
-
-    const booksBeginningFrom =
-        masterResult?.summary?.booksBeginningFrom;
-
-    if (!booksBeginningFrom) {
-        return {
-            success: false,
-            error: "Books Beginning date not available"
-        };
-    }
-
-    return await sendToConnector(
-        socket,
-        "getTrialBalance",
-        {
-            company: tallyCompany,
-            booksBeginningFrom,
-            asOnDate
-        }
-    );
-}
-
-*/
-async function getTrialBalance({
-    company_code,
-    tally_owner
-}) {
-
     const socket = registry.get(company_code);
 
     if (!socket) {
@@ -225,31 +167,7 @@ async function getTrialBalance({
             ? company.ca_tally_company
             : company.client_tally_company;
 
-    // =========================
-    // GET TRIAL BALANCE
-    // DATE IS CONTROLLED
-    // INSIDE CONNECTOR
-    // =========================
-/*
-    const tbResult =
-        await sendToConnector(
-            socket,
-            "getTrialBalance",
-            {
-                company: tallyCompany
-            }
-        );
-
-    if (!tbResult?.success) {
-        return tbResult;
-    }
-
-    const tallyLedgers =
-        Array.isArray(tbResult.data)
-            ? tbResult.data
-            : [];
-*/
-
+  
 // =========================
 // WAIT FOR TRIAL BALANCE PROTOCOL DATA
 // =========================
@@ -481,11 +399,6 @@ const balanceDifference =
     console.log("SKIPPED :", skipped);
     console.log("======================================");
 
-
-    // =========================
-// BULK UPDATE
-// =========================
-
 // =========================
 // BULK DB UPDATE
 // =========================
@@ -521,6 +434,32 @@ if (updates.length > 0) {
     console.log("SKIPPED       :", skipped);
     console.log("======================================");
 
+    const { data: differences, error: recoError } =
+    await supabase
+        .from("balance_difference_view")
+        .select("id")
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner);
+
+if (recoError) {
+    throw recoError;
+}
+
+const ledgerReconciliationPassed =
+    !differences || differences.length === 0;
+
+if (sync_batch_id) {
+    const { error } = await supabase
+        .from("sync_batches")
+        .update({
+            ledger_reconciliation_completed:
+                ledgerReconciliationPassed
+        })
+        .eq("batch_id", sync_batch_id);
+
+    if (error) throw error;
+}
+
     return {
         success: true,
         data: tallyLedgers,
@@ -539,9 +478,9 @@ if (updates.length > 0) {
 
 async function getStockGodownBalance({
     company_code,
-    tally_owner
+    tally_owner,
+    sync_batch_id
 }) {
-
     const socket =
         registry.get(company_code);
 
@@ -669,6 +608,8 @@ const saveResult =
 
         tally_owner,
 
+        sync_batch_id,
+
         stockGodownBalances:
             stock
 
@@ -678,6 +619,34 @@ console.log(
     "STOCK GODOWN DB SAVE:",
     saveResult
 );
+
+const { data: differences, error: recoError } =
+    await supabase
+        .from("stock_godown_reconciliation_view")
+        .select("id")
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner);
+
+if (recoError) {
+    throw recoError;
+}
+
+const stockReconciliationPassed =
+    !differences || differences.length === 0;
+
+if (sync_batch_id) {
+    const { error } = await supabase
+        .from("sync_batches")
+        .update({
+            stock_reconciliation_completed:
+                stockReconciliationPassed
+        })
+        .eq("batch_id", sync_batch_id);
+
+    if (error) {
+        throw error;
+    }
+}
 
 fs.writeFileSync(
     "./stock-godown-server-result.json",

@@ -229,6 +229,12 @@
   },
   {
     "stockItemName": "Elbow 3/4 CPVC",
+    "godownName": "Delhi Godown",
+    "closingQuantity": 25,
+    "unit": "PAC"
+  },
+  {
+    "stockItemName": "Elbow 3/4 CPVC",
     "godownName": "Main Location",
     "closingQuantity": -5934,
     "unit": "PAC"
@@ -374,7 +380,7 @@
   {
     "stockItemName": "N Trap",
     "godownName": "Main Location",
-    "closingQuantity": -852,
+    "closingQuantity": -902,
     "unit": "NOS"
   },
   {
@@ -386,7 +392,13 @@
   {
     "stockItemName": "Orissa Pan",
     "godownName": "Delhi Godown",
-    "closingQuantity": -3,
+    "closingQuantity": -5,
+    "unit": "NOS"
+  },
+  {
+    "stockItemName": "Orissa Pan",
+    "godownName": "Gurgaon Godown",
+    "closingQuantity": 2,
     "unit": "NOS"
   },
   {
@@ -548,7 +560,7 @@
   {
     "stockItemName": "Reducer 1 x 3/4 CPVC",
     "godownName": "Main Location",
-    "closingQuantity": -200,
+    "closingQuantity": -220,
     "unit": "PAC"
   },
   {
@@ -572,13 +584,13 @@
   {
     "stockItemName": "SANITARY 391723",
     "godownName": "Main Location",
-    "closingQuantity": -2855,
+    "closingQuantity": -2865,
     "unit": "NOS"
   },
   {
     "stockItemName": "SANITARY- 391729",
     "godownName": "Main Location",
-    "closingQuantity": -12,
+    "closingQuantity": -2,
     "unit": "MTR"
   },
   {
@@ -613,8 +625,8 @@
   },
   {
     "stockItemName": "Scrap",
-    "godownName": "Main Location",
-    "closingQuantity": -50,
+    "godownName": "Delhi Godown",
+    "closingQuantity": 10,
     "unit": "KGS."
   },
   {

@@ -1907,6 +1907,8 @@ for (const voucher of vouchers) {
         allVoucherRows.push(
             VoucherRowBuilder.build({
                 header,
+                stockInCount: voucher.stockInCount,
+                stockOutCount: voucher.stockOutCount,
                 company_code,
                 tally_owner,
                 sync_batch_id,
@@ -2067,6 +2069,9 @@ voucherRows.push(
     VoucherRowBuilder.build({
 
         header,
+
+        stockInCount: voucher.stockInCount,
+        stockOutCount: voucher.stockOutCount,
 
         company_code,
 

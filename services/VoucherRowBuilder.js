@@ -17,6 +17,9 @@ class VoucherRowBuilder {
 
         header,
 
+        stockInCount = null,
+        stockOutCount = null,
+
         company_code,
 
         tally_owner,
@@ -86,6 +89,12 @@ class VoucherRowBuilder {
 
             persisted_view:
                 header.persistedView || null,
+
+            stock_in_count:
+                stockInCount,
+
+            stock_out_count:
+                stockOutCount,
 
             is_invoice:
                 header.isInvoice === "Yes",
