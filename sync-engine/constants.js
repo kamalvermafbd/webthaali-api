@@ -566,6 +566,7 @@ const VOUCHER_CHILD_RECONCILIATION_VIEWS = [
     "stock_voucher_rows_reco",
 
     "voucher_bill_allocation_reconciliation_view",
+    "voucher_inventory_count_reco_view",
 
     "voucher_costcentre_reconciliation_view"
 
@@ -584,6 +585,9 @@ const VOUCHER_CHILD_RECONCILIATION_MAP = {
 
      stock_voucher_rows_reco:
         TABLES.STOCK_VOUCHERS,
+
+    voucher_inventory_count_reco_view:
+        TABLES.VOUCHER_INVENTORY,
 
     voucher_bill_allocation_reconciliation_view:
         TABLES.BILL_ALLOCATIONS,

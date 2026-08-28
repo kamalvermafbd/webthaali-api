@@ -118,6 +118,7 @@ async function checkChildVoucherReconciliation({
     let totalExtra = 0;
     let totalAmountMismatch = 0;
     let totalStockMismatch = 0;
+    let totalInventoryCountMismatch = 0;
 
 
     for (const viewName of views) {
@@ -165,6 +166,14 @@ async function checkChildVoucherReconciliation({
                 )
                 : [];
                 
+        const inventoryCountMismatchRows =
+            viewName === "voucher_inventory_count_reco_view"
+                ? rows.filter(
+                    row =>
+                        row.status === "MISMATCH"
+                )
+                : [];
+
 
 
         totalMissing +=
@@ -178,6 +187,9 @@ async function checkChildVoucherReconciliation({
 
         totalStockMismatch +=
              stockMismatchRows.length;
+
+        totalInventoryCountMismatch +=
+             inventoryCountMismatchRows.length;
     
 
     const childTable =
@@ -212,6 +224,7 @@ async function checkChildVoucherReconciliation({
             extraRows,
             amountMismatchRows,
             stockMismatchRows,
+            inventoryCountMismatchRows
         });
 
         // 27.08.26
@@ -235,8 +248,8 @@ async function checkChildVoucherReconciliation({
         totalMissing === 0 &&
         totalExtra === 0 &&
         totalAmountMismatch === 0 &&
-        totalStockMismatch === 0;
-
+        totalStockMismatch === 0 &&
+        totalInventoryCountMismatch === 0;
         // 27.08.26 GENERIC REPAIR PLAN
 // One combined plan from all configured reconciliation views.
 // Each entry retains source view + target table + action.
@@ -277,6 +290,19 @@ const genericRepairPlan = results.flatMap(item => [
     })),
 
     ...(item.stockMismatchRows || []).map(row => ({
+        guid: (
+            row.voucher_guid ||
+            row.guid
+        )?.trim(),
+        sourceView: item.view,
+        targetTable: item.table,
+        status: "MISMATCH",
+        action: "REPLACE"
+    }))
+
+    ,
+
+    ...(item.inventoryCountMismatchRows || []).map(row => ({
         guid: (
             row.voucher_guid ||
             row.guid
@@ -336,6 +362,8 @@ const amountMismatchByChildTable = {};
 
 const stockMismatchByChildTable = {};
 
+const inventoryCountMismatchByChildTable = {};
+
 // 27.08.26 OLD REPAIR PLAN BUILDER
 // Kept temporarily for rollback/reference.
 // Generic repair-plan flow will replace this block.
@@ -368,6 +396,10 @@ for (const item of results) {
             item.stockMismatchRows;
     }   
 
+    if (item.inventoryCountMismatchRows?.length > 0) {
+        inventoryCountMismatchByChildTable[item.table] =
+            item.inventoryCountMismatchRows;
+    }
     // 27.08.26 OLD MISSING REPAIR PLAN
 // Kept for rollback/reference.
 
@@ -474,6 +506,31 @@ for (const row of item.stockMismatchRows || []) {
 
 }
 
+
+for (const row of item.inventoryCountMismatchRows || []) {
+
+    repairPlan.push({
+        guid:
+            (
+                row.voucher_guid ||
+                row.guid
+            )?.trim(),
+
+        sourceView:
+            item.view,
+
+        status:
+            "MISMATCH",
+
+        targetTable:
+            item.table,
+
+        action:
+            "REPLACE"
+    });
+
+}
+
 }
 
     return {
@@ -490,6 +547,8 @@ for (const row of item.stockMismatchRows || []) {
 
             totalStockMismatch,
 
+            totalInventoryCountMismatch,
+
             views: results,
 
             repairPlan,
@@ -502,6 +561,8 @@ for (const row of item.stockMismatchRows || []) {
             amountMismatchByChildTable,
 
             stockMismatchByChildTable,
+
+            inventoryCountMismatchByChildTable,
 
             extraByChildTable
 

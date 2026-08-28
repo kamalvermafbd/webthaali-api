@@ -37683,11 +37683,28 @@ const stockMismatchVoucherGuids = [
     )
 ];
 
+const inventoryCountMismatchVoucherGuids = [
+    ...new Set(
+        Object.values(
+            childReconciliationResult.inventoryCountMismatchByChildTable || {}
+        )
+        .flat()
+        .map(row =>
+            (
+                row.voucher_guid ||
+                row.guid
+            )?.trim()
+        )
+        .filter(Boolean)
+    )
+];
+
 const childRepairVoucherGuids = [
     ...new Set([
         ...childMissingVoucherGuids,
         ...childMismatchVoucherGuids,
-        ...stockMismatchVoucherGuids
+        ...stockMismatchVoucherGuids,
+        ...inventoryCountMismatchVoucherGuids
     ])
 ];
 
@@ -37763,7 +37780,8 @@ console.log(
 if (
     childMissingVoucherGuids.length > 0 ||
     childMismatchVoucherGuids.length > 0 ||
-    stockMismatchVoucherGuids.length > 0
+    stockMismatchVoucherGuids.length > 0 ||
+    inventoryCountMismatchVoucherGuids.length > 0
 ) {
 
     const cachedMissingVouchers =
@@ -37777,7 +37795,8 @@ if (
         ...new Set([
             ...childMissingVoucherGuids,
             ...childMismatchVoucherGuids,
-            ...stockMismatchVoucherGuids
+            ...stockMismatchVoucherGuids,
+            ...inventoryCountMismatchVoucherGuids
         ])
     ].filter(
         guid =>
