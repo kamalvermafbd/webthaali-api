@@ -34947,6 +34947,15 @@ console.log(
 // =========================
 // SYNC BATCH ID
 // =========================
+/*
+const workerBatchId = req.query.worker_batch_id;
+
+if (workerBatchId) {
+
+    sync_batch_id = workerBatchId;
+    httpWorkerId = null;
+
+} else {
 
 const requestId = crypto.randomUUID();
 
@@ -34980,6 +34989,67 @@ if (httpBatchClaim.claimed !== true) {
 
 sync_batch_id = httpBatchClaim.batch_id;
 httpWorkerId = httpBatchClaim.worker_id;
+}
+*/
+const workerBatchId = req.query.worker_batch_id;
+
+if (workerBatchId) {
+
+    sync_batch_id = workerBatchId;
+    httpWorkerId = null;
+
+} else {
+
+   const { data: previousBatch, error: previousBatchError } =
+    await supabase
+        .from("sync_batches")
+        .select("batch_id")
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .limit(1)
+        .maybeSingle();
+
+if (previousBatchError) {
+    throw previousBatchError;
+}
+
+const workerType =
+    previousBatch
+        ? "NORMAL_SYNC"
+        : "INITIAL_SYNC";
+
+const { data: queuedBatch, error: queueError } =
+    await supabase
+        .from("sync_batches")
+        .insert({
+            batch_id: crypto.randomUUID(),
+            company_code,
+            tally_owner,
+            batch_status: "PENDING",
+            worker_status: "PENDING",
+            worker_type: workerType,
+            job_type: "TALLY_SYNC",
+            priority: 5
+        })
+        .select("batch_id")
+        .single();
+        
+    if (queueError) {
+
+        return res.status(500).json({
+            success: false,
+            error: queueError.message
+        });
+
+    }
+
+    return res.json({
+        success: true,
+        queued: true,
+        batch_id: queuedBatch.batch_id
+    });
+}
+
 
 const failHttpBatch = async (error) => {
     await BatchStatusManager.markFailed({
@@ -34987,10 +35057,14 @@ const failHttpBatch = async (error) => {
         error
     });
 
+    if (httpWorkerId) {
+
     await BatchStatusManager.releaseHttpBatch({
         batch_id: sync_batch_id,
         worker_id: httpWorkerId
     });
+
+}
 };
 
 const runningBatch =
@@ -38578,7 +38652,7 @@ if (
 }
 
 
-
+/* 280826
 batchCompletedSuccessfully = true;
 
 await BatchStatusManager.releaseHttpBatch({
@@ -38588,6 +38662,21 @@ await BatchStatusManager.releaseHttpBatch({
     worker_id: httpWorkerId
 
 });
+*/
+
+batchCompletedSuccessfully = true;
+
+if (httpWorkerId) {
+
+    await BatchStatusManager.releaseHttpBatch({
+
+        batch_id: sync_batch_id,
+
+        worker_id: httpWorkerId
+
+    });
+
+}
 
 const cleanupResult =
 await CleanupManager.cleanup({

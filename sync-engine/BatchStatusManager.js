@@ -606,6 +606,9 @@ async hasCompletedSync({
 
                     BATCH_STATUS.COMPLETED,
 
+                 worker_status:
+                    "COMPLETED",
+
                 processed_vouchers:
 
                     processed,
