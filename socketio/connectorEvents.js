@@ -12,6 +12,8 @@ function registerEvents(io) {
         console.log("Socket ID :", socket.id);
         console.log("================================");
 
+        registry.registerPending(socket);
+
         socket.protocolReceiver =
             new ServerProtocolReceiver(
                 socket

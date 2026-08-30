@@ -1,16 +1,18 @@
 const connectors = new Map();
+const pendingConnectors = new Set();
 
 /**
  * Register Connector
  */
 function register(companyCode, socket) {
 
+    pendingConnectors.delete(socket);
+
     connectors.set(companyCode, socket);
 
     console.log(`✅ Registered : ${companyCode}`);
 
 }
-
 /**
  * Get Connector
  */
@@ -29,12 +31,34 @@ function getAny() {
 
 }
 
+function registerPending(socket) {
+
+    pendingConnectors.add(socket);
+
+    console.log(
+        `🆕 Pending Connector : ${socket.id}`
+    );
+
+}
+
+function getPending() {
+
+    return pendingConnectors.values().next().value;
+
+}
+
 /**
  * Remove Connector
  */
 function remove(companyCode) {
 
+    const socket = connectors.get(companyCode);
+
     connectors.delete(companyCode);
+
+    if (socket) {
+        pendingConnectors.delete(socket);
+    }
 
     console.log(`❌ Removed : ${companyCode}`);
 
@@ -61,15 +85,12 @@ function list() {
 module.exports = {
 
     register,
-
     get,
-
     getAny,
-
+    registerPending,
+    getPending,
     remove,
-
     isOnline,
-
     list
 
 };

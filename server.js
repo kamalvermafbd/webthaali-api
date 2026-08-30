@@ -391,11 +391,17 @@ app.post("/pairConnector", async (req, res) => {
     const company_code =
       String(req.body.company_code || "").trim();
 
-    if (!company_code) {
+    const tally_company =
+      String(req.body.tally_company || "").trim();
+
+    const tally_company_guid =
+      String(req.body.tally_company_guid || "").trim();
+
+    if (!company_code || !tally_company_guid) {
 
       return res.json({
         success: false,
-        error: "company_code missing"
+        error: "company_code or tally_company_guid missing"
       });
 
     }
@@ -410,8 +416,8 @@ app.post("/pairConnector", async (req, res) => {
       registry.list()
     );
 
-    const socket =
-      registry.getAny();
+  const socket =
+  registry.getPending() || registry.getAny();
 
     console.log(
       "PAIR SOCKET FOUND :",
@@ -435,10 +441,11 @@ app.post("/pairConnector", async (req, res) => {
         socket,
 
         "pair",
-
-        {
-          company_code
-        }
+          {
+            company_code,
+            company_name: tally_company,
+            company_guid: tally_company_guid
+          }
 
       );
 
@@ -488,7 +495,8 @@ console.log("REGISTERED :", registry.list());
 
     }
 
-    const socket = registry.getAny();
+    const socket =
+  registry.getPending() || registry.getAny();
 
     console.log("SOCKET FOUND :", !!socket);
 
