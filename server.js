@@ -128,6 +128,8 @@ const {
     runChildVoucherReconciliation
 } = require("./sync-engine/ChildVoucherReconciliationService")
 
+
+
 /*
 const {
     saveSyncSnapshotChunk
@@ -138,6 +140,18 @@ const {
     saveSyncSnapshotChunk,
     removeMissingSnapshotGuids
 } = require("./services/sync/SyncSnapshotService");
+
+const {
+    addBatchToQueue
+} = require("./workers/addBatchToQueue");
+
+const {
+    resolveWorkerForBatch
+} = require("./workers/resolveWorkerForBatch");
+
+const {
+    startBatchQueueDispatcher
+} = require("./workers/queueExistingBatch");
 
 /*
 const {
@@ -370,7 +384,6 @@ app.get("/testTally", async (req, res) => {
 // =========================
 // PAIR CONNECTOR
 // =========================
-
 app.post("/pairConnector", async (req, res) => {
 
   try {
@@ -387,9 +400,25 @@ app.post("/pairConnector", async (req, res) => {
 
     }
 
-   const socket = registry.getAny();
+    console.log(
+      "PAIR REQUEST COMPANY CODE :",
+      company_code
+    );
 
-   console.log("PAIR SOCKET FOUND :", !!socket);
+    console.log(
+      "CONNECTED CONNECTORS :",
+      registry.list()
+    );
+
+    const socket =
+      registry.getAny();
+
+    console.log(
+      "PAIR SOCKET FOUND :",
+      !!socket,
+      "TARGET COMPANY CODE :",
+      company_code
+    );
 
     if (!socket) {
 
@@ -413,11 +442,12 @@ app.post("/pairConnector", async (req, res) => {
 
       );
 
-      console.log("PAIR RESULT :", result);
+    console.log(
+      "PAIR RESULT :",
+      result
+    );
 
     return res.json(result);
-
-    console.log("PAIR RESULT :", result);
 
   } catch (err) {
 
@@ -458,7 +488,7 @@ console.log("REGISTERED :", registry.list());
 
     }
 
-    const socket = registry.get(company_code);
+    const socket = registry.getAny();
 
     console.log("SOCKET FOUND :", !!socket);
 
@@ -27162,15 +27192,12 @@ app.post(
 
     try {
 
-      const {
-
-        company_code,
-
-        is_ca = true,
-
-        tally_company
-
-      } = req.body || {};
+     const {
+  company_code,
+  is_ca = true,
+  tally_company,
+  tally_company_guid
+} = req.body || {};
 
       if (!company_code) {
 
@@ -27198,23 +27225,39 @@ app.post(
 
       }
 
+      if (!tally_company_guid) {
+
+  return res.json({
+    success: false,
+    error:
+      "Tally company GUID required"
+  });
+
+}
+
       // =========================
       // BUILD UPDATE OBJECT
       // =========================
 
       const updateObj = {};
 
-      if (is_ca) {
+     if (is_ca) {
 
-        updateObj.ca_tally_company =
-          tally_company;
+  updateObj.ca_tally_company =
+    tally_company;
 
-      } else {
+  updateObj.ca_tally_company_guid =
+    tally_company_guid;
 
-        updateObj.client_tally_company =
-          tally_company;
+} else {
 
-      }
+  updateObj.client_tally_company =
+    tally_company;
+
+  updateObj.client_tally_company_guid =
+    tally_company_guid;
+
+}
 
       // =========================
       // UPDATE COMPANY
@@ -34820,6 +34863,11 @@ if (
 
         : companyData.client_tally_company;
 
+        const companyGuid =
+  tally_owner === "CA"
+    ? companyData.ca_tally_company_guid
+    : companyData.client_tally_company_guid;
+
     if (!company) {
 
       return res.json({
@@ -34828,6 +34876,15 @@ if (
 
         error: "Tally company not mapped"
 
+      });
+
+    }
+
+    if (!companyGuid) {
+
+      return res.json({
+        success: false,
+        error: "Tally company GUID not mapped"
       });
 
     }
@@ -34943,11 +35000,32 @@ console.log(
 
     }
 
+    if (
+  String(socket.companyGuid || "").trim().toLowerCase() !==
+  String(companyGuid).trim().toLowerCase()
+) {
+
+  console.error(
+    "❌ TALLY COMPANY GUID MISMATCH",
+    {
+      company_code,
+      tally_owner,
+      expectedGuid: companyGuid,
+      actualGuid: socket.companyGuid
+    }
+  );
+
+  return res.status(409).json({
+    success: false,
+    error: "Tally company identity mismatch"
+  });
+
+}
 
 // =========================
 // SYNC BATCH ID
 // =========================
-/*
+
 const workerBatchId = req.query.worker_batch_id;
 
 if (workerBatchId) {
@@ -34990,65 +35068,9 @@ if (httpBatchClaim.claimed !== true) {
 sync_batch_id = httpBatchClaim.batch_id;
 httpWorkerId = httpBatchClaim.worker_id;
 }
-*/
-const workerBatchId = req.query.worker_batch_id;
 
-if (workerBatchId) {
+//const workerBatchId = req.query.worker_batch_id;
 
-    sync_batch_id = workerBatchId;
-    httpWorkerId = null;
-
-} else {
-
-   const { data: previousBatch, error: previousBatchError } =
-    await supabase
-        .from("sync_batches")
-        .select("batch_id")
-        .eq("company_code", company_code)
-        .eq("tally_owner", tally_owner)
-        .limit(1)
-        .maybeSingle();
-
-if (previousBatchError) {
-    throw previousBatchError;
-}
-
-const workerType =
-    previousBatch
-        ? "NORMAL_SYNC"
-        : "INITIAL_SYNC";
-
-const { data: queuedBatch, error: queueError } =
-    await supabase
-        .from("sync_batches")
-        .insert({
-            batch_id: crypto.randomUUID(),
-            company_code,
-            tally_owner,
-            batch_status: "PENDING",
-            worker_status: "PENDING",
-            worker_type: workerType,
-            job_type: "TALLY_SYNC",
-            priority: 5
-        })
-        .select("batch_id")
-        .single();
-        
-    if (queueError) {
-
-        return res.status(500).json({
-            success: false,
-            error: queueError.message
-        });
-
-    }
-
-    return res.json({
-        success: true,
-        queued: true,
-        batch_id: queuedBatch.batch_id
-    });
-}
 
 
 const failHttpBatch = async (error) => {
@@ -38812,6 +38834,8 @@ app.post("/testSaveGroups", async (req, res) => {
 
 });
 
+startBatchQueueDispatcher();
+
 server.listen(
   process.env.PORT,
   () => {
@@ -38819,6 +38843,6 @@ server.listen(
     console.log(
       `Server running on port ${process.env.PORT}`
     );
-
+    
   }
 );

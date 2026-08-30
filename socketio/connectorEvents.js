@@ -23,9 +23,13 @@ function registerEvents(io) {
         socket.on("register", (data) => {
 
             console.log("Register Request :", data);
-            socket.companyCode = data.company_code;
+           socket.companyCode = data.company_code;
+            socket.companyGuid = data.company_guid;
 
-            registry.register(data.company_code, socket);
+            registry.register(
+                data.company_code,
+                socket
+            );
 
         });
 

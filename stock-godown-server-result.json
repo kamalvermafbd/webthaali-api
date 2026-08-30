@@ -1,1 +1,62 @@
-[]
+[
+  {
+    "stockItemName": "07134000-Pc",
+    "godownName": "Main Location",
+    "closingQuantity": -21073,
+    "unit": "Pc"
+  },
+  {
+    "stockItemName": "07134000-Pkt",
+    "godownName": "Main Location",
+    "closingQuantity": -32,
+    "unit": "Pkt"
+  },
+  {
+    "stockItemName": "07134000-Set",
+    "godownName": "Main Location",
+    "closingQuantity": -1,
+    "unit": "Set"
+  },
+  {
+    "stockItemName": "07134001-Pc",
+    "godownName": "Main Location",
+    "closingQuantity": -50,
+    "unit": "Pc"
+  },
+  {
+    "stockItemName": "39171010-Box",
+    "godownName": "Main Location",
+    "closingQuantity": -1,
+    "unit": "Box"
+  },
+  {
+    "stockItemName": "39171010-LTH",
+    "godownName": "Main Location",
+    "closingQuantity": -5,
+    "unit": "LTH"
+  },
+  {
+    "stockItemName": "39171010-Pc",
+    "godownName": "Main Location",
+    "closingQuantity": -6,
+    "unit": "Pc"
+  },
+  {
+    "stockItemName": "39171010-Pkt",
+    "godownName": "Main Location",
+    "closingQuantity": -15,
+    "unit": "Pkt"
+  },
+  {
+    "stockItemName": "39171012-Pkt",
+    "godownName": "Main Location",
+    "closingQuantity": -10,
+    "unit": "Pkt"
+  },
+  {
+    "stockItemName": "39172310-Pkt",
+    "godownName": "Main Location",
+    "closingQuantity": -1,
+    "unit": "Pkt"
+  }
+]
