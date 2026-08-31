@@ -18,14 +18,49 @@ async function getSyncMasterData({
   //  master_type
 }) {
 
-    const socket = registry.get(company_code);
+   const is_ca =
+    String(tally_owner).toUpperCase() === "CA";
 
-    if (!socket) {
-        return {
-            success: false,
-            error: "Connector offline"
-        };
-    }
+const connectorField =
+    is_ca
+        ? "ca_connector_id"
+        : "client_connector_id";
+
+const {
+    data: connectorCompany,
+    error: connectorError
+} = await supabase
+    .from("company")
+    .select(`company_code, ${connectorField}`)
+    .eq("company_code", company_code)
+    .single();
+
+if (connectorError) {
+    return {
+        success: false,
+        error: connectorError.message
+    };
+}
+
+const connector_id =
+    connectorCompany?.[connectorField];
+
+if (!connector_id) {
+    return {
+        success: false,
+        error: "Connector not paired"
+    };
+}
+
+const socket =
+    registry.get(connector_id);
+
+if (!socket) {
+    return {
+        success: false,
+        error: "Connector offline"
+    };
+}
 
 
 
@@ -133,14 +168,49 @@ async function getTrialBalance({
     tally_owner,
     sync_batch_id
 }) {
-    const socket = registry.get(company_code);
+   const is_ca =
+    String(tally_owner).toUpperCase() === "CA";
 
-    if (!socket) {
-        return {
-            success: false,
-            error: "Connector offline"
-        };
-    }
+const connectorField =
+    is_ca
+        ? "ca_connector_id"
+        : "client_connector_id";
+
+const {
+    data: connectorCompany,
+    error: connectorError
+} = await supabase
+    .from("company")
+    .select(`company_code, ${connectorField}`)
+    .eq("company_code", company_code)
+    .single();
+
+if (connectorError) {
+    return {
+        success: false,
+        error: connectorError.message
+    };
+}
+
+const connector_id =
+    connectorCompany?.[connectorField];
+
+if (!connector_id) {
+    return {
+        success: false,
+        error: "Connector not paired"
+    };
+}
+
+const socket =
+    registry.get(connector_id);
+
+if (!socket) {
+    return {
+        success: false,
+        error: "Connector offline"
+    };
+}
 
     // =========================
     // GET TALLY COMPANY
@@ -481,17 +551,49 @@ async function getStockGodownBalance({
     tally_owner,
     sync_batch_id
 }) {
-    const socket =
-        registry.get(company_code);
+   const is_ca =
+    String(tally_owner).toUpperCase() === "CA";
 
-    if (!socket) {
+const connectorField =
+    is_ca
+        ? "ca_connector_id"
+        : "client_connector_id";
 
-        return {
-            success: false,
-            error: "Connector offline"
-        };
+const {
+    data: connectorCompany,
+    error: connectorError
+} = await supabase
+    .from("company")
+    .select(`company_code, ${connectorField}`)
+    .eq("company_code", company_code)
+    .single();
 
-    }
+if (connectorError) {
+    return {
+        success: false,
+        error: connectorError.message
+    };
+}
+
+const connector_id =
+    connectorCompany?.[connectorField];
+
+if (!connector_id) {
+    return {
+        success: false,
+        error: "Connector not paired"
+    };
+}
+
+const socket =
+    registry.get(connector_id);
+
+if (!socket) {
+    return {
+        success: false,
+        error: "Connector offline"
+    };
+}
 
 
     // =========================

@@ -388,14 +388,49 @@ app.post("/pairConnector", async (req, res) => {
 
   try {
 
-    const company_code =
-      String(req.body.company_code || "").trim();
+   const company_code =
+    String(req.body.company_code || "").trim();
 
-    const tally_company =
-      String(req.body.tally_company || "").trim();
+  const tally_company =
+    String(req.body.tally_company || "").trim();
 
-    const tally_company_guid =
-      String(req.body.tally_company_guid || "").trim();
+  const tally_company_guid =
+    String(req.body.tally_company_guid || "").trim();
+
+  const is_ca =
+    Boolean(req.body.is_ca);
+
+  const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
+
+const {
+  data: companyData,
+  error: companyError
+} = await supabase
+
+  .from("company")
+
+  .select(
+    `company_code, ${connectorField}`
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .single();
+
+if (companyError) {
+
+  return res.json({
+    success: false,
+    error: companyError.message
+  });
+
+}
 
     if (!company_code || !tally_company_guid) {
 
@@ -416,8 +451,10 @@ app.post("/pairConnector", async (req, res) => {
       registry.list()
     );
 
-  const socket =
+const socket =
   registry.getPending() || registry.getAny();
+
+  
 
     console.log(
       "PAIR SOCKET FOUND :",
@@ -435,19 +472,72 @@ app.post("/pairConnector", async (req, res) => {
 
     }
 
-    const result =
-      await sendToConnector(
+    
+let connector_id =
+  companyData?.[connectorField];
 
-        socket,
+console.log(
+  "EXISTING CONNECTOR ID :",
+  connector_id
+);
 
-        "pair",
-          {
-            company_code,
-            company_name: tally_company,
-            company_guid: tally_company_guid
-          }
+if (!connector_id) {
 
-      );
+  connector_id =
+    `CON-${crypto.randomUUID()}`;
+
+  const {
+    error: connectorSaveError
+  } = await supabase
+
+    .from("company")
+
+    .update({
+      [connectorField]:
+        connector_id
+    })
+
+    .eq(
+      "company_code",
+      company_code
+    );
+
+  if (connectorSaveError) {
+
+    return res.json({
+      success: false,
+      error:
+        connectorSaveError.message
+    });
+
+  }
+
+  console.log(
+    "🆕 NEW CONNECTOR ID CREATED :",
+    connector_id
+  );
+
+} else {
+
+  console.log(
+    "♻️ EXISTING CONNECTOR ID USED :",
+    connector_id
+  );
+
+}
+    
+
+   const result =
+  await sendToConnector(
+    socket,
+    "pair",
+    {
+      company_code,
+      company_name: tally_company,
+      company_guid: tally_company_guid,
+      connector_id
+    }
+  );
 
     console.log(
       "PAIR RESULT :",
@@ -473,6 +563,81 @@ app.post("/pairConnector", async (req, res) => {
 
 });
 
+
+app.post("/getConnectorId", async (req, res) => {
+
+  try {
+
+    const {
+      company_code,
+      is_ca = false
+    } = req.body || {};
+
+    if (!company_code) {
+
+      return res.json({
+        success: false,
+        error: "company_code required"
+      });
+
+    }
+
+    const connectorField =
+      is_ca
+        ? "ca_connector_id"
+        : "client_connector_id";
+
+    const {
+      data,
+      error
+    } = await supabase
+
+      .from("company")
+
+      .select(
+        `company_code, ${connectorField}`
+      )
+
+      .eq(
+        "company_code",
+        company_code
+      )
+
+      .single();
+
+    if (error) {
+
+      return res.json({
+        success: false,
+        error: error.message
+      });
+
+    }
+
+    return res.json({
+
+      success: true,
+
+      connector_id:
+        data?.[connectorField] || null
+
+    });
+
+  } catch (err) {
+
+    return res.json({
+
+      success: false,
+
+      error: err.message
+
+    });
+
+  }
+
+});
+
+
 app.get("/getTallyCompanies", async (req, res) => {
 
   try {
@@ -480,11 +645,15 @@ app.get("/getTallyCompanies", async (req, res) => {
     const company_code =
       String(req.query.company_code || "").trim();
 
+      const is_ca =
+      String(req.query.is_ca).toLowerCase() === "true";
+
+
       console.log("================================");
-console.log("GET TALLY COMPANIES");
-console.log("QUERY :", req.query);
-console.log("COMPANY CODE :", company_code);
-console.log("REGISTERED :", registry.list());
+      console.log("GET TALLY COMPANIES");
+      console.log("QUERY :", req.query);
+      console.log("COMPANY CODE :", company_code);
+      console.log("REGISTERED :", registry.list());
 
     if (!company_code) {
 
@@ -495,7 +664,7 @@ console.log("REGISTERED :", registry.list());
 
     }
 
-    const socket =
+  const socket =
   registry.getPending() || registry.getAny();
 
     console.log("SOCKET FOUND :", !!socket);
@@ -27764,10 +27933,65 @@ console.log("REQ BODY :", req.body);
 console.log("COMPANY CODE :", company_code);
 console.log("REGISTERED :", registry.list());
 
-const socket =
-  registry.get(company_code);
+const is_ca =
+  Boolean(req.body.is_ca);
 
-console.log("SOCKET FOUND :", !!socket);
+const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
+
+const {
+  data: companyData,
+  error: companyError
+} = await supabase
+
+  .from("company")
+
+  .select(
+    `company_code, ${connectorField}`
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .single();
+
+if (companyError) {
+
+  return res.json({
+    success: false,
+    error: companyError.message
+  });
+
+}
+
+const connector_id =
+  companyData?.[connectorField];
+
+console.log(
+  "CONNECTOR ID FROM DB :",
+  connector_id
+);
+
+if (!connector_id) {
+
+  return res.json({
+    success: false,
+    error: "Connector not paired"
+  });
+
+}
+
+const socket =
+  registry.get(connector_id);
+
+console.log(
+  "SOCKET FOUND :",
+  !!socket
+);
 
 if (socket) {
 
@@ -28041,8 +28265,60 @@ if (
 // GET CONNECTOR SOCKET
 // =========================
 
+const is_ca =
+  String(tally_owner).toUpperCase() === "CA";
+
+const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
+
+const {
+  data: connectorCompany,
+  error: connectorError
+} = await supabase
+
+  .from("company")
+
+  .select(
+    `company_code, ${connectorField}`
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .single();
+
+if (connectorError) {
+
+  return res.json({
+    success: false,
+    error: connectorError.message
+  });
+
+}
+
+const connector_id =
+  connectorCompany?.[connectorField];
+
+console.log(
+  "SALES EXPORT CONNECTOR ID :",
+  connector_id
+);
+
+if (!connector_id) {
+
+  return res.json({
+    success: false,
+    error: "Connector not paired"
+  });
+
+}
+
 const socket =
-  registry.get(company_code);
+  registry.get(connector_id);
 
 console.log(
   "SALES EXPORT SOCKET FOUND :",
@@ -31938,25 +32214,74 @@ app.post(
       const company_code =
          String(req.body.company_code || "").trim();
 
-          const socket =
-            registry.get(company_code);
+      const is_ca =
+  Boolean(req.body.is_ca);
 
-          console.log(
-            "SOCKET FOUND :",
-            !!socket
-          );
+const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
 
-          if (!socket) {
+const {
+  data: companyData,
+  error: companyError
+} = await supabase
 
-            return res.json({
+  .from("company")
 
-              success: false,
+  .select(
+    `company_code, ${connectorField}`
+  )
 
-              error: "Connector offline"
+  .eq(
+    "company_code",
+    company_code
+  )
 
-            });
+  .single();
 
-          }
+if (companyError) {
+
+  return res.json({
+    success: false,
+    error: companyError.message
+  });
+
+}
+
+const connector_id =
+  companyData?.[connectorField];
+
+console.log(
+  "STOCK CONNECTOR ID :",
+  connector_id
+);
+
+if (!connector_id) {
+
+  return res.json({
+    success: false,
+    error: "Connector not paired"
+  });
+
+}
+
+const socket =
+  registry.get(connector_id);
+
+console.log(
+  "SOCKET FOUND :",
+  !!socket
+);
+
+if (!socket) {
+
+  return res.json({
+    success: false,
+    error: "Connector offline"
+  });
+
+}
 
 const results = [];
 
@@ -32163,25 +32488,74 @@ app.post(
     const company_code =
   String(req.body.company_code || "").trim();
 
-    const socket =
-      registry.get(company_code);
+   const is_ca =
+  Boolean(req.body.is_ca);
 
-    console.log(
-      "SOCKET FOUND :",
-      !!socket
-    );
+const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
 
-    if (!socket) {
+const {
+  data: companyData,
+  error: companyError
+} = await supabase
 
-      return res.json({
+  .from("company")
 
-        success: false,
+  .select(
+    `company_code, ${connectorField}`
+  )
 
-        error: "Connector offline"
+  .eq(
+    "company_code",
+    company_code
+  )
 
-      });
+  .single();
 
-    }
+if (companyError) {
+
+  return res.json({
+    success: false,
+    error: companyError.message
+  });
+
+}
+
+const connector_id =
+  companyData?.[connectorField];
+
+console.log(
+  "SALES LEDGER CONNECTOR ID :",
+  connector_id
+);
+
+if (!connector_id) {
+
+  return res.json({
+    success: false,
+    error: "Connector not paired"
+  });
+
+}
+
+const socket =
+  registry.get(connector_id);
+
+console.log(
+  "SOCKET FOUND :",
+  !!socket
+);
+
+if (!socket) {
+
+  return res.json({
+    success: false,
+    error: "Connector offline"
+  });
+
+}
 
       if (
         !company ||
@@ -32320,25 +32694,74 @@ app.post(
       const company_code =
         String(req.body.company_code || "").trim();
 
-      const socket =
-        registry.get(company_code);
+     const is_ca =
+  Boolean(req.body.is_ca);
 
-      console.log(
-        "SOCKET FOUND :",
-        !!socket
-      );
+const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
 
-      if (!socket) {
+const {
+  data: companyData,
+  error: companyError
+} = await supabase
 
-        return res.json({
+  .from("company")
 
-          success: false,
+  .select(
+    `company_code, ${connectorField}`
+  )
 
-          error: "Connector offline"
+  .eq(
+    "company_code",
+    company_code
+  )
 
-        });
+  .single();
 
-      }
+if (companyError) {
+
+  return res.json({
+    success: false,
+    error: companyError.message
+  });
+
+}
+
+const connector_id =
+  companyData?.[connectorField];
+
+console.log(
+  "TAX LEDGER CONNECTOR ID :",
+  connector_id
+);
+
+if (!connector_id) {
+
+  return res.json({
+    success: false,
+    error: "Connector not paired"
+  });
+
+}
+
+const socket =
+  registry.get(connector_id);
+
+console.log(
+  "SOCKET FOUND :",
+  !!socket
+);
+
+if (!socket) {
+
+  return res.json({
+    success: false,
+    error: "Connector offline"
+  });
+
+}
 
       if (
         !company ||
@@ -32478,25 +32901,74 @@ app.post(
       const company_code =
         String(req.body.company_code || "").trim();
 
-      const socket =
-        registry.get(company_code);
+      const is_ca =
+  Boolean(req.body.is_ca);
 
-      console.log(
-        "SOCKET FOUND :",
-        !!socket
-      );
+const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
 
-      if (!socket) {
+const {
+  data: connectorCompany,
+  error: connectorError
+} = await supabase
 
-        return res.json({
+  .from("company")
 
-          success: false,
+  .select(
+    `company_code, ${connectorField}`
+  )
 
-          error: "Connector offline"
+  .eq(
+    "company_code",
+    company_code
+  )
 
-        });
+  .single();
 
-      }
+if (connectorError) {
+
+  return res.json({
+    success: false,
+    error: connectorError.message
+  });
+
+}
+
+const connector_id =
+  connectorCompany?.[connectorField];
+
+console.log(
+  "DEBTOR CONNECTOR ID :",
+  connector_id
+);
+
+if (!connector_id) {
+
+  return res.json({
+    success: false,
+    error: "Connector not paired"
+  });
+
+}
+
+const socket =
+  registry.get(connector_id);
+
+console.log(
+  "SOCKET FOUND :",
+  !!socket
+);
+
+if (!socket) {
+
+  return res.json({
+    success: false,
+    error: "Connector offline"
+  });
+
+}
 
       if (
         !company ||
@@ -34979,34 +35451,61 @@ console.log(
     // CONNECTOR
     // =========================
 
-    const socket =
-      registry.get(company_code);
+   // =========================
+// CONNECTOR
+// =========================
 
-    console.log(
-      "SOCKET FOUND :",
-      !!socket
-    );
+const is_ca =
+  tally_owner === "CA";
 
-    if (socket) {
+const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
 
-      console.log(
-        "SOCKET ID :",
-        socket.id
-      );
+const connector_id =
+  companyData?.[connectorField];
 
-    }
+console.log(
+  "GET MASTERS CONNECTOR ID :",
+  connector_id
+);
 
-    if (!socket) {
+if (!connector_id) {
 
-      return res.json({
+  return res.json({
+    success: false,
+    error: "Connector not paired"
+  });
 
-        success: false,
+}
 
-        error: "Connector offline"
+const socket =
+  registry.get(connector_id);
 
-      });
+console.log(
+  "SOCKET FOUND :",
+  !!socket
+);
 
-    }
+if (socket) {
+
+  console.log(
+    "SOCKET ID :",
+    socket.id
+  );
+
+}
+
+if (!socket) {
+
+  return res.json({
+    success: false,
+    error: "Connector offline"
+  });
+
+}
+
 
     if (
   String(socket.companyGuid || "").trim().toLowerCase() !==

@@ -24,12 +24,22 @@ function registerEvents(io) {
         // Connector Register
         socket.on("register", (data) => {
 
-            console.log("Register Request :", data);
-           socket.companyCode = data.company_code;
-            socket.companyGuid = data.company_guid;
+            console.log(
+                "Register Request :",
+                data
+            );
+
+            socket.companyCode =
+                data.company_code;
+
+            socket.companyGuid =
+                data.company_guid;
+
+            socket.connectorId =
+                data.connector_id;
 
             registry.register(
-                data.company_code,
+                data.connector_id,
                 socket
             );
 
@@ -50,7 +60,8 @@ function registerEvents(io) {
 
         socket.on("getMastersProgress", (data) => {
 
-            socket.lastHeartbeat = Date.now();
+            socket.lastHeartbeat =
+                Date.now();
 
             console.log(
                 "💓 Heartbeat :",
@@ -66,22 +77,22 @@ function registerEvents(io) {
             console.log("Socket ID :", socket.id);
             console.log("Reason :", reason);
 
-            if (socket.companyCode) {
+            if (socket.connectorId) {
 
-    registry.remove(
-        socket.companyCode,
-        socket
-    );
+                registry.remove(
+                    socket.connectorId,
+                    socket
+                );
 
-}
+            }
 
             console.log("================================");
 
         });
 
-            });
+    });
 
-        }
+}
 
 module.exports = {
     registerEvents

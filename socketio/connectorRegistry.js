@@ -4,21 +4,23 @@ const pendingConnectors = new Set();
 /**
  * Register Connector
  */
-function register(companyCode, socket) {
+function register(connectorId, socket) {
 
     pendingConnectors.delete(socket);
 
-    connectors.set(companyCode, socket);
+    connectors.set(connectorId, socket);
 
-    console.log(`✅ Registered : ${companyCode}`);
+    console.log(
+        `✅ Registered Connector : ${connectorId}`
+    );
 
 }
 /**
  * Get Connector
  */
-function get(companyCode) {
+function get(connectorId) {
 
-    return connectors.get(companyCode);
+    return connectors.get(connectorId);
 
 }
 
@@ -50,17 +52,17 @@ function getPending() {
 /**
  * Remove Connector
  */
-function remove(companyCode, socket) {
+function remove(connectorId, socket) {
 
     const currentSocket =
-        connectors.get(companyCode);
+        connectors.get(connectorId);
 
     if (currentSocket === socket) {
 
-        connectors.delete(companyCode);
+        connectors.delete(connectorId);
 
         console.log(
-            `❌ Removed : ${companyCode}`
+            `❌ Removed Connector : ${connectorId}`
         );
 
     }
@@ -72,9 +74,9 @@ function remove(companyCode, socket) {
 /**
  * Check Connector
  */
-function isOnline(companyCode) {
+function isOnline(connectorId) {
 
-    return connectors.has(companyCode);
+    return connectors.has(connectorId);
 
 }
 
