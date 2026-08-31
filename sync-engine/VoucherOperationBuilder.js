@@ -705,6 +705,24 @@ function buildVoucherOperations(args) {
             })
             : [];
 
+    const isChildInsertRepair =
+        args.executionMode === "CHILD_RECONCILIATION" &&
+        args.repairAction === "INSERT";
+
+    const repairDeleteOperations =
+    !isChildInsertRepair &&
+    args.repairVoucherGuids?.length > 0 &&
+    args.childRepairTables?.length > 0
+        ? buildDeleteOperations({
+            ...args,
+            voucherGuids:
+                args.repairVoucherGuids,
+            childRepairTables:
+                args.childRepairTables
+        })
+        : [];
+
+/*
     const repairDeleteOperations =
         args.repairVoucherGuids?.length > 0 &&
         args.childRepairTables?.length > 0
@@ -716,7 +734,7 @@ function buildVoucherOperations(args) {
                     args.childRepairTables
             })
             : [];
-/*
+
     const orphanDeleteOperations =
         args.orphanGuids
             ? buildOrphanDeleteOperations({
@@ -1151,7 +1169,7 @@ for (
     });
 }
 
-
+/*
 // Parent voucher → SOFT DELETE
 if (parentVoucherGuids.size > 0) {
 
@@ -1221,7 +1239,7 @@ if (parentVoucherGuids.size > 0) {
 
     );
 }
-
+*/
 return operations;
 }
 

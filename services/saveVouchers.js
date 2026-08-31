@@ -1152,6 +1152,8 @@ async function saveVoucherExecutionData({
 
     repairVoucherGuids = [],
 
+    repairAction = null,
+
     childRepairTables,
 
     rowsToSave,
@@ -1196,9 +1198,8 @@ async function saveVoucherExecutionData({
         orphanGuids,
 
         repairVoucherGuids,
-
+        repairAction,
         childRepairTables,
-
         rowsToSave,
 
         allVoucherRows,
@@ -1688,7 +1689,8 @@ async function saveVouchers({
     // Child tables that actually need repair
     childRepairTables = [],
     orphanGuids = {},
-    repairVoucherGuids = []
+    repairVoucherGuids = [],
+    repairAction = null
 }) {
 
     console.log("=== SAVE VOUCHERS RECEIVED ===", {
@@ -2469,6 +2471,9 @@ const executionResult =
 
         repairVoucherGuids:
             repairVoucherGuids || [],
+
+        repairAction:
+            repairAction || null,
 
         rowsToSave,
 

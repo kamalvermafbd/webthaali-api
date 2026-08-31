@@ -56,6 +56,7 @@ class VoucherExecutionService {
         orphanGuids = {},
 
         repairVoucherGuids = [],
+        repairAction = null,
         childRepairTables = [],
 
 
@@ -79,7 +80,9 @@ class VoucherExecutionService {
                 orphanGuids,
 
                 repairVoucherGuids,
+                repairAction,
 
+                executionMode,
                 childRepairTables,
 
                 voucherRows: rowsToSave,
