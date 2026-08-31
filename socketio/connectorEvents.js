@@ -67,8 +67,13 @@ function registerEvents(io) {
             console.log("Reason :", reason);
 
             if (socket.companyCode) {
-                registry.remove(socket.companyCode);
-            }
+
+    registry.remove(
+        socket.companyCode,
+        socket
+    );
+
+}
 
             console.log("================================");
 

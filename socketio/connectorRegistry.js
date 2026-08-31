@@ -50,17 +50,22 @@ function getPending() {
 /**
  * Remove Connector
  */
-function remove(companyCode) {
+function remove(companyCode, socket) {
 
-    const socket = connectors.get(companyCode);
+    const currentSocket =
+        connectors.get(companyCode);
 
-    connectors.delete(companyCode);
+    if (currentSocket === socket) {
 
-    if (socket) {
-        pendingConnectors.delete(socket);
+        connectors.delete(companyCode);
+
+        console.log(
+            `❌ Removed : ${companyCode}`
+        );
+
     }
 
-    console.log(`❌ Removed : ${companyCode}`);
+    pendingConnectors.delete(socket);
 
 }
 
