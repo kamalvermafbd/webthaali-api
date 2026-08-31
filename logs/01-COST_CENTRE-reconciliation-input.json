@@ -1,0 +1,16 @@
+{
+  "table": "tally_sync_cost_centres",
+  "company_code": "C0035",
+  "tally_owner": "USER",
+  "module": "MASTER",
+  "entity_type": "COST_CENTRE",
+  "sync_batch_id": "6cc8ea5d-4705-475d-bb96-2e5996c43624",
+  "snapshotCount": 1,
+  "dbCount": 1,
+  "snapshotGuids": [
+    "b06ee43a-c023-4bfc-b8d9-3fd85283e679-000007b8"
+  ],
+  "dbGuids": [
+    "b06ee43a-c023-4bfc-b8d9-3fd85283e679-000007b8"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "stage": "ROWS_TO_SAVE",
+  "sync_batch_id": "d8a284c7-0157-436f-8ed9-942cc9c7419e",
+  "targetGuid": "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b73",
+  "targetVoucher": null,
+  "targetVoucherRow": null,
+  "rowsToSaveCount": 0,
+  "changedVoucherRows": 0,
+  "newVoucherRows": 0
+}

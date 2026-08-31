@@ -1,0 +1,8 @@
+{
+  "stage": "POST_EXECUTION_START",
+  "batch_id": "6cc8ea5d-4705-475d-bb96-2e5996c43624",
+  "module": "MASTER",
+  "entity": "LEDGER",
+  "table": "tally_sync_ledgers",
+  "failedCount": 0
+}

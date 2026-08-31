@@ -1,0 +1,8 @@
+{
+  "stage": "POST_EXECUTION_START",
+  "batch_id": "c4c1b10e-3283-4f87-8f2e-fe09416b7da2",
+  "module": "MASTER",
+  "entity": "STOCK_GROUP",
+  "table": "tally_sync_stock_groups",
+  "failedCount": 0
+}

@@ -1,0 +1,8 @@
+{
+  "stage": "AFTER_RETRY",
+  "batch_id": "e0561f5b-49b0-497f-8637-5a6fc36d46e1",
+  "entity": "GODOWN",
+  "failedCount": 0,
+  "retrySuccess": true,
+  "retried": 0
+}

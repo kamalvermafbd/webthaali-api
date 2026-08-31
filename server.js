@@ -38189,9 +38189,8 @@ const MAX_CHILD_REPAIR_ROUNDS = 10;
 
 let childRepairRound = 0;
 
-while (
-    !childReconciliationResult.completed &&
-    childRepairRound < MAX_CHILD_REPAIR_ROUNDS
+if (
+    !childReconciliationResult.completed
 ) {
 
     childRepairRound++;
@@ -38243,6 +38242,8 @@ console.log(
     "GENERIC CHILD REPAIR TABLES:",
     Object.keys(repairByTable)
 );
+
+
     // =========================================
     // COLLECT UNIQUE MISSING VOUCHER GUIDS
     // =========================================
@@ -38391,6 +38392,93 @@ console.log(
     )
 );
 
+for (
+    const [childTable, repairs]
+    of Object.entries(repairByTable)
+) {
+
+    if (!repairs?.length) {
+        continue;
+    }
+
+    const repairVoucherGuids = [
+        ...new Set(
+            repairs
+                .map(repair => repair.guid)
+                .filter(Boolean)
+        )
+    ];
+
+    const extraGuids =
+    repairs
+        .filter(repair => repair.action === "DELETE")
+        .map(repair => repair.guid)
+        .filter(Boolean);
+
+    const fetchedVouchers =
+        repairVoucherGuids
+            .map(guid =>
+                cachedVoucherMap.get(guid)
+            )
+            .filter(Boolean);
+
+    console.log(
+        "GENERIC CHILD REPAIR:",
+        childTable,
+        "| GUIDS:",
+        repairVoucherGuids.length,
+        "| VOUCHERS:",
+        fetchedVouchers.length
+    );
+
+    if (
+    !fetchedVouchers.length &&
+    extraGuids.length === 0
+) {
+    continue;
+}
+
+    const childRepairResult =
+        await saveVouchers({
+
+            company_code,
+            tally_owner,
+            sync_batch_id,
+            syncMode,
+
+            vouchers:
+                fetchedVouchers,
+
+            orphanGuids:
+                extraGuids,
+
+            repairVoucherGuids:
+                repairVoucherGuids,
+
+            allVoucherGuids:
+                voucherGuidResult?.items || [],
+
+            executionMode:
+                "CHILD_RECONCILIATION",
+
+            childRepairTables: [
+                childTable
+            ]
+
+        });
+
+    console.log(
+        "GENERIC CHILD REPAIR RESULT:",
+        {
+            childTable,
+            status:
+                childRepairResult?.status,
+            success:
+                childRepairResult?.success
+        }
+    );
+}
+
 if (
     childMissingVoucherGuids.length > 0 ||
     childMismatchVoucherGuids.length > 0 ||
@@ -38516,96 +38604,7 @@ if (uncachedMissingVoucherGuids.length > 0) {
 }
 
 
-// =========================================
-// 27.08.26 GENERIC CHILD REPAIR EXECUTION
-// =========================================
 
-for (
-    const [childTable, repairs]
-    of Object.entries(repairByTable)
-) {
-
-    if (!repairs?.length) {
-        continue;
-    }
-
-
-    const repairVoucherGuids = [
-        ...new Set(
-            repairs
-                .map(repair => repair.guid)
-                .filter(Boolean)
-        )
-    ];
-
-
-    const fetchedVouchers =
-        repairVoucherGuids
-            .map(guid =>
-                cachedVoucherMap.get(guid)
-            )
-            .filter(Boolean);
-
-
-    console.log(
-        "GENERIC CHILD REPAIR:",
-        childTable,
-        "| GUIDS:",
-        repairVoucherGuids.length,
-        "| VOUCHERS:",
-        fetchedVouchers.length
-    );
-
-
-    if (!fetchedVouchers.length) {
-        continue;
-    }
-
-
-    const childRepairResult =
-        await saveVouchers({
-
-            company_code,
-
-            tally_owner,
-
-            sync_batch_id,
-
-            syncMode,
-
-            vouchers:
-                fetchedVouchers,
-
-            repairVoucherGuids:
-                repairVoucherGuids,
-
-            allVoucherGuids:
-                voucherGuidResult?.items || [],
-
-            executionMode:
-                "CHILD_RECONCILIATION",
-
-            childRepairTables: [
-                childTable
-            ]
-
-        });
-
-
-    console.log(
-        "GENERIC CHILD REPAIR RESULT:",
-        {
-            childTable,
-
-            status:
-                childRepairResult?.status,
-
-            success:
-                childRepairResult?.success
-        }
-    );
-
-}
         // =========================================
         // REPAIR EACH CHILD TABLE SEPARATELY
         // =========================================
@@ -38929,56 +38928,12 @@ for (
     );
 */
 }
-
-    // =========================================
-    // EXTRA CHILD REPAIR
-    // =========================================
-
-    if (
-        Object.keys(
-            extraByChildTable
-        ).length > 0
-    ) {
-
-        const childExtraResult =
-            await saveVouchers({
-
-                company_code,
-
-                tally_owner,
-
-                sync_batch_id,
-
-                syncMode,
-
-                vouchers: [],
-
-                allVoucherGuids:
-                    voucherGuidResult?.items || [],
-
-                executionMode:
-                    "CHILD_RECONCILIATION",
-
-                childRepairTables: [],
-
-                orphanGuids:
-                    extraByChildTable
-
-            });
-
-
-        console.log(
-            "CHILD EXTRA DELETE:",
-            childExtraResult
-        );
-
-    }
-
+    
 
     // =========================================
     // RE-CHECK AFTER THIS REPAIR ROUND
     // =========================================
-
+/*
     childReconciliationResult =
         await runChildVoucherReconciliation({
 
@@ -38997,14 +38952,14 @@ for (
 
         childReconciliationResult
     );
-
+*/
 }
 
 
 // =========================================
 // FINAL RESULT
 // =========================================
-
+/*
 if (
     !childReconciliationResult.completed
 ) {
@@ -39014,7 +38969,7 @@ if (
     );
 
 }
-
+*/
 
 console.log(
     "CHILD VOUCHER RECONCILIATION COMPLETED IN ROUND:",

@@ -1,0 +1,9 @@
+{
+  "stage": "VOUCHER_EXECUTION_TO_BATCH_POST_EXECUTION",
+  "sync_batch_id": "d6978dbf-1f6f-4162-aedd-bf0684d28ff0",
+  "module": "VOUCHER",
+  "entity": "VOUCHER",
+  "table": "tally_vouchers",
+  "snapshotRows": 0,
+  "snapshotGuids": []
+}

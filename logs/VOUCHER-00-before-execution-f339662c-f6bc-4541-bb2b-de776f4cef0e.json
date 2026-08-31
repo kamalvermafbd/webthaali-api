@@ -1,0 +1,9 @@
+{
+  "stage": "SAVE_VOUCHERS_TO_EXECUTION",
+  "sync_batch_id": "f339662c-f6bc-4541-bb2b-de776f4cef0e",
+  "vouchersCount": 0,
+  "allVoucherRowsCount": 0,
+  "allVoucherGuidsCount": 6602,
+  "firstVoucherGuid": null,
+  "lastVoucherGuid": null
+}

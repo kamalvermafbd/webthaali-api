@@ -1,0 +1,8 @@
+{
+  "stage": "AFTER_RETRY",
+  "batch_id": "d6978dbf-1f6f-4162-aedd-bf0684d28ff0",
+  "entity": "STOCK",
+  "failedCount": 0,
+  "retrySuccess": true,
+  "retried": 0
+}

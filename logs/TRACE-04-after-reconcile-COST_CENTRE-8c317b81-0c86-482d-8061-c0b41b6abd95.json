@@ -1,0 +1,12 @@
+{
+  "stage": "AFTER_RECONCILE",
+  "batch_id": "8c317b81-0c86-482d-8061-c0b41b6abd95",
+  "module": "MASTER",
+  "entity": "COST_CENTRE",
+  "table": "tally_sync_cost_centres",
+  "success": true,
+  "snapshotCount": 1,
+  "dbCount": 1,
+  "missing": 0,
+  "extra": 0
+}

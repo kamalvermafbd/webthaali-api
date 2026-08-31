@@ -1,0 +1,10 @@
+{
+  "stage": "FULL_VOUCHER_GUID_VALIDATION",
+  "sync_batch_id": "6cc8ea5d-4705-475d-bb96-2e5996c43624",
+  "allVoucherGuids": 6602,
+  "incomingVouchers": 0,
+  "incomingGuidSet": 0,
+  "missingVoucherGuids": 0,
+  "firstMissing": [],
+  "lastMissing": []
+}

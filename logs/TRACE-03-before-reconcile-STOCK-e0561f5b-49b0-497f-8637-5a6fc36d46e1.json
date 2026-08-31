@@ -1,0 +1,8 @@
+{
+  "stage": "PASSED_RETRY_BEFORE_RECONCILE",
+  "batch_id": "e0561f5b-49b0-497f-8637-5a6fc36d46e1",
+  "module": "MASTER",
+  "entity": "STOCK",
+  "table": "tally_sync_stocks",
+  "retrySuccess": true
+}

@@ -190,6 +190,8 @@ function buildDeleteOperations({
 
     const operations = [];
 
+
+
    const allChildTables =
     Object.entries(
         VOUCHER_RECONCILIATION.CHILDREN
@@ -714,7 +716,7 @@ function buildVoucherOperations(args) {
                     args.childRepairTables
             })
             : [];
-
+/*
     const orphanDeleteOperations =
         args.orphanGuids
             ? buildOrphanDeleteOperations({
@@ -734,13 +736,57 @@ function buildVoucherOperations(args) {
             })
             : [];
 
+const softDeleteOperations =
+        args.orphanGuids
+            ? buildSoftDeleteOperations({
+                company_code:
+                    args.company_code,
+
+                tally_owner:
+                    args.tally_owner,
+
+                sync_batch_id:
+                    args.sync_batch_id,
+
+                extraGuids:
+                    Object.values(
+                        args.orphanGuids
+                    )
+                    .flat()
+                    .map(guid => ({
+                        guid,
+                        targetTable: childTable
+                    }))
+            })
+            : [];
+*/
+
+const softDeleteOperations =
+    args.orphanGuids
+        ? buildSoftDeleteOperations({
+            company_code:
+                args.company_code,
+
+            tally_owner:
+                args.tally_owner,
+
+            sync_batch_id:
+                args.sync_batch_id,
+
+            orphanGuids:
+                args.orphanGuids
+        })
+        : [];
+
     return [
 
         ...deleteOperations,
 
         ...repairDeleteOperations,
 
-        ...orphanDeleteOperations,
+        //...orphanDeleteOperations,
+
+        ...softDeleteOperations,
 
         ...buildSaveOperations({
 
@@ -939,28 +985,17 @@ fs.appendFileSync(
 }
 
 function buildSoftDeleteOperations({
-    table,
     company_code,
     tally_owner,
     sync_batch_id,
-    extraGuids = []
+    orphanGuids = {}
 }) {
 
-    fs.appendFileSync(
-    "./logs/DEBUG-SOFT-DELETE.jsonl",
-    JSON.stringify({
-        source: "buildSoftDeleteOperations",
-        sync_batch_id,
-        extraGuidCount: extraGuids?.length || 0,
-        extraGuids: (extraGuids || [])
-            .map(item => item?.guid)
-            .filter(Boolean),
-        timestamp: new Date().toISOString()
-    }) + "\n"
-);
-
+  
+/*
     const operations = [];
 
+    
     for (const item of extraGuids) {
 
         const voucherGuid = item.guid;
@@ -1073,7 +1108,121 @@ function buildSoftDeleteOperations({
 
     }
 
-    return operations;
+    */
+const operations = [];
+
+const parentVoucherGuids = new Set();
+
+for (
+    const [targetTable, voucherGuids]
+    of Object.entries(orphanGuids || {})
+) {
+
+    if (
+        !Array.isArray(voucherGuids) ||
+        voucherGuids.length === 0
+    ) {
+        continue;
+    }
+
+    // Only the child table present in the delete plan
+    operations.push(
+        ...buildDeleteOperations({
+
+            company_code,
+
+            tally_owner,
+
+            sync_batch_id,
+
+            voucherGuids,
+
+            childRepairTables: [
+                targetTable
+            ]
+
+        })
+    );
+
+    voucherGuids.forEach(guid => {
+        if (guid) {
+            parentVoucherGuids.add(guid);
+        }
+    });
+}
+
+
+// Parent voucher → SOFT DELETE
+if (parentVoucherGuids.size > 0) {
+
+    const root =
+        VOUCHER_RECONCILIATION.ROOT;
+
+    operations.push(
+
+        OperationBuilder.build({
+
+            entity:
+                ENTITY_TYPE.VOUCHER,
+
+            table:
+                root.table,
+
+            operation:
+                OPERATION_TYPE.UPDATE,
+
+            values: {
+
+                [root.deletedColumn]:
+                    true,
+
+                sync_batch_id,
+
+                [root.updatedColumn]:
+                    new Date().toISOString()
+
+            },
+
+            filters: [
+
+                {
+                    type: "eq",
+                    column: "company_code",
+                    value: company_code
+                },
+
+                {
+                    type: "eq",
+                    column: "tally_owner",
+                    value: tally_owner
+                },
+
+                {
+                    type: "in",
+                    column: root.guidColumn,
+                    value: [
+                        ...parentVoucherGuids
+                    ]
+                },
+
+                {
+                    type: "eq",
+                    column: root.deletedColumn,
+                    value: false
+                }
+
+            ],
+
+            company_code,
+            tally_owner,
+            sync_batch_id
+
+        })
+
+    );
+}
+
+return operations;
 }
 
 

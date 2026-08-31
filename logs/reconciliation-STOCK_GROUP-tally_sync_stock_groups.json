@@ -1,0 +1,14 @@
+{
+  "stage": "RECONCILIATION_RESULT",
+  "table": "tally_sync_stock_groups",
+  "module": "MASTER",
+  "entity_type": "STOCK_GROUP",
+  "sync_batch_id": "6cc8ea5d-4705-475d-bb96-2e5996c43624",
+  "snapshotCount": 3,
+  "dbCount": 3,
+  "missingCount": 0,
+  "extraCount": 0,
+  "alterChangedCount": 0,
+  "missingGuids": [],
+  "extraGuids": []
+}

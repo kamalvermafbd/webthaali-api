@@ -1,0 +1,429 @@
+[
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005a",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000063",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000064",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000066",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005f",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005d",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005c",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000058",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000065",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000061",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000067",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000059",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000055",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005b",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000057",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000056",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000069",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000060",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005e",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000068",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000062",
+    "sourceView": "voucher_ledger_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_ledgers",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005a",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000067",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000059",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000063",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000064",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000066",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005f",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005b",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005d",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000055",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005c",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000057",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000058",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000065",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000060",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000061",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005e",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000068",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000062",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000056",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000069",
+    "sourceView": "voucher_invoice_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_voucher_inventory",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005a",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000067",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000059",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000063",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000064",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000066",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005f",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005b",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005d",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000055",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005c",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000057",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000058",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000065",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000060",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000061",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-0000005e",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000062",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  },
+  {
+    "guid": "b5e48d6d-ab2c-4866-89cc-e35c22d4accd-00000056",
+    "sourceView": "voucher_bill_allocation_reconciliation_view",
+    "status": "EXTRA",
+    "targetTable": "tally_bill_allocations",
+    "action": "DELETE"
+  }
+]

@@ -1,0 +1,19 @@
+{
+  "source": "BatchManager.postExecution",
+  "entity": "VOUCHER",
+  "orphanGuids": {
+    "tally_voucher_ledgers": [],
+    "tally_voucher_inventory": [],
+    "tally_stock_vouchers": [],
+    "tally_bill_allocations": [],
+    "tally_costcentre_allocations": []
+  },
+  "orphanCounts": {
+    "tally_voucher_ledgers": 0,
+    "tally_voucher_inventory": 0,
+    "tally_stock_vouchers": 0,
+    "tally_bill_allocations": 0,
+    "tally_costcentre_allocations": 0
+  },
+  "timestamp": "2026-08-31T11:24:41.603Z"
+}

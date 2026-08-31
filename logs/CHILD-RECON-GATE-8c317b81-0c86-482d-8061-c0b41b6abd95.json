@@ -1,0 +1,18 @@
+{
+  "stage": "INITIAL_CHILD_RECONCILIATION",
+  "sync_batch_id": "8c317b81-0c86-482d-8061-c0b41b6abd95",
+  "completed": false,
+  "totalMissing": 0,
+  "totalExtra": 61,
+  "totalAmountMismatch": 0,
+  "totalStockMismatch": 0,
+  "missingTables": [],
+  "amountMismatchTables": [],
+  "extraTables": [
+    "tally_voucher_ledgers",
+    "tally_voucher_inventory",
+    "tally_bill_allocations"
+  ],
+  "stockMismatchTables": [],
+  "stockMismatchRows": {}
+}

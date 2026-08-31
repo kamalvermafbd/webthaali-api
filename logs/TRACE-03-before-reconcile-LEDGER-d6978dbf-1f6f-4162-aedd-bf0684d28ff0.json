@@ -1,0 +1,8 @@
+{
+  "stage": "PASSED_RETRY_BEFORE_RECONCILE",
+  "batch_id": "d6978dbf-1f6f-4162-aedd-bf0684d28ff0",
+  "module": "MASTER",
+  "entity": "LEDGER",
+  "table": "tally_sync_ledgers",
+  "retrySuccess": true
+}

@@ -1,0 +1,12 @@
+{
+  "stage": "AFTER_RECONCILE",
+  "batch_id": "d8a284c7-0157-436f-8ed9-942cc9c7419e",
+  "module": "MASTER",
+  "entity": "GODOWN",
+  "table": "tally_sync_godowns",
+  "success": true,
+  "snapshotCount": 3,
+  "dbCount": 3,
+  "missing": 0,
+  "extra": 0
+}

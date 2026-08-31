@@ -1,0 +1,8 @@
+{
+  "stage": "POST_EXECUTION_START",
+  "batch_id": "e0561f5b-49b0-497f-8637-5a6fc36d46e1",
+  "module": "MASTER",
+  "entity": "COST_CENTRE",
+  "table": "tally_sync_cost_centres",
+  "failedCount": 0
+}

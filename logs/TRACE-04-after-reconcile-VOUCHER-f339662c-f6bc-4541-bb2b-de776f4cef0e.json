@@ -1,0 +1,12 @@
+{
+  "stage": "AFTER_RECONCILE",
+  "batch_id": "f339662c-f6bc-4541-bb2b-de776f4cef0e",
+  "module": "VOUCHER",
+  "entity": "VOUCHER",
+  "table": "tally_vouchers",
+  "success": true,
+  "snapshotCount": 6602,
+  "dbCount": 6602,
+  "missing": 0,
+  "extra": 0
+}

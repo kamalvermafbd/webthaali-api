@@ -1,0 +1,12 @@
+{
+  "stage": "AFTER_RECONCILE",
+  "batch_id": "6cc8ea5d-4705-475d-bb96-2e5996c43624",
+  "module": "MASTER",
+  "entity": "STOCK",
+  "table": "tally_sync_stocks",
+  "success": true,
+  "snapshotCount": 128,
+  "dbCount": 128,
+  "missing": 0,
+  "extra": 0
+}
