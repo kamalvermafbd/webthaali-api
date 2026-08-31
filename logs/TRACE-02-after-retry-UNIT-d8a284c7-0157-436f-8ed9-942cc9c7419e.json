@@ -1,8 +1,0 @@
-{
-  "stage": "AFTER_RETRY",
-  "batch_id": "d8a284c7-0157-436f-8ed9-942cc9c7419e",
-  "entity": "UNIT",
-  "failedCount": 0,
-  "retrySuccess": true,
-  "retried": 0
-}

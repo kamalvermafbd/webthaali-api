@@ -1,8 +1,0 @@
-{
-  "stage": "PASSED_RETRY_BEFORE_RECONCILE",
-  "batch_id": "c4c1b10e-3283-4f87-8f2e-fe09416b7da2",
-  "module": "MASTER",
-  "entity": "UNIT",
-  "table": "tally_sync_units",
-  "retrySuccess": true
-}

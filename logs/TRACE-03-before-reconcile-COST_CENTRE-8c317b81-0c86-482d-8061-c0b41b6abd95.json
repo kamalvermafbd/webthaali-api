@@ -1,8 +1,0 @@
-{
-  "stage": "PASSED_RETRY_BEFORE_RECONCILE",
-  "batch_id": "8c317b81-0c86-482d-8061-c0b41b6abd95",
-  "module": "MASTER",
-  "entity": "COST_CENTRE",
-  "table": "tally_sync_cost_centres",
-  "retrySuccess": true
-}
