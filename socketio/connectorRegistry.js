@@ -4,6 +4,8 @@ const pendingConnectors = new Set();
 /**
  * Register Connector
  */
+
+/*010926 commented
 function register(connectorId, socket) {
 
     pendingConnectors.delete(socket);
@@ -15,6 +17,8 @@ function register(connectorId, socket) {
     );
 
 }
+
+*/
 /**
  * Get Connector
  */
@@ -26,6 +30,34 @@ function get(connectorId) {
 
 }
 */
+
+function register(connectorId, socket) {
+
+    pendingConnectors.delete(socket);
+
+    // Remove any old connector ID belonging to this socket
+    for (const [oldConnectorId, oldSocket] of connectors.entries()) {
+
+        if (oldSocket === socket &&
+            oldConnectorId !== connectorId) {
+
+            connectors.delete(oldConnectorId);
+
+            console.log(
+                `♻️ Removed Old Connector Mapping : ${oldConnectorId}`
+            );
+
+        }
+
+    }
+
+    connectors.set(connectorId, socket);
+
+    console.log(
+        `✅ Registered Connector : ${connectorId}`
+    );
+
+}
 
 function get(connectorId) {
 
