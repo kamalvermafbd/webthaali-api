@@ -44,7 +44,24 @@ function registerEvents(io) {
             );
 
         });
+/*
+socket.on("register", (data) => {
 
+    console.log(
+        "Register Request :",
+        data
+    );
+
+    socket.connectorId =
+        data.connector_id;
+
+    registry.register(
+        data.connector_id,
+        socket
+    );
+
+});
+*/
         socket.on("testExport", () => {
 
             console.log("================================");
