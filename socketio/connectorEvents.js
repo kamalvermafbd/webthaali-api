@@ -37,6 +37,13 @@ function registerEvents(io) {
 
             socket.connectorId =
                 data.connector_id;
+                
+                console.log("REGISTER TRACE:", {
+    socket_id: socket.id,
+    connector_id: data.connector_id,
+    company_code: data.company_code,
+    computer_name: data.computer_name
+});
 
             registry.register(
                 data.connector_id,

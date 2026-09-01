@@ -535,7 +535,14 @@ if (!connector_id) {
   );
 
 }
-    
+    console.log("PAIR TRACE:", {
+  company_code,
+  connector_id,
+  socket_id: socket?.id,
+  socket_connector_id: socket?.connectorId,
+  socket_company_code: socket?.companyCode,
+  socket_computer: socket?.computerName
+});
 
    const result =
   await sendToConnector(
@@ -729,6 +736,15 @@ console.log(
 
 const socket =
   registry.get(connector_id);
+
+  console.log("ROUTING TRACE:", {
+  company_code,
+  connector_id,
+  socket_id: socket?.id,
+  socket_connector_id: socket?.connectorId,
+  socket_company_code: socket?.companyCode,
+  socket_computer: socket?.computerName
+});
 
 console.log(
   "SOCKET FOUND :",
