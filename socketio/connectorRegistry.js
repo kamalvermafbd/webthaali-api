@@ -82,6 +82,56 @@ function get(connectorId) {
     return socket;
 }
 
+function waitForConnector(connectorId, timeout = 10000) {
+
+    return new Promise((resolve, reject) => {
+
+        const existing =
+            connectors.get(connectorId);
+
+        if (existing) {
+            return resolve(existing);
+        }
+
+        const startedAt = Date.now();
+
+        const timer = setInterval(() => {
+
+            const socket =
+                connectors.get(connectorId);
+
+            if (socket) {
+
+                clearInterval(timer);
+
+                console.log(
+                    "WAIT CONNECTOR FOUND:",
+                    connectorId,
+                    socket.id
+                );
+
+                return resolve(socket);
+
+            }
+
+            if (Date.now() - startedAt >= timeout) {
+
+                clearInterval(timer);
+
+                reject(
+                    new Error(
+                        `Connector offline: ${connectorId}`
+                    )
+                );
+
+            }
+
+        }, 100);
+
+    });
+
+}
+
 /**
  * Get Any Connector
  */
@@ -151,6 +201,7 @@ module.exports = {
 
     register,
     get,
+    waitForConnector,
     getAny,
     registerPending,
     getPending,

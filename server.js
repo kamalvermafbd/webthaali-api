@@ -734,8 +734,11 @@ console.log(
   connector_id
 );
 
+//const socket =
+  //registry.get(connector_id);
+
 const socket =
-  registry.get(connector_id);
+  await registry.waitForConnector(connector_id);
 
   console.log("ROUTING TRACE:", {
   company_code,
@@ -766,7 +769,7 @@ if (!socket) {
   });
 
 }
-  //
+//
     const result = await sendToConnector(
       socket,
       "getTallyCompanies",
