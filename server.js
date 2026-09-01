@@ -391,7 +391,7 @@ app.get("/testTally", async (req, res) => {
 
 });
 
-
+/*new 
 // =========================
 // PAIR CONNECTOR
 // =========================
@@ -618,7 +618,7 @@ app.post("/pairConnector", async (req, res) => {
 
 });
 
-/*
+*/
 // =========================
 // PAIR CONNECTOR
 // =========================
@@ -801,7 +801,7 @@ if (!connector_id) {
 
 });
 
-*/
+
 
 app.post("/getConnectorId", async (req, res) => {
 
@@ -876,7 +876,7 @@ app.post("/getConnectorId", async (req, res) => {
 
 });
 
-/*
+
 app.get("/getTallyCompanies", async (req, res) => {
 
   try {
@@ -948,195 +948,7 @@ app.get("/getTallyCompanies", async (req, res) => {
   }
 
 });
-*/
 
-app.get("/getTallyCompanies", async (req, res) => {
-
-  try {
-
-    const company_code =
-      String(req.query.company_code || "").trim();
-
-    const is_ca =
-      String(req.query.is_ca).toLowerCase() === "true";
-
-
-    console.log("================================");
-    console.log("GET TALLY COMPANIES");
-    console.log("QUERY :", req.query);
-    console.log("COMPANY CODE :", company_code);
-    console.log("REGISTERED :", registry.list());
-
-
-    if (!company_code) {
-
-      return res.json({
-        success: false,
-        error: "company_code missing"
-      });
-
-    }
-
-
-    // =========================
-    // GET COMPANY CONNECTOR
-    // =========================
-
-    const {
-      data: companyData,
-      error: companyError
-    } = await supabase
-
-      .from("company")
-
-      .select(
-        "ca_connector_id, client_connector_id"
-      )
-
-      .eq(
-        "company_code",
-        company_code
-      )
-
-      .single();
-
-
-    if (companyError || !companyData) {
-
-      console.error(
-        "GET TALLY COMPANIES COMPANY ERROR:",
-        companyError
-      );
-
-      return res.json({
-
-        success: false,
-
-        error: "Company not found"
-
-      });
-
-    }
-
-
-    // =========================
-    // CONNECTOR FIELD
-    // =========================
-
-    const connectorField =
-      is_ca
-        ? "ca_connector_id"
-        : "client_connector_id";
-
-
-    const connector_id =
-      companyData[connectorField];
-
-
-    console.log(
-      "GET TALLY COMPANIES CONNECTOR FIELD:",
-      connectorField
-    );
-
-    console.log(
-      "GET TALLY COMPANIES CONNECTOR ID:",
-      connector_id
-    );
-
-
-    if (!connector_id) {
-
-      return res.json({
-
-        success: false,
-
-        error: "Connector not paired"
-
-      });
-
-    }
-
-
-    // =========================
-    // GET EXACT CONNECTOR
-    // =========================
-
-    const socket =
-      registry.get(connector_id);
-
-
-    console.log(
-      "SOCKET FOUND :",
-      !!socket
-    );
-
-
-    if (socket) {
-
-      console.log(
-        "SOCKET ID :",
-        socket.id
-      );
-
-    }
-
-
-    if (!socket) {
-
-      return res.json({
-
-        success: false,
-
-        error: "Connector offline"
-
-      });
-
-    }
-
-
-    // =========================
-    // GET TALLY COMPANIES
-    // =========================
-
-    const result =
-      await sendToConnector(
-
-        socket,
-
-        "getTallyCompanies",
-
-        {}
-
-      );
-
-
-    console.log(
-      "CONNECTOR RESULT:",
-      result
-    );
-
-
-    return res.json(result);
-
-
-  } catch (err) {
-
-    console.error(err);
-
-
-    return res.status(500).json({
-
-      success: false,
-
-      error:
-        err.response?.data ||
-        err.message
-
-    });
-
-  }
-
-});
 
 function formatDateByCountry(
   date,
