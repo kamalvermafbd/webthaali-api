@@ -53,6 +53,13 @@ function register(connectorId, socket) {
 
     connectors.set(connectorId, socket);
 
+    console.log("REGISTRY SET TRACE:", {
+    connector_id: connectorId,
+    socket_id: socket.id,
+    socket_connector_id: socket.connectorId,
+    socket_company_code: socket.companyCode
+});
+
     console.log(
         `✅ Registered Connector : ${connectorId}`
     );

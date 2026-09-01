@@ -85,6 +85,14 @@ function sendToConnector(socket, event, payload) {
 
     resetTimeout();
 
+    console.log("SOCKET EMIT TRACE:", {
+    event,
+    socket_id: socket?.id,
+    socket_connector_id: socket?.connectorId,
+    socket_company_code: socket?.companyCode,
+    payload
+});
+
     socket.emit(event, payload);
 
   });
