@@ -18,10 +18,29 @@ function register(connectorId, socket) {
 /**
  * Get Connector
  */
+
+/*
 function get(connectorId) {
 
     return connectors.get(connectorId);
 
+}
+*/
+
+function get(connectorId) {
+
+    const socket = connectors.get(connectorId);
+
+    console.log(
+        "REGISTRY GET:",
+        connectorId,
+        "SOCKET:",
+        socket?.id,
+        "SOCKET CONNECTOR:",
+        socket?.connectorId
+    );
+
+    return socket;
 }
 
 /**
