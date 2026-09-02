@@ -21,14 +21,15 @@ function registerEvents(io) {
 
         socket.protocolReceiver.start();
 
-        // Connector Register
-        socket.on("register", (data) => {
+// Connector Register
+socket.on("register", (data) => {
 
             console.log(
                 "Register Request :",
                 data
             );
-
+/*
+020926
             socket.companyCode =
                 data.company_code;
 
@@ -39,19 +40,55 @@ function registerEvents(io) {
                 data.connector_id;
                 
                 console.log("REGISTER TRACE:", {
-    socket_id: socket.id,
-    connector_id: data.connector_id,
-    company_code: data.company_code,
-    computer_name: data.computer_name
+                
+                */
+
+                socket.companyCode =
+                data.company_code;
+
+            socket.companyGuid =
+                data.company_guid;
+
+            socket.connectorId =
+                data.connector_id;
+
+            console.log("REGISTER TRACE:", {
+                socket_id: socket.id,
+                connector_id: data.connector_id,
+                company_code: data.company_code,
+                computer_name: data.computer_name
+            });
+
+
+const registered =
+    registry.register(
+        data.connector_id,
+        socket
+    );
+
+if (!registered) {
+
+    console.error(
+        "❌ CONNECTOR REGISTRATION REJECTED",
+        {
+            socket_id: socket.id,
+            connector_id: data.connector_id,
+            company_code: data.company_code
+        }
+    );
+
+    return;
+}
 });
 
+/*020926
             registry.register(
                 data.connector_id,
                 socket
             );
 
         });
-/*
+
 socket.on("register", (data) => {
 
     console.log(

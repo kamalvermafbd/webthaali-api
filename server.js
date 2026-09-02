@@ -461,28 +461,117 @@ if (companyError) {
       registry.list()
     );
 
-const socket =
-  registry.getPending() || registry.getAny();
+let socket = null;
 
-  
+let connector_id =
+  companyData?.[connectorField];
+
+console.log(
+  "EXISTING CONNECTOR ID :",
+  connector_id
+);
+
+// ==========================================
+// EXISTING CONNECTOR
+// ==========================================
+
+if (connector_id) {
+
+  socket =
+    registry.get(
+      connector_id,
+      company_code
+    );
+
+  console.log(
+    "EXISTING CONNECTOR SOCKET FOUND :",
+    !!socket
+  );
+
+  // Existing connector offline/not registered
+  // but a new pending connector is available
+  if (!socket) {
+
+    socket =
+      registry.getPending();
 
     console.log(
-      "PAIR SOCKET FOUND :",
-      !!socket,
-      "TARGET COMPANY CODE :",
-      company_code
+      "PENDING CONNECTOR FALLBACK FOUND :",
+      !!socket
     );
 
     if (!socket) {
 
       return res.json({
         success: false,
-        error: "Connector offline"
+        error: "Linked connector offline"
       });
 
     }
 
-    
+  }
+
+}
+// ==========================================
+// FIRST TIME PAIRING
+// ==========================================
+
+else {
+
+  socket =
+    registry.getPending();
+
+  console.log(
+    "PENDING CONNECTOR FOUND :",
+    !!socket
+  );
+
+  if (!socket) {
+
+    return res.json({
+      success: false,
+      error: "No pending connector available"
+    });
+
+  }
+
+  connector_id =
+    `CON-${crypto.randomUUID()}`;
+
+  const {
+    error: connectorSaveError
+  } = await supabase
+
+    .from("company")
+
+    .update({
+      [connectorField]:
+        connector_id
+    })
+
+    .eq(
+      "company_code",
+      company_code
+    );
+
+  if (connectorSaveError) {
+
+    return res.json({
+      success: false,
+      error:
+        connectorSaveError.message
+    });
+
+  }
+
+  console.log(
+    "🆕 NEW CONNECTOR ID CREATED :",
+    connector_id
+  );
+
+}
+
+    /* 020926
 let connector_id =
   companyData?.[connectorField];
 
@@ -535,6 +624,7 @@ if (!connector_id) {
   );
 
 }
+  */
     console.log("PAIR TRACE:", {
   company_code,
   connector_id,
@@ -736,10 +826,54 @@ console.log(
 
 //const socket =
   //registry.get(connector_id);
-
+/*020926
 const socket =
   await registry.waitForConnector(connector_id);
+*/
 
+let socket = null;
+
+// Existing paired connector online
+if (connector_id) {
+
+    socket =
+        registry.get(
+            connector_id,
+            company_code
+        );
+
+}
+
+// First-time / unregistered connector
+if (!socket) {
+
+    socket =
+        registry.getPending();
+
+}
+
+console.log(
+    "SOCKET FOUND :",
+    !!socket
+);
+
+if (socket) {
+
+    console.log(
+        "SOCKET ID :",
+        socket.id
+    );
+
+}
+
+if (!socket) {
+
+    return res.json({
+        success: false,
+        error: "Connector offline"
+    });
+
+}
   console.log("ROUTING TRACE:", {
   company_code,
   connector_id,

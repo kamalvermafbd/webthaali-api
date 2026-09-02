@@ -33,13 +33,37 @@ function get(connectorId) {
 
 function register(connectorId, socket) {
 
+    if (!connectorId) {
+        console.error("❌ REGISTER REJECTED: connector_id missing");
+        return false;
+    }
+
+    if (!socket) {
+        console.error("❌ REGISTER REJECTED: socket missing");
+        return false;
+    }
+
+    // Socket ki identity pehle set honi chahiye
+    if (socket.connectorId !== connectorId) {
+
+        console.error("❌ REGISTER REJECTED: connector identity mismatch", {
+            connector_id: connectorId,
+            socket_connector_id: socket.connectorId,
+            socket_id: socket.id
+        });
+
+        return false;
+    }
+
     pendingConnectors.delete(socket);
 
-    // Remove any old connector ID belonging to this socket
+    // Remove old mappings belonging to this socket
     for (const [oldConnectorId, oldSocket] of connectors.entries()) {
 
-        if (oldSocket === socket &&
-            oldConnectorId !== connectorId) {
+        if (
+            oldSocket === socket &&
+            oldConnectorId !== connectorId
+        ) {
 
             connectors.delete(oldConnectorId);
 
@@ -54,40 +78,129 @@ function register(connectorId, socket) {
     connectors.set(connectorId, socket);
 
     console.log("REGISTRY SET TRACE:", {
-    connector_id: connectorId,
-    socket_id: socket.id,
-    socket_connector_id: socket.connectorId,
-    socket_company_code: socket.companyCode
-});
+        connector_id: connectorId,
+        socket_id: socket.id,
+        socket_connector_id: socket.connectorId,
+        socket_company_code: socket.companyCode
+    });
 
     console.log(
         `✅ Registered Connector : ${connectorId}`
     );
 
+    return true;
 }
 
-function get(connectorId) {
+function get(connectorId, companyCode) {
 
     const socket = connectors.get(connectorId);
 
+    if (!socket) {
+        console.log(
+            "REGISTRY GET: CONNECTOR NOT FOUND",
+            connectorId
+        );
+        return null;
+    }
+
+    if (socket.connectorId !== connectorId) {
+
+        console.error(
+            "❌ REGISTRY GET REJECTED: CONNECTOR ID MISMATCH",
+            {
+                connector_id: connectorId,
+                socket_connector_id: socket.connectorId,
+                socket_id: socket.id
+            }
+        );
+
+        return null;
+    }
+
+    if (
+        companyCode &&
+        socket.companyCode !== companyCode
+    ) {
+
+        console.error(
+            "❌ REGISTRY GET REJECTED: COMPANY CODE MISMATCH",
+            {
+                requested_company_code: companyCode,
+                socket_company_code: socket.companyCode,
+                connector_id: connectorId,
+                socket_id: socket.id
+            }
+        );
+
+        return null;
+    }
+
     console.log(
-        "REGISTRY GET:",
-        connectorId,
-        "SOCKET:",
-        socket?.id,
-        "SOCKET CONNECTOR:",
-        socket?.connectorId
+        "REGISTRY GET VALID:",
+        {
+            connector_id: connectorId,
+            company_code: socket.companyCode,
+            socket_id: socket.id
+        }
     );
 
     return socket;
 }
 
-function waitForConnector(connectorId, timeout = 10000) {
+function waitForConnector(
+    connectorId,
+    companyCode,
+    timeout = 10000
+) {
 
     return new Promise((resolve, reject) => {
 
+        const findValidSocket = () => {
+
+            const socket =
+                connectors.get(connectorId);
+
+            if (!socket) {
+                return null;
+            }
+
+            if (socket.connectorId !== connectorId) {
+
+                console.error(
+                    "❌ WAIT CONNECTOR REJECTED: CONNECTOR ID MISMATCH",
+                    {
+                        requested_connector_id: connectorId,
+                        socket_connector_id: socket.connectorId,
+                        socket_id: socket.id
+                    }
+                );
+
+                return null;
+            }
+
+            if (
+                companyCode &&
+                socket.companyCode !== companyCode
+            ) {
+
+                console.error(
+                    "❌ WAIT CONNECTOR REJECTED: COMPANY CODE MISMATCH",
+                    {
+                        requested_company_code: companyCode,
+                        socket_company_code: socket.companyCode,
+                        connector_id: connectorId,
+                        socket_id: socket.id
+                    }
+                );
+
+                return null;
+            }
+
+            return socket;
+        };
+
         const existing =
-            connectors.get(connectorId);
+            findValidSocket();
 
         if (existing) {
             return resolve(existing);
@@ -98,7 +211,7 @@ function waitForConnector(connectorId, timeout = 10000) {
         const timer = setInterval(() => {
 
             const socket =
-                connectors.get(connectorId);
+                findValidSocket();
 
             if (socket) {
 
@@ -106,15 +219,20 @@ function waitForConnector(connectorId, timeout = 10000) {
 
                 console.log(
                     "WAIT CONNECTOR FOUND:",
-                    connectorId,
-                    socket.id
+                    {
+                        connector_id: connectorId,
+                        company_code: companyCode,
+                        socket_id: socket.id
+                    }
                 );
 
                 return resolve(socket);
-
             }
 
-            if (Date.now() - startedAt >= timeout) {
+            if (
+                Date.now() - startedAt >=
+                timeout
+            ) {
 
                 clearInterval(timer);
 
@@ -123,7 +241,6 @@ function waitForConnector(connectorId, timeout = 10000) {
                         `Connector offline: ${connectorId}`
                     )
                 );
-
             }
 
         }, 100);
