@@ -316,19 +316,29 @@ async hasCompletedSync({
 
         async claimOrCreateHttpBatch({
 
-            company_code,
+    company_code,
 
-            tally_owner,
+    tally_owner,
 
-            request_id
+    request_id,
 
-        }) {
+    sync_mode,
 
-            if (!company_code || !tally_owner || !request_id) {
+    sync_period
 
-                throw new Error(
-                    "company_code, tally_owner, and request_id are required"
-                );
+}) {
+
+           if (
+    !company_code ||
+    !tally_owner ||
+    !request_id ||
+    !sync_mode ||
+    !sync_period
+) {
+
+              throw new Error(
+    "company_code, tally_owner, request_id, sync_mode, and sync_period are required"
+);
 
             }
 
@@ -348,7 +358,11 @@ async hasCompletedSync({
 
                     p_tally_owner: tally_owner,
 
-                    p_request_id: request_id
+                    p_request_id: request_id,
+
+                    p_sync_mode: sync_mode,
+
+                    p_sync_period: sync_period
 
                 }
 

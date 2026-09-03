@@ -64,6 +64,12 @@ async function addBatchToQueue(
                 worker_type:
                     batch.worker_type,
 
+                sync_mode:
+                    batch.sync_mode,
+
+                sync_period:
+                    batch.sync_period,
+
                 worker_name:
                     workerConfig.worker_name,
 

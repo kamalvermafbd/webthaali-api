@@ -47,13 +47,13 @@ async function runJob(job, serverUrl) {
                             `${serverUrl}/getMasters` +
                             `?company_code=${encodeURIComponent(job.company_code)}` +
                             `&tally_owner=${encodeURIComponent(job.tally_owner)}` +
-                            `&sync_mode=PERIODIC` +
-                            `&sync_period=SIX_MONTHS` +
+                           `&sync_mode=${encodeURIComponent(job.sync_mode)}` +
+                            `&sync_period=${encodeURIComponent(job.sync_period)}` +
                             `&worker_batch_id=${encodeURIComponent(job.batch_id)}`,
                             {
                                 signal: controller.signal
                             }
-                        );
+                        );  
 
                     } finally {
 
@@ -61,15 +61,70 @@ async function runJob(job, serverUrl) {
 
                     }
 
+                    console.log(
+                        "TALLY_SYNC HTTP STATUS:",
+                        response.status
+                    );
+
+                    console.log(
+                        "TALLY_SYNC HTTP RESPONSE:",
+                        await response.clone().text()
+                    );
+
                     if (!response.ok) {
 
                         const text =
                             await response.text();
 
+                        let errorData = null;
+
+                        try {
+                            errorData = JSON.parse(text);
+                        } catch {
+                            // Response is not JSON
+                        }
+
+                        if (
+                            errorData?.error === "Connector offline" ||
+                            text.includes("Connector offline")
+                        ) {
+
+                            await BatchStatusManager.markWaitingConnector({
+                                batch_id: job.batch_id
+                            });
+
+                            console.log(
+                                "CONNECTOR OFFLINE — BATCH WAITING:",
+                                job.batch_id
+                            );
+
+                            return;
+                        }
+
                         throw new Error(
                             `getMasters failed: ${response.status} ${text}`
                         );
+                    }
 
+                    const responseText =
+                        await response.text();
+
+                    let responseData = null;
+
+                    try {
+                        responseData = JSON.parse(responseText);
+                    } catch {
+                        throw new Error(
+                            `getMasters returned invalid JSON: ${responseText}`
+                        );
+                    }
+
+                    if (responseData?.success === false) {
+
+                        throw new Error(
+                            responseData.error ||
+                            "getMasters returned success:false"
+                        );
                     }
 
                     console.log(

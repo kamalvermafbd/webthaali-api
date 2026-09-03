@@ -43,6 +43,11 @@ async function lockJob(job, workerConfig) {
                 "worker_status",
                 "PENDING"
             )
+
+            .eq(
+                "worker_id",
+                workerConfig.worker_name
+            )
             .select()
             .single();
 
@@ -86,13 +91,17 @@ async function startHeartbeat(
                             last_activity_at:
                                 now
                         })
-                        .eq(
+                       .eq(
                             "id",
                             jobId
                         )
                         .eq(
                             "worker_status",
                             "RUNNING"
+                        )
+                        .eq(
+                            "worker_id",
+                            workerConfig.worker_name
                         );
 
                 if (error) {
@@ -113,6 +122,10 @@ async function startHeartbeat(
                         .eq(
                             "runtime_id",
                             workerConfig.runtime_id
+                        )
+                        .eq(
+                            "is_active",
+                            true
                         );
 
                 if (workerHeartbeatError) {

@@ -31,6 +31,119 @@ const supabase = createClient(
     process.env.SUPABASE_SERVICE_KEY
 );
 
+
+async function dispatchBatch(batch) {
+
+    if (!batch) {
+        throw new Error("Batch is required");
+    }
+
+    const workerConfig =
+        await resolveWorkerForBatch(batch);
+
+    if (
+        !workerConfig?.worker_name ||
+        !workerConfig?.queue_name
+    ) {
+        throw new Error(
+            `No valid worker configuration for batch ${batch.batch_id}`
+        );
+    }
+
+    const {
+        data: reserved,
+        error: reserveError
+    } = await supabase
+        .from("sync_batches")
+      .update({
+    worker_id: workerConfig.worker_name,
+    locked_at: new Date(),
+    sync_mode: batch.sync_mode,
+    sync_period: batch.sync_period,
+    job_type: batch.job_type,
+    worker_type: batch.worker_type
+})
+        .eq(
+            "id",
+            batch.id
+        )
+        .eq(
+            "batch_status",
+            "PENDING"
+        )
+        .eq(
+            "worker_status",
+            "PENDING"
+        )
+        .is(
+            "worker_id",
+            null
+        )
+        .select()
+        .maybeSingle();
+
+    if (reserveError) {
+        throw new Error(
+            "BATCH RESERVATION FAILED: "
+            + reserveError.message
+        );
+    }
+
+    if (!reserved) {
+        throw new Error(
+            `Batch ${batch.batch_id} is already assigned or processed`
+        );
+    }
+
+    try {
+
+        await addBatchToQueue(
+            reserved,
+            workerConfig
+        );
+
+        console.log(
+            "BATCH QUEUED:",
+            batch.batch_id,
+            "→",
+            workerConfig.worker_name
+        );
+
+        return {
+            success: true,
+            batch: reserved,
+            worker: workerConfig
+        };
+
+    } catch (queueError) {
+
+        await supabase
+            .from("sync_batches")
+            .update({
+                worker_id: null,
+                locked_at: null
+            })
+            .eq(
+                "id",
+                batch.id
+            )
+            .eq(
+                "batch_status",
+                "PENDING"
+            )
+            .eq(
+                "worker_status",
+                "PENDING"
+            )
+            .eq(
+                "worker_id",
+                workerConfig.worker_name
+            );
+
+        throw queueError;
+    }
+}
+
 async function dispatchPendingBatches() {
 
     if (dispatcherRunning) {
@@ -103,13 +216,14 @@ async function dispatchPendingBatches() {
                     error: reserveError
                 } = await supabase
                     .from("sync_batches")
-                    .update({
-                        worker_id:
-                            workerConfig.worker_name,
-
-                        locked_at:
-                            new Date()
-                    })
+                   .update({
+                            worker_id: workerConfig.worker_name,
+                            locked_at: new Date(),
+                            sync_mode: batch.sync_mode,
+                            sync_period: batch.sync_period,
+                            job_type: batch.job_type,
+                            worker_type: batch.worker_type
+                        })
                     .eq(
                         "id",
                         batch.id
@@ -202,6 +316,7 @@ async function dispatchPendingBatches() {
     }
 }
 
+/* 02092026
 function startBatchQueueDispatcher() {
 
     console.log(
@@ -231,7 +346,9 @@ function startBatchQueueDispatcher() {
         DISPATCH_INTERVAL_MS
     );
 }
+    */
 
 module.exports = {
-    startBatchQueueDispatcher
+    //startBatchQueueDispatcher
+     dispatchBatch
 };

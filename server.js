@@ -108,6 +108,10 @@ const registry =
   require("./socketio/connectorRegistry");
 
 const {
+    pairConnector,
+    pairConnectorForBatch
+} = require("./services/PairConnectorService");
+const {
 
     ENTITY_METADATA,
 
@@ -161,9 +165,8 @@ const {
 } = require("./workers/resolveWorkerForBatch");
 
 const {
-    startBatchQueueDispatcher
+    dispatchBatch
 } = require("./workers/queueExistingBatch");
-
 /*
 const {
   reconcileMasters
@@ -214,6 +217,10 @@ const {
 
 const BatchStatusManager =
     require("./sync-engine/BatchStatusManager");
+
+const {
+    startSync
+} = require("./workers/SyncStartService");
 
 //io.on("connection", (socket) => {
 
@@ -369,6 +376,56 @@ app.get("/", (req, res) => {
   });
 
 });
+
+
+app.post("/sync/start", async (req, res) => {
+
+    try {
+
+        const result = await startSync({
+
+            company_code:
+                req.body.company_code,
+
+            tally_owner:
+                req.body.tally_owner,
+
+            sync_mode:
+                req.body.sync_mode,
+
+            sync_period:
+                req.body.sync_period
+
+        });
+
+        if (result.already_active) {
+
+            return res.status(409).json(result);
+
+        }
+
+        return res.status(200).json(result);
+
+    } catch (err) {
+
+        console.error(
+            "SYNC START ERROR:",
+            err
+        );
+
+        return res.status(500).json({
+
+            success: false,
+
+            error:
+                err.message
+
+        });
+
+    }
+
+});
+
 app.get("/testTally", async (req, res) => {
 
   try {
@@ -671,6 +728,35 @@ if (!connector_id) {
 });
 
 
+
+
+// =========================
+// PAIR CONNECTOR FOR BATCH
+// =========================
+app.post("/pairConnectorforbatch", async (req, res) => {
+
+    try {
+
+        const result = await pairConnectorForBatch({
+            company_code:
+                String(req.query.company_code || "").trim(),
+
+            tally_owner:
+                String(req.query.tally_owner || "").trim()
+        });
+
+        return res.json(result);
+
+    } catch (err) {
+
+        console.error(err);
+
+        return res.json({
+            success: false,
+            error: err.stack || err.message
+        });
+    }
+});
 
 app.post("/getConnectorId", async (req, res) => {
 
@@ -35444,6 +35530,7 @@ app.get("/getMasters", async (req, res) => {
 
   let sync_batch_id;
   let httpWorkerId;
+  let socket;
   let batchCompletedSuccessfully = false;
 
   try {
@@ -35676,58 +35763,8 @@ console.log(
 // CONNECTOR
 // =========================
 
-const is_ca =
-  tally_owner === "CA";
 
-const connectorField =
-  is_ca
-    ? "ca_connector_id"
-    : "client_connector_id";
-
-const connector_id =
-  companyData?.[connectorField];
-
-console.log(
-  "GET MASTERS CONNECTOR ID :",
-  connector_id
-);
-
-if (!connector_id) {
-
-  return res.json({
-    success: false,
-    error: "Connector not paired"
-  });
-
-}
-
-const socket =
-  registry.get(connector_id);
-
-console.log(
-  "SOCKET FOUND :",
-  !!socket
-);
-
-if (socket) {
-
-  console.log(
-    "SOCKET ID :",
-    socket.id
-  );
-
-}
-
-if (!socket) {
-
-  return res.json({
-    success: false,
-    error: "Connector offline"
-  });
-
-}
-
-
+/*
     if (
   String(socket.companyGuid || "").trim().toLowerCase() !==
   String(companyGuid).trim().toLowerCase()
@@ -35749,11 +35786,11 @@ if (!socket) {
   });
 
 }
-
+*/
 // =========================
 // SYNC BATCH ID
 // =========================
-
+/*020926
 const workerBatchId = req.query.worker_batch_id;
 
 if (workerBatchId) {
@@ -35796,10 +35833,209 @@ if (httpBatchClaim.claimed !== true) {
 sync_batch_id = httpBatchClaim.batch_id;
 httpWorkerId = httpBatchClaim.worker_id;
 }
-
+*/
 //const workerBatchId = req.query.worker_batch_id;
 
+const workerBatchId =
+    String(req.query.worker_batch_id || "").trim();
 
+
+// ==================================================
+// WORKER EXECUTION PATH
+// ==================================================
+if (workerBatchId) {
+
+    sync_batch_id = workerBatchId;
+    httpWorkerId = null;
+
+    const is_ca =
+        tally_owner === "CA";
+
+    const connectorField =
+        is_ca
+            ? "ca_connector_id"
+            : "client_connector_id";
+
+    const connector_id =
+        companyData?.[connectorField];
+
+    console.log(
+        "GET MASTERS CONNECTOR ID :",
+        connector_id
+    );
+
+    if (!connector_id) {
+
+        return res.status(503).json({
+            success: false,
+            error: "Connector not paired"
+        });
+
+    }
+
+    socket =
+        registry.get(connector_id);
+
+    console.log(
+        "SOCKET FOUND :",
+        !!socket
+    );
+
+    if (!socket) {
+
+        return res.status(503).json({
+            success: false,
+            error: "Connector offline"
+        });
+
+    }
+
+    if (
+        String(socket.companyGuid || "")
+            .trim()
+            .toLowerCase() !==
+        String(companyGuid)
+            .trim()
+            .toLowerCase()
+    ) {
+
+        console.error(
+            "❌ TALLY COMPANY GUID MISMATCH",
+            {
+                company_code,
+                tally_owner,
+                expectedGuid: companyGuid,
+                actualGuid: socket.companyGuid
+            }
+        );
+
+        return res.status(409).json({
+            success: false,
+            error: "Tally company identity mismatch"
+        });
+
+    }
+
+} 
+
+
+
+// ==================================================
+// NEW SYNC REQUEST → CREATE + QUEUE
+// ==================================================
+
+else {
+
+    const requestId =
+        crypto.randomUUID();
+
+    const httpBatchClaim =
+        await BatchStatusManager.claimOrCreateHttpBatch({
+
+            company_code,
+
+            tally_owner,
+
+            request_id: requestId,
+            sync_mode: syncMode,
+
+            sync_period: syncPeriod
+
+        });
+
+
+    // ----------------------------------------------
+    // Existing active batch
+    // ----------------------------------------------
+
+    if (httpBatchClaim.claimed !== true) {
+
+        return res.status(409).json({
+
+            success: false,
+
+            error:
+                "Sync batch is already being processed",
+
+            reason:
+                httpBatchClaim.reason,
+
+            batch_id:
+                httpBatchClaim.batch_id
+
+        });
+
+    }
+
+
+    sync_batch_id =
+        httpBatchClaim.batch_id;
+
+
+    // ----------------------------------------------
+    // LOAD NEW PENDING BATCH
+    // ----------------------------------------------
+
+    const newBatch =
+        await BatchStatusManager.loadBatch({
+
+            batch_id:
+                sync_batch_id
+
+        });
+
+
+    // ----------------------------------------------
+    // DISPATCH TO BULLMQ
+    // ----------------------------------------------
+
+    const dispatchResult =
+        await dispatchBatch(
+            newBatch
+        );
+
+
+    console.log(
+        "SYNC BATCH DISPATCHED:",
+        {
+            batch_id:
+                sync_batch_id,
+
+            worker:
+                dispatchResult.worker.worker_name,
+
+            queue:
+                dispatchResult.worker.queue_name
+        }
+    );
+
+
+    // ----------------------------------------------
+    // IMPORTANT:
+    // HTTP REQUEST ENDS HERE.
+    //
+    // Worker will call:
+    // /getMasters?worker_batch_id=...
+    // ----------------------------------------------
+
+    return res.json({
+
+        success: true,
+
+        queued: true,
+
+        batch_id:
+            sync_batch_id,
+
+        status:
+            "QUEUED",
+
+        worker:
+            dispatchResult.worker.worker_name
+
+    });
+
+}
 
 const failHttpBatch = async (error) => {
     await BatchStatusManager.markFailed({
@@ -39540,7 +39776,7 @@ app.post("/testSaveGroups", async (req, res) => {
 
 });
 
-startBatchQueueDispatcher();
+ 
 
 server.listen(
   process.env.PORT,

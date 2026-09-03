@@ -28,8 +28,15 @@ const supabase =
 
 
 const connection = {
-    host: "127.0.0.1",
-    port: 6379
+    host:
+        process.env.REDIS_HOST ||
+        "127.0.0.1",
+
+    port:
+        Number(
+            process.env.REDIS_PORT ||
+            6379
+        )
 };
 
 async function startWorker() {
@@ -78,24 +85,26 @@ async function startWorker() {
         );
     }
 
-    const runtimeId = crypto.randomUUID();
+const runtimeId = crypto.randomUUID();
 
-const { error: runtimeError } =
-    await supabase
-        .from("workers")
-        .update({
-            runtime_id: runtimeId,
-            runtime_started_at: new Date(),
-            runtime_heartbeat_at: new Date(),
-            updated_at: new Date()
-        })
-        .eq("id", worker.id)
-        .eq("is_active", true);
+const {
+    data: claimedWorker,
+    error: runtimeError
+} = await supabase.rpc(
+    "claim_worker_runtime",
+    {
+        p_worker_id: worker.id,
+        p_runtime_id: runtimeId
+    }
+);
 
-if (runtimeError) {
+if (
+    runtimeError ||
+    !claimedWorker ||
+    claimedWorker.length === 0
+) {
     throw new Error(
-        "Worker runtime registration failed: "
-        + runtimeError.message
+        `Worker runtime already active or claim failed: ${worker.worker_name}`
     );
 }
 
@@ -189,9 +198,15 @@ const lockedJob =
 
 if (!lockedJob) {
 
-    throw new Error(
-        `Unable to lock batch ${job.data.batch_id}`
+    console.log(
+        "BATCH ALREADY LOCKED OR NO LONGER PENDING:",
+        job.data.batch_id
     );
+
+    return {
+        success: true,
+        skipped: true
+    };
 }
 
 const heartbeat =
@@ -202,7 +217,7 @@ const heartbeat =
 
                 try {
 
-                                
+                    console.log("HTTP URL:", job.data.http_url);      
                     await runJob(
                     lockedJob,
                     job.data.http_url
