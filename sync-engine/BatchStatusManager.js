@@ -16,7 +16,9 @@ const {
 
     BATCH_STATUS,
 
-    TABLES
+    TABLES,
+
+     SYNC_STAGE,
 
 } = require("./constants");
 
@@ -328,19 +330,29 @@ async hasCompletedSync({
 
 }) {
 
-           if (
-    !company_code ||
-    !tally_owner ||
-    !request_id ||
-    !sync_mode ||
-    !sync_period
-) {
+          if (
+            !company_code ||
+            !tally_owner ||
+            !request_id ||
+            !sync_mode
+        ) {
 
-              throw new Error(
-    "company_code, tally_owner, request_id, sync_mode, and sync_period are required"
-);
+            throw new Error(
+                "company_code, tally_owner, request_id, and sync_mode are required"
+            );
 
-            }
+        }
+
+        if (
+            sync_mode === "PERIODIC" &&
+            !sync_period
+        ) {
+
+            throw new Error(
+                "sync_period is required for PERIODIC sync"
+            );
+
+        }
 
             const {
 
@@ -664,6 +676,9 @@ async hasCompletedSync({
                 batch_status:
 
                     BATCH_STATUS.FAILED,
+                
+                worker_status:
+                    "FAILED",
 
                 error_message:
 
@@ -677,6 +692,49 @@ async hasCompletedSync({
         });
 
     }
+
+    // ----------------------------------
+// Mark Waiting For Connector
+// ----------------------------------
+
+async markWaitingConnector({
+
+    batch_id
+
+}) {
+
+    return this.updateFields({
+
+        batch_id,
+
+        fields: {
+
+            batch_status:
+                BATCH_STATUS.PENDING,
+
+            worker_status:
+                "PENDING",
+
+            current_stage:
+                SYNC_STAGE.WAITING_CONNECTOR,
+
+            error_message:
+                null,
+
+            worker_id:
+                null,
+
+            locked_at:
+                null,
+
+            heartbeat_at:
+                null
+
+        }
+
+    });
+
+}
 
         // ----------------------------------
     // Update Connector State

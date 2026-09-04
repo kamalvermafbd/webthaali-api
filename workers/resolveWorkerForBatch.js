@@ -2,7 +2,9 @@ require("dotenv").config();
 
 const { createClient } =
     require("@supabase/supabase-js");
-
+const {
+    recoverStaleBatches
+} = require("./workerLockService");
 
 const supabase = createClient(
     process.env.SUPABASE_URL,
@@ -236,6 +238,7 @@ if (batchError) {
 
 const currentLoad =
     runningCount || 0;
+
 
 const concurrency =
     worker.concurrency || 1;
@@ -587,6 +590,9 @@ if (specialServerConfig) {
     }
 
     const eligibleWorkers = [];
+
+    
+
 
     for (const worker of workers) {
 
@@ -957,9 +963,42 @@ if (specialServerConfig) {
          * ---------------------------------------------------------
          */
 
+                console.log(
+    "GENERAL DEBUG:",
+    JSON.stringify({
+        batch_id: batch.batch_id,
+        company_code,
+        tally_owner,
+        worker_type,
+        workers
+    }, null, 2)
+);
+
         const eligibleWorkers = [];
 
         for (const worker of workers) {
+
+            try {
+                await recoverStaleBatches(worker);
+            } catch (error) {
+                console.error(
+                    "STALE BATCH RECOVERY ERROR:",
+                    worker.worker_name,
+                    error.message
+                );
+            }
+        }
+
+        
+        for (const worker of workers) {
+
+            console.log(
+            "CHECK WORKER:",
+            worker.worker_name,
+            worker.server_id,
+            worker.runtime_id,
+            worker.runtime_heartbeat_at
+        );
 
             const { data: server, error: serverError } =
                 await supabase
@@ -1059,11 +1098,55 @@ if (specialServerConfig) {
                 );
             }
 
+            const { data: loadRows, error: loadRowsError } =
+            await supabase
+                .from("sync_batches")
+                .select(`
+                    id,
+                    batch_id,
+                    company_code,
+                    batch_status,
+                    worker_id,
+                    worker_status
+                `)
+                .eq(
+                    "worker_id",
+                    worker.worker_name
+                )
+                .in(
+                    "worker_status",
+                    [
+                        "PENDING",
+                        "RUNNING"
+                    ]
+                );
+
+        console.log(
+            "WORKER LOAD ROWS:",
+            JSON.stringify(
+                {
+                    loadRows,
+                    loadRowsError
+                },
+                null,
+                2
+            )
+        );
             const currentLoad =
                 runningCount || 0;
 
             const concurrency =
                 worker.concurrency || 1;
+
+            console.log(
+                "WORKER LOAD DEBUG:",
+                JSON.stringify({
+                    worker_name: worker.worker_name,
+                    runningCount,
+                    currentLoad,
+                    concurrency
+                }, null, 2)
+            );
 
             /*
              * Worker has no available execution slot.

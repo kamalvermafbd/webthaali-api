@@ -143,7 +143,139 @@ async function startHeartbeat(
     return heartbeat;
 }
 
+async function recoverStaleBatches(workerConfig) {
+
+    const heartbeatTimeout =
+        workerConfig.heartbeat_timeout_seconds || 120;
+
+    const staleBefore =
+        new Date(
+            Date.now() -
+            heartbeatTimeout * 1000
+        ).toISOString();
+
+    /*
+     * ---------------------------------------------------------
+     * 1. RECOVER GENUINELY STALE RUNNING BATCH
+     *
+     * PROCESSING + RUNNING + stale heartbeat
+     * means worker execution was abandoned.
+     * ---------------------------------------------------------
+     */
+
+    const {
+        data: staleRunning,
+        error: staleRunningError
+    } = await supabase
+        .from("sync_batches")
+        .update({
+            batch_status: "PENDING",
+            worker_status: "PENDING",
+            worker_id: null,
+            locked_at: null,
+            started_at: null,
+            heartbeat_at: null
+        })
+        .eq(
+            "worker_id",
+            workerConfig.worker_name
+        )
+        .eq(
+            "batch_status",
+            "PROCESSING"
+        )
+        .eq(
+            "worker_status",
+            "RUNNING"
+        )
+        .lt(
+            "heartbeat_at",
+            staleBefore
+        )
+        .select(
+            "id, batch_id"
+        );
+
+    if (staleRunningError) {
+
+        throw new Error(
+            "Stale running batch recovery failed: " +
+            staleRunningError.message
+        );
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * 2. CLEAN TERMINAL BATCH STATE
+     *
+     * FAILED/COMPLETED batch must NEVER occupy worker slot.
+     * Preserve terminal batch status.
+     * Only release worker execution fields.
+     * ---------------------------------------------------------
+     */
+
+    const {
+        data: terminalBatches,
+        error: terminalError
+    } = await supabase
+        .from("sync_batches")
+        .update({
+            worker_status: "FAILED",
+            worker_id: null,
+            locked_at: null,
+            heartbeat_at: null
+        })
+        .eq(
+            "worker_id",
+            workerConfig.worker_name
+        )
+        .eq(
+            "batch_status",
+            "FAILED"
+        )
+        .eq(
+            "worker_status",
+            "RUNNING"
+        )
+        .select(
+            "id, batch_id"
+        );
+
+    if (terminalError) {
+
+        throw new Error(
+            "Terminal batch cleanup failed: " +
+            terminalError.message
+        );
+    }
+
+    if (
+        staleRunning?.length ||
+        terminalBatches?.length
+    ) {
+
+        console.log(
+            "WORKER STALE STATE RECOVERED:",
+            JSON.stringify(
+                {
+                    staleRunning,
+                    terminalBatches
+                },
+                null,
+                2
+            )
+        );
+    }
+
+    return {
+        staleRunning: staleRunning || [],
+        terminalBatches: terminalBatches || []
+    };
+}
+
+
 module.exports = {
     lockJob,
-    startHeartbeat
+    startHeartbeat,
+    recoverStaleBatches
 };

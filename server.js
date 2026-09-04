@@ -376,11 +376,56 @@ app.get("/", (req, res) => {
   });
 
 });
-
-
 app.post("/sync/start", async (req, res) => {
 
     try {
+
+        const sync_mode =
+            String(req.body.sync_mode || "")
+                .trim()
+                .toUpperCase();
+
+        const sync_period =
+            req.body.sync_period
+                ? String(req.body.sync_period)
+                    .trim()
+                    .toUpperCase()
+                : null;
+
+        // ==========================================
+        // SYNC MODE VALIDATION
+        // ==========================================
+
+        if (!["FULL", "PERIODIC"].includes(sync_mode)) {
+
+            return res.status(400).json({
+                success: false,
+                error:
+                    "Invalid sync_mode. Use FULL or PERIODIC"
+            });
+
+        }
+
+        // ==========================================
+        // PERIODIC SYNC REQUIRES PERIOD
+        // ==========================================
+
+        if (
+            sync_mode === "PERIODIC" &&
+            !sync_period
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                error:
+                    "sync_period is required for PERIODIC sync"
+            });
+
+        }
+
+        // ==========================================
+        // START SYNC
+        // ==========================================
 
         const result = await startSync({
 
@@ -391,12 +436,18 @@ app.post("/sync/start", async (req, res) => {
                 req.body.tally_owner,
 
             sync_mode:
-                req.body.sync_mode,
+                sync_mode,
 
             sync_period:
-                req.body.sync_period
+                sync_mode === "PERIODIC"
+                    ? sync_period
+                    : null
 
         });
+
+        // ==========================================
+        // ALREADY ACTIVE
+        // ==========================================
 
         if (result.already_active) {
 
@@ -547,6 +598,7 @@ if (connector_id) {
 
   // Existing connector offline/not registered
   // but a new pending connector is available
+  /*
   if (!socket) {
 
     socket =
@@ -567,6 +619,48 @@ if (connector_id) {
     }
 
   }
+*/
+if (!socket) {
+/*
+  socket =
+    registry.getPending();
+*/
+
+socket =
+    registry.getPendingByGuid(
+        tally_company_guid
+    );
+
+  console.log(
+    "PENDING CONNECTOR FALLBACK FOUND :",
+    !!socket
+  );
+
+  if (!socket) {
+
+    return res.json({
+      success: false,
+      error: "Linked connector offline"
+    });
+
+  }
+
+}
+
+if (
+  !socket.companyGuids ||
+  !socket.companyGuids.includes(
+    tally_company_guid
+  )
+) {
+
+  return res.json({
+    success: false,
+    error:
+      "Selected Tally company is not available on this connector"
+  });
+
+}
 
 }
 // ==========================================
@@ -574,9 +668,15 @@ if (connector_id) {
 // ==========================================
 
 else {
-
+/*040926
   socket =
     registry.getPending();
+*/
+
+socket =
+    registry.getPendingByGuid(
+        tally_company_guid
+    );
 
   console.log(
     "PENDING CONNECTOR FOUND :",
@@ -889,7 +989,11 @@ const {
   error: companyError
 } = await supabase
   .from("company")
-  .select(`company_code, ${connectorField}`)
+  .select(`
+    company_code,
+    ${connectorField},
+    ${is_ca ? "ca_tally_company_guid" : "client_tally_company_guid"}
+`)
   .eq("company_code", company_code)
   .single();
 
@@ -934,7 +1038,11 @@ if (connector_id) {
 if (!socket) {
 
     socket =
-        registry.getPending();
+        registry.getPendingByGuid(
+            is_ca
+                ? companyData.ca_tally_company_guid
+                : companyData.client_tally_company_guid
+        );
 
 }
 
@@ -969,26 +1077,6 @@ if (!socket) {
   socket_computer: socket?.computerName
 });
 
-console.log(
-  "SOCKET FOUND :",
-  !!socket
-);
-
-if (socket) {
-  console.log(
-    "SOCKET ID :",
-    socket.id
-  );
-}
-
-if (!socket) {
-
-  return res.json({
-    success: false,
-    error: "Connector offline"
-  });
-
-}
 //
     const result = await sendToConnector(
       socket,
@@ -35890,6 +35978,8 @@ if (workerBatchId) {
 
     }
 
+
+    /* 030926
     if (
         String(socket.companyGuid || "")
             .trim()
@@ -35915,6 +36005,45 @@ if (workerBatchId) {
         });
 
     }
+        */
+
+    const connectorCompanyGuids =
+    Array.isArray(socket.companyGuids)
+        ? socket.companyGuids
+        : [];
+
+const requestedCompanyGuid =
+    String(companyGuid)
+        .trim()
+        .toLowerCase();
+
+const guidMatched =
+    connectorCompanyGuids.some(
+        guid =>
+            String(guid)
+                .trim()
+                .toLowerCase() ===
+            requestedCompanyGuid
+    );
+
+if (!guidMatched) {
+
+    console.error(
+        "❌ TALLY COMPANY GUID MISMATCH",
+        {
+            company_code,
+            tally_owner,
+            expectedGuid: companyGuid,
+            connectorGuids: connectorCompanyGuids
+        }
+    );
+
+    return res.status(409).json({
+        success: false,
+        error: "Tally company identity mismatch"
+    });
+
+}
 
 } 
 

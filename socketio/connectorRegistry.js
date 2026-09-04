@@ -44,6 +44,7 @@ function register(connectorId, socket) {
     }
 
     // Socket ki identity pehle set honi chahiye
+   /*040926
     if (socket.connectorId !== connectorId) {
 
         console.error("❌ REGISTER REJECTED: connector identity mismatch", {
@@ -54,10 +55,18 @@ function register(connectorId, socket) {
 
         return false;
     }
+*/
+
+    if (!socket.connectorIds) {
+    socket.connectorIds = new Set();
+}
+
+socket.connectorIds.add(connectorId);
 
     pendingConnectors.delete(socket);
 
     // Remove old mappings belonging to this socket
+/*040926
     for (const [oldConnectorId, oldSocket] of connectors.entries()) {
 
         if (
@@ -74,6 +83,7 @@ function register(connectorId, socket) {
         }
 
     }
+*/
 
     connectors.set(connectorId, socket);
 
@@ -103,6 +113,27 @@ function get(connectorId, companyCode) {
         return null;
     }
 
+    if (
+    !socket.connectorIds ||
+    !socket.connectorIds.has(connectorId)
+    ) {
+
+        console.error(
+            "❌ REGISTRY GET REJECTED: CONNECTOR ID MISMATCH",
+            {
+                connector_id: connectorId,
+                socket_connector_ids:
+                    socket.connectorIds
+                        ? [...socket.connectorIds]
+                        : [],
+                socket_id: socket.id
+            }
+        );
+
+        return null;
+    }
+
+    /*040926
     if (socket.connectorId !== connectorId) {
 
         console.error(
@@ -116,7 +147,8 @@ function get(connectorId, companyCode) {
 
         return null;
     }
-
+        */
+/* 030926
     if (
         companyCode &&
         socket.companyCode !== companyCode
@@ -134,12 +166,12 @@ function get(connectorId, companyCode) {
 
         return null;
     }
-
+*/
     console.log(
         "REGISTRY GET VALID:",
         {
             connector_id: connectorId,
-            company_code: socket.companyCode,
+            //company_code: socket.companyCode,
             socket_id: socket.id
         }
     );
@@ -164,6 +196,26 @@ function waitForConnector(
                 return null;
             }
 
+            if (
+                !socket.connectorIds ||
+                !socket.connectorIds.has(connectorId)
+            ) {
+
+                console.error(
+                    "❌ WAIT CONNECTOR REJECTED: CONNECTOR ID MISMATCH",
+                    {
+                        requested_connector_id: connectorId,
+                        socket_connector_ids:
+                            socket.connectorIds
+                                ? [...socket.connectorIds]
+                                : [],
+                        socket_id: socket.id
+                    }
+                );
+
+                return null;
+            }
+/*040926
             if (socket.connectorId !== connectorId) {
 
                 console.error(
@@ -177,7 +229,8 @@ function waitForConnector(
 
                 return null;
             }
-
+                */
+/* 030926
             if (
                 companyCode &&
                 socket.companyCode !== companyCode
@@ -195,7 +248,7 @@ function waitForConnector(
 
                 return null;
             }
-
+*/
             return socket;
         };
 
@@ -274,9 +327,32 @@ function getPending() {
 
 }
 
+function getPendingByGuid(companyGuid) {
+
+    if (!companyGuid) {
+        return null;
+    }
+
+    for (const socket of pendingConnectors) {
+
+        if (
+            Array.isArray(socket.companyGuids) &&
+            socket.companyGuids.includes(companyGuid)
+        ) {
+
+            return socket;
+
+        }
+
+    }
+
+    return null;
+}
+
 /**
  * Remove Connector
  */
+/*040926
 function remove(connectorId, socket) {
 
     const currentSocket =
@@ -285,6 +361,30 @@ function remove(connectorId, socket) {
     if (currentSocket === socket) {
 
         connectors.delete(connectorId);
+
+        console.log(
+            `❌ Removed Connector : ${connectorId}`
+        );
+
+    }
+
+    pendingConnectors.delete(socket);
+
+}
+*/
+
+function remove(connectorId, socket) {
+
+    const currentSocket =
+        connectors.get(connectorId);
+
+    if (currentSocket === socket) {
+
+        connectors.delete(connectorId);
+
+        if (socket.connectorIds) {
+            socket.connectorIds.delete(connectorId);
+        }
 
         console.log(
             `❌ Removed Connector : ${connectorId}`
@@ -322,6 +422,7 @@ module.exports = {
     getAny,
     registerPending,
     getPending,
+    getPendingByGuid,
     remove,
     isOnline,
     list

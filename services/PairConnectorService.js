@@ -82,7 +82,7 @@ async function pairConnector({
     // ==========================================
     // EXISTING CONNECTOR
     // ==========================================
-
+/*
     if (connector_id) {
 
         socket =
@@ -105,8 +105,56 @@ async function pairConnector({
         }
 
     }
+*/
+
+    // ==========================================
+// EXISTING CONNECTOR
+// ==========================================
+
+if (connector_id) {
+
+    socket =
+        registry.get(
+            connector_id,
+            company_code
+        );
 
 
+    // Existing connector is not registered yet.
+    // Try the pending connector for pairing.
+
+    if (!socket) {
+
+        socket =
+            registry.getPending();
+
+        if (!socket) {
+
+            return {
+                success: false,
+                error: "Linked connector offline"
+            };
+
+        }
+
+    }
+
+    if (
+    !socket.companyGuids ||
+    !socket.companyGuids.includes(
+        tally_company_guid
+    )
+) {
+
+    return {
+        success: false,
+        error:
+            "Selected Tally company is not available on this connector"
+    };
+
+}
+
+}
     // ==========================================
     // FIRST TIME PAIRING
     // ==========================================
@@ -127,6 +175,21 @@ async function pairConnector({
 
         }
 
+
+        if (
+                !socket.companyGuids ||
+                !socket.companyGuids.includes(
+                    tally_company_guid
+                )
+            ) {
+
+                return {
+                    success: false,
+                    error:
+                        "Selected Tally company is not available on this connector"
+                };
+
+            }
 
         connector_id =
             `CON-${crypto.randomUUID()}`;

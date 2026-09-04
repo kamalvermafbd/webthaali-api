@@ -3,9 +3,6 @@ const crypto = require("crypto");
 const BatchStatusManager =
     require("../sync-engine/BatchStatusManager");
 
-const {
-    pairConnectorForBatch
-} = require("../services/PairConnectorService");
 
 const {
     dispatchBatch
@@ -110,7 +107,7 @@ if (
             existingBatch.batch_status === "PENDING" &&
             !existingBatch.worker_id
         ) {
-
+/*
             const connectorResult =
                 await pairConnectorForBatch({
                     company_code,
@@ -124,6 +121,7 @@ if (
                     "Connector pairing failed"
                 );
             }
+            */
 
             const dispatchResult =
                 await dispatchBatch(existingBatch);
@@ -214,7 +212,7 @@ if (
     // =========================================
     // 3. EXISTING CONNECTOR PAIRING
     // =========================================
-
+/*
     const connectorResult =
         await pairConnectorForBatch({
 
@@ -234,9 +232,9 @@ if (
 
     }
 
-
+*/
     // =========================================
-    // 4. EXISTING DISPATCH FLOW
+    // 4. DISPATCH FLOW
     // =========================================
 
     const dispatchResult =
