@@ -518,6 +518,12 @@ if (recoError) {
 const ledgerReconciliationPassed =
     !differences || differences.length === 0;
 
+    console.log("===== LEDGER RECON DEBUG =====");
+console.log("SYNC BATCH ID :", sync_batch_id);
+console.log("DIFFERENCES COUNT :", differences?.length || 0);
+console.log("LEDGER PASSED :", ledgerReconciliationPassed);
+console.log("DIFFERENCES :", differences);
+
 if (sync_batch_id) {
     const { error } = await supabase
         .from("sync_batches")
@@ -529,7 +535,11 @@ if (sync_batch_id) {
 
     if (error) throw error;
 }
-
+console.log(
+    "LEDGER FLAG UPDATE COMPLETE:",
+    sync_batch_id,
+    ledgerReconciliationPassed
+);
     return {
         success: true,
         data: tallyLedgers,
