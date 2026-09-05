@@ -333,7 +333,21 @@ function getPendingByGuid(companyGuid) {
         return null;
     }
 
+     console.log(
+        "PENDING CONNECTORS COUNT:",
+        pendingConnectors.size
+    );
+
     for (const socket of pendingConnectors) {
+
+          console.log(
+            "PENDING SOCKET CHECK:",
+            {
+                socket_id: socket.id,
+                company_guids: socket.companyGuids,
+                requested_guid: companyGuid
+            }
+        );
 
         if (
             Array.isArray(socket.companyGuids) &&
