@@ -40,6 +40,13 @@ async function addBatchToQueue(
             workerConfig.queue_name
         );
 
+        console.log(
+    "ABOUT TO ADD BULLMQ JOB:",
+    batch.batch_id,
+    workerConfig.queue_name,
+    workerConfig.worker_name
+);
+
     const job =
         await syncQueue.add(
 
@@ -91,6 +98,12 @@ async function addBatchToQueue(
                     batch.batch_id
             }
         );
+
+        console.log(
+    "BULLMQ ADD RETURNED:",
+    job?.id,
+    batch.batch_id
+);
 
     console.log(
         "BULLMQ BATCH QUEUED:",
