@@ -852,7 +852,7 @@ if (!connector_id) {
 
 
 // =========================
-// PAIR CONNECTOR FOR BATCH
+// PAIR CONNECTOR FOR BATCH 060926
 // =========================
 app.post("/pairConnectorforbatch", async (req, res) => {
 
