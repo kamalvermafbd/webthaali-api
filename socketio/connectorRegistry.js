@@ -1,5 +1,6 @@
 const connectors = new Map();
 const pendingConnectors = new Set();
+const pendingConnectorMap = new Map();
 
 /**
  * Register Connector
@@ -311,6 +312,8 @@ function getAny() {
 
 }
 
+/* 060926
+
 function registerPending(socket) {
 
     pendingConnectors.add(socket);
@@ -320,12 +323,68 @@ function registerPending(socket) {
     );
 
 }
+*/
+
+function registerPending(socket, connectorId) {
+
+    pendingConnectors.add(socket);
+
+    if (connectorId) {
+//060926 start
+            socket.pendingConnectorId =
+            connectorId;
+// 060926 end
+
+        pendingConnectorMap.set(
+            connectorId,
+            socket
+        );
+    }
+
+    console.log(
+        `🆕 Pending Connector : ${socket.id}`,
+        {
+            connector_id: connectorId
+        }
+    );
+
+}
 
 function getPending() {
 
     return pendingConnectors.values().next().value;
 
 }
+// 060926
+function getPendingById(connectorId) {
+
+    if (!connectorId) {
+        return null;
+    }
+
+    return pendingConnectorMap.get(connectorId) || null;
+
+}
+
+
+// 060926 start
+function getPendingConnectors() {
+
+    return Array.from(
+        pendingConnectors
+    ).map(socket => ({
+        pending_connector_id:
+            socket.pendingConnectorId,
+
+        socket_id:
+            socket.id,
+
+        computer_name:
+            socket.computerName || null
+    }));
+
+}
+// 060926 end
 
 function getPendingByGuid(companyGuid) {
 
@@ -405,7 +464,13 @@ function remove(connectorId, socket) {
         );
 
     }
-
+//060926 start
+    if (socket.pendingConnectorId) {
+    pendingConnectorMap.delete(
+        socket.pendingConnectorId
+    );
+}
+//end 060926
     pendingConnectors.delete(socket);
 
 }
@@ -436,6 +501,8 @@ module.exports = {
     getAny,
     registerPending,
     getPending,
+    getPendingById,
+    getPendingConnectors,
     getPendingByGuid,
     remove,
     isOnline,

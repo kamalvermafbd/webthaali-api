@@ -1,5 +1,9 @@
 const registry = require("./connectorRegistry");
 
+// 060926 start
+const crypto = require("crypto");
+// 060926 end
+
 const {
     createClient
 } = require("@supabase/supabase-js");
@@ -22,7 +26,29 @@ function registerEvents(io) {
         console.log("Socket ID :", socket.id);
         console.log("================================");
 
-        registry.registerPending(socket);
+       // registry.registerPending(socket);
+
+       // 060926 start
+const pendingConnectorId =
+    `TMP-${crypto.randomUUID()}`;
+
+socket.pendingConnectorId =
+    pendingConnectorId;
+
+registry.registerPending(
+    socket,
+    pendingConnectorId
+);
+
+console.log(
+    "🆕 TEMP CONNECTOR CREATED:",
+    {
+        socket_id: socket.id,
+        pending_connector_id:
+            pendingConnectorId
+    }
+);
+// 060926 end
 
         socket.protocolReceiver =
             new ServerProtocolReceiver(

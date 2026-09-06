@@ -528,6 +528,11 @@ app.post("/pairConnector", async (req, res) => {
     ? "ca_connector_id"
     : "client_connector_id";
 
+    // 060926 start
+const pending_connector_id =
+  String(req.body.pending_connector_id || "").trim();
+// 060926 end
+
 const {
   data: companyData,
   error: companyError
@@ -626,29 +631,11 @@ if (connector_id) {
   }
 */
 if (!socket) {
-/*
-  socket =
-    registry.getPending();
-*/
 
-socket =
-    registry.getPendingByGuid(
-        tally_company_guid
-    );
-
-  console.log(
-    "PENDING CONNECTOR FALLBACK FOUND :",
-    !!socket
-  );
-
-  if (!socket) {
-
-    return res.json({
-      success: false,
-      error: "Linked connector offline"
-    });
-
-  }
+  return res.json({
+    success: false,
+    error: "Linked connector offline"
+  });
 
 }
 
@@ -673,15 +660,44 @@ if (
 // ==========================================
 
 else {
-/*040926
+// 060926 start
   socket =
-    registry.getPending();
-*/
-
-socket =
-    registry.getPendingByGuid(
-        tally_company_guid
+    registry.getPendingById(
+      pending_connector_id
     );
+
+  console.log(
+    "PENDING CONNECTOR BY ID FOUND :",
+    !!socket
+  );
+
+  if (!socket) {
+
+    return res.json({
+      success: false,
+      error:
+        "Selected connector is no longer available"
+    });
+
+  }
+// 060926 end
+
+// 060926 start
+if (
+  !socket.companyGuids ||
+  !socket.companyGuids.includes(
+    tally_company_guid
+  )
+) {
+
+  return res.json({
+    success: false,
+    error:
+      "Selected Tally company is not available on this connector"
+  });
+
+}
+// 060926 end
 
   console.log(
     "PENDING CONNECTOR FOUND :",
@@ -937,6 +953,41 @@ app.post("/getConnectorId", async (req, res) => {
 });
 
 
+// 060926 start
+// =========================
+// GET PENDING CONNECTORS
+// =========================
+app.get("/getPendingConnectors", async (req, res) => {
+
+  try {
+
+    const pendingConnectors =
+      registry.getPendingConnectors();
+
+    console.log(
+      "PENDING CONNECTORS :",
+      pendingConnectors
+    );
+
+    return res.json({
+      success: true,
+      connectors: pendingConnectors
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    return res.json({
+      success: false,
+      error: err.message
+    });
+
+  }
+
+});
+// 060926 end
+
 app.get("/getTallyCompanies", async (req, res) => {
 
   try {
@@ -1026,9 +1077,13 @@ const socket =
   await registry.waitForConnector(connector_id);
 */
 
+
 let socket = null;
 
-// Existing paired connector online
+// =====================================================
+// EXISTING PAIRED CONNECTOR
+// =====================================================
+
 if (connector_id) {
 
     socket =
@@ -1037,29 +1092,80 @@ if (connector_id) {
             company_code
         );
 
+    console.log(
+        "EXISTING CONNECTOR SOCKET FOUND :",
+        !!socket
+    );
+
+    // Existing connector DB mein hai,
+    // lekin online nahi hai.
+    // Kisi pending connector par fallback NAHI karna.
+    if (!socket) {
+
+        return res.json({
+            success: false,
+            error: "Connector offline"
+        });
+
+    }
+
 }
 
-// First-time / unregistered connector
-/* 060926
-if (!socket) {
+// =====================================================
+// FIRST-TIME / UNREGISTERED CONNECTOR
+// =====================================================
+
+if (!connector_id) {
+
+    const pending_connector_id =
+        String(
+            req.query.pending_connector_id || ""
+        ).trim();
+
+    console.log(
+        "REQUESTED PENDING CONNECTOR ID :",
+        pending_connector_id
+    );
+
+    if (!pending_connector_id) {
+
+        return res.json({
+            success: false,
+            error: "pending_connector_id required"
+        });
+
+    }
 
     socket =
-        registry.getPendingByGuid(
-            is_ca
-                ? companyData.ca_tally_company_guid
-                : companyData.client_tally_company_guid
+        registry.getPendingById(
+            pending_connector_id
         );
 
+    console.log(
+        "PENDING CONNECTOR BY ID FOUND :",
+        !!socket
+    );
+
+    if (socket && socket.pendingConnectorId) {
+
+        console.log(
+            "SELECTED PENDING CONNECTOR :",
+            socket.pendingConnectorId
+        );
+
+    }
+
+    if (!socket) {
+
+        return res.json({
+            success: false,
+            error: "Selected connector is no longer available"
+        });
+
+    }
+
 }
-*/
- 
-// First-time / unregistered connector
-if (!socket) {
-
-    socket = registry.getPending();
-
-}
-
+// 060926 end
 console.log(
     "SOCKET FOUND :",
     !!socket
