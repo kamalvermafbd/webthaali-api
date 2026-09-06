@@ -358,16 +358,50 @@ socket.on("identifyConnector", async (data) => {
 */
       // Connector is not assigned during startup.
 // Startup only records which Tally companies are available.
-        socket.companyGuids =
-            company_guids;
+    
+   socket.companyGuids =
+    company_guids;
+
+console.log(
+    "📋 TALLY GUIDS AVAILABLE ON SOCKET:",
+    {
+        socket_id: socket.id,
+        company_guids: socket.companyGuids
+    }
+);
+
+// ==========================================
+// REGISTER EXISTING CONNECTORS FROM DB
+// ==========================================
+
+const connectorIds = [
+    ...new Set(
+        matches
+            .map(row => row.connector_id)
+            .filter(Boolean)
+    )
+];
+
+for (const connectorId of connectorIds) {
+
+    const registered =
+        registry.register(
+            connectorId,
+            socket
+        );
+
+    if (registered) {
 
         console.log(
-            "📋 TALLY GUIDS AVAILABLE ON SOCKET:",
+            "✅ EXISTING CONNECTOR AUTO REGISTERED",
             {
                 socket_id: socket.id,
-                company_guids: socket.companyGuids
+                connector_id: connectorId
             }
         );
+
+    }
+}
 
 /* 040926
         const registered =
