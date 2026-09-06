@@ -1040,6 +1040,7 @@ if (connector_id) {
 }
 
 // First-time / unregistered connector
+/* 060926
 if (!socket) {
 
     socket =
@@ -1050,7 +1051,15 @@ if (!socket) {
         );
 
 }
+*/
  
+// First-time / unregistered connector
+if (!socket) {
+
+    socket = registry.getPending();
+
+}
+
 console.log(
     "SOCKET FOUND :",
     !!socket
