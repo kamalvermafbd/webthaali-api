@@ -2,6 +2,8 @@ const connectors = new Map();
 const pendingConnectors = new Set();
 const pendingConnectorMap = new Map();
 
+let currentPendingConnector = null;
+
 /**
  * Register Connector
  */
@@ -329,6 +331,8 @@ function registerPending(socket, connectorId) {
 
     pendingConnectors.add(socket);
 
+     currentPendingConnector = socket;
+
     if (connectorId) {
 //060926 start
             socket.pendingConnectorId =
@@ -366,6 +370,20 @@ function getPendingById(connectorId) {
 
 }
 
+
+function getCurrentPendingConnector() {
+
+    if (!currentPendingConnector) {
+        return null;
+    }
+
+    if (!pendingConnectors.has(currentPendingConnector)) {
+        currentPendingConnector = null;
+        return null;
+    }
+
+    return currentPendingConnector;
+}
 
 // 060926 start
 function getPendingConnectors() {
@@ -451,6 +469,10 @@ function remove(connectorId, socket) {
     const currentSocket =
         connectors.get(connectorId);
 
+            if (socket === currentPendingConnector) {
+        currentPendingConnector = null;
+    }
+
     if (currentSocket === socket) {
 
         connectors.delete(connectorId);
@@ -502,6 +524,7 @@ module.exports = {
     registerPending,
     getPending,
     getPendingById,
+    getCurrentPendingConnector,
     getPendingConnectors,
     getPendingByGuid,
     remove,

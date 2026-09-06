@@ -528,10 +528,10 @@ app.post("/pairConnector", async (req, res) => {
     ? "ca_connector_id"
     : "client_connector_id";
 
-    // 060926 start
+    /* 060926 start
 const pending_connector_id =
   String(req.body.pending_connector_id || "").trim();
-// 060926 end
+*/ 
 
 const {
   data: companyData,
@@ -658,16 +658,13 @@ if (
 // ==========================================
 // FIRST TIME PAIRING
 // ==========================================
-
 else {
-// 060926 start
+
   socket =
-    registry.getPendingById(
-      pending_connector_id
-    );
+    registry.getCurrentPendingConnector();
 
   console.log(
-    "PENDING CONNECTOR BY ID FOUND :",
+    "CURRENT PENDING CONNECTOR FOUND :",
     !!socket
   );
 
@@ -676,11 +673,10 @@ else {
     return res.json({
       success: false,
       error:
-        "Selected connector is no longer available"
+        "Connector offline"
     });
 
   }
-// 060926 end
 
 // 060926 start
 if (
@@ -699,19 +695,6 @@ if (
 }
 // 060926 end
 
-  console.log(
-    "PENDING CONNECTOR FOUND :",
-    !!socket
-  );
-
-  if (!socket) {
-
-    return res.json({
-      success: false,
-      error: "No pending connector available"
-    });
-
-  }
 
   connector_id =
     `CON-${crypto.randomUUID()}`;
@@ -1114,43 +1097,25 @@ if (connector_id) {
 // =====================================================
 // FIRST-TIME / UNREGISTERED CONNECTOR
 // =====================================================
-
 if (!connector_id) {
 
-    const pending_connector_id =
-        String(
-            req.query.pending_connector_id || ""
-        ).trim();
-
-    console.log(
-        "REQUESTED PENDING CONNECTOR ID :",
-        pending_connector_id
-    );
-
-    if (!pending_connector_id) {
-
-        return res.json({
-            success: false,
-            error: "pending_connector_id required"
-        });
-
-    }
-
     socket =
-        registry.getPendingById(
-            pending_connector_id
-        );
+        registry.getCurrentPendingConnector();
 
     console.log(
-        "PENDING CONNECTOR BY ID FOUND :",
+        "CURRENT PENDING CONNECTOR FOUND :",
         !!socket
     );
 
-    if (socket && socket.pendingConnectorId) {
+    if (socket) {
 
         console.log(
-            "SELECTED PENDING CONNECTOR :",
-            socket.pendingConnectorId
+            "CURRENT PENDING CONNECTOR :",
+            {
+                socket_id: socket.id,
+                pending_connector_id:
+                    socket.pendingConnectorId
+            }
         );
 
     }
@@ -1159,7 +1124,7 @@ if (!connector_id) {
 
         return res.json({
             success: false,
-            error: "Selected connector is no longer available"
+            error: "Connector offline"
         });
 
     }
