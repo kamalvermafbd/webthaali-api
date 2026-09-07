@@ -587,6 +587,7 @@ if (specialServerConfig) {
         );
     }
 
+ 
     if (
         !workers ||
         workers.length === 0
@@ -1063,6 +1064,16 @@ if (isGeneral) {
                 continue;
             }
 
+            console.log(
+    "GENERAL SERVER:",
+    JSON.stringify({
+        worker_name: worker.worker_name,
+        server_id: server.id,
+        server_category: server.server_category,
+        server_active: server.is_active
+    }, null, 2)
+);
+
             if (
                 server.server_category !==
                 "GENERAL"
@@ -1083,6 +1094,16 @@ if (isGeneral) {
             const heartbeatAge =
                 Date.now() -
                 new Date(worker.runtime_heartbeat_at).getTime();
+
+            console.log(
+                "GENERAL HEARTBEAT:",
+                JSON.stringify({
+                    worker_name: worker.worker_name,
+                    heartbeatAge,
+                    heartbeatTimeout,
+                    runtime_heartbeat_at: worker.runtime_heartbeat_at
+                }, null, 2)
+            );
 
             if (
                 heartbeatAge >
