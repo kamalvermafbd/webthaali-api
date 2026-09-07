@@ -80,7 +80,6 @@ async function startSync({
     // =========================================
 // EXISTING ACTIVE BATCH
 // =========================================
-
 if (
     claimResult.claimed !== true
 ) {
@@ -107,24 +106,45 @@ if (
             existingBatch.batch_status === "PENDING" &&
             !existingBatch.worker_id
         ) {
-/*
-            const connectorResult =
-                await pairConnectorForBatch({
-                    company_code,
-                    tally_owner
-                });
 
-            if (!connectorResult?.success) {
+            let dispatchResult;
 
-                throw new Error(
-                    connectorResult?.error ||
-                    "Connector pairing failed"
-                );
+            try {
+
+                dispatchResult =
+                    await dispatchBatch(existingBatch);
+
+            } catch (error) {
+
+                if (
+                    error.message?.includes("No active") ||
+                    error.message?.includes("No available")
+                ) {
+
+                    return {
+
+                        success: false,
+
+                        queued: false,
+
+                        already_active: false,
+
+                        recovered: true,
+
+                        reason:
+                            "WAITING_FOR_WORKER",
+
+                        batch_id:
+                            existingBatch.batch_id,
+
+                        worker_id:
+                            null
+
+                    };
+                }
+
+                throw error;
             }
-            */
-
-            const dispatchResult =
-                await dispatchBatch(existingBatch);
 
             return {
 
@@ -233,17 +253,50 @@ if (
     }
 
 */
-    // =========================================
-    // 4. DISPATCH FLOW
-    // =========================================
+// =========================================
+// 4. DISPATCH FLOW
+// =========================================
 
-    const dispatchResult =
+let dispatchResult;
+
+try {
+
+    dispatchResult =
         await dispatchBatch(batch);
 
+} catch (error) {
 
-    // =========================================
-    // FINAL RESPONSE
-    // =========================================
+    if (
+        error.message?.includes("No active") ||
+        error.message?.includes("No available")
+    ) {
+
+        return {
+
+            success: false,
+
+            queued: false,
+
+            already_active: false,
+
+            reason:
+                "WAITING_FOR_WORKER",
+
+            batch_id,
+
+            worker_id:
+                null
+
+        };
+    }
+
+    throw error;
+}
+
+
+// =========================================
+// FINAL RESPONSE
+// =========================================
 
     return {
 

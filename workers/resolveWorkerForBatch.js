@@ -74,7 +74,7 @@ async function resolveWorkerForBatch(batch) {
             + configError.message
         );
     }
-
+/*070926
     if (
         !configs ||
         configs.length === 0
@@ -84,7 +84,15 @@ async function resolveWorkerForBatch(batch) {
             `No active worker config found for ${company_code}/${tally_owner}`
         );
     }
+*/
+const hasGeneralConfig =
+    configs?.some(
+        config => config.sync_preference === "GENERAL"
+    );
 
+const isGeneral =
+    !configs?.length ||
+    hasGeneralConfig;
     /*
      * ---------------------------------------------------------
      * 2. TRY CONFIGURED WORKER FIRST
@@ -779,20 +787,37 @@ if (specialServerConfig) {
      */
 
     const generalConfig =
-        configs.find(
-            config =>
-                config.sync_preference ===
-                "GENERAL"
-        );
+    configs.find(
+        config =>
+            config.sync_preference ===
+            "GENERAL"
+    );
 
-    if (generalConfig) {
+if (isGeneral) {
 
-        if (!worker_type) {
+       if (!worker_type) {
 
             throw new Error(
-                `worker_type missing for SPECIAL_SERVER batch ${batch.batch_id}`
+                `worker_type missing for GENERAL batch ${batch.batch_id}`
             );
         }
+
+        const normalizedWorkerType =
+            String(worker_type).trim().toUpperCase();
+
+        const requiredWorkerId =
+            normalizedWorkerType === "INITIAL_SYNC"
+                ? 2
+                : normalizedWorkerType === "NORMAL_SYNC"
+                    ? 3
+                    : null;
+
+        if (!requiredWorkerId) {
+
+                throw new Error(
+                    `Unsupported GENERAL worker_type: ${worker_type}`
+                );
+            }
 
         const { data: workers, error: workersError } =
             await supabase
@@ -812,7 +837,12 @@ if (specialServerConfig) {
                 `)
                 .eq(
                     "worker_type",
-                    worker_type
+                     normalizedWorkerType
+                )
+
+                .eq(
+                    "id",
+                    requiredWorkerId
                 )
                 .eq(
                     "is_active",
@@ -1262,7 +1292,7 @@ if (specialServerConfig) {
                 server.http_url,
 
             sync_preference:
-                generalConfig.sync_preference,
+    generalConfig?.sync_preference || "GENERAL",
 
             company_code:
                 company_code,
