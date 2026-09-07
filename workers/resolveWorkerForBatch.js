@@ -1052,6 +1052,15 @@ if (isGeneral) {
                     )
                     .maybeSingle();
 
+                    console.log(
+    "GENERAL SERVER RAW:",
+    JSON.stringify({
+        worker_name: worker.worker_name,
+        server,
+        serverError
+    }, null, 2)
+);
+
             if (serverError) {
 
                 throw new Error(
