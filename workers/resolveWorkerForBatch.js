@@ -1181,13 +1181,13 @@ if (isGeneral) {
             /*
              * Worker has no available execution slot.
              */
-
+/*070926
             if (
                 currentLoad >= concurrency
             ) {
                 continue;
             }
-
+*/
             eligibleWorkers.push({
 
                 worker,
