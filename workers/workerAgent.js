@@ -121,6 +121,48 @@ async function getPM2Process(processName) {
     }
 }
 
+async function reconcileWorker(worker) {
+
+    const pm2Process = await getPM2Process(
+        worker.pm2_process_name
+    );
+
+    const isRunning =
+        pm2Process &&
+        ["online", "launching"].includes(
+            pm2Process.pm2_env?.status
+        );
+
+    if (worker.is_active && !isRunning) {
+
+        console.log(
+            "DRY RUN: WOULD START",
+            worker.pm2_process_name,
+            "WORKER ID:",
+            worker.id
+        );
+
+        return;
+    }
+
+    if (!worker.is_active && isRunning) {
+
+        console.log(
+            "DRY RUN: WOULD STOP",
+            worker.pm2_process_name,
+            "WORKER ID:",
+            worker.id
+        );
+
+        return;
+    }
+
+    console.log(
+        "DRY RUN: NO ACTION",
+        worker.pm2_process_name
+    );
+}
+
 async function reconcileWorkers() {
 
     const agent = await loadAgent();
@@ -155,15 +197,7 @@ async function reconcileWorkers() {
             priority: worker.priority
         });
 
-        const pm2Process = await getPM2Process(
-    worker.pm2_process_name
-);
-
-console.log(
-    "PM2 STATUS:",
-    worker.pm2_process_name,
-    pm2Process?.pm2_env?.status || "NOT_FOUND"
-);
+        await reconcileWorker(worker);
 
     }
 }
