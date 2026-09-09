@@ -1,5 +1,7 @@
 // workers/workerAgent.js
 
+const { execFile } = require("child_process");
+
 require("dotenv").config();
 
 const os = require("os");
@@ -78,6 +80,47 @@ async function loadWorkers(serverId) {
     return data || [];
 }
 
+function runPM2(args) {
+    return new Promise((resolve, reject) => {
+
+        execFile("pm2", args, (error, stdout, stderr) => {
+
+            if (error) {
+                reject(error);
+                return;
+            }
+
+            resolve(stdout);
+        });
+
+    });
+}
+
+async function getPM2Process(processName) {
+
+    try {
+
+        const output = await runPM2([
+            "jlist"
+        ]);
+
+        const processes = JSON.parse(output);
+
+        return processes.find(
+            process => process.name === processName
+        );
+
+    } catch (error) {
+
+        console.error(
+            "PM2 status check failed:",
+            error.message
+        );
+
+        return null;
+    }
+}
+
 async function reconcileWorkers() {
 
     const agent = await loadAgent();
@@ -111,6 +154,16 @@ async function reconcileWorkers() {
             concurrency: worker.concurrency,
             priority: worker.priority
         });
+
+        const pm2Process = await getPM2Process(
+    worker.pm2_process_name
+);
+
+console.log(
+    "PM2 STATUS:",
+    worker.pm2_process_name,
+    pm2Process?.pm2_env?.status || "NOT_FOUND"
+);
 
     }
 }
