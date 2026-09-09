@@ -36375,6 +36375,19 @@ const result = await sendChunkedToConnector(
     }
 );
 
+await supabase
+    .from("sync_batches")
+    .update({
+        tally_groups_count: result.summary?.groups || 0,
+        tally_ledgers_count: result.summary?.ledgers || 0,
+        tally_stock_groups_count: result.summary?.stockGroups || 0,
+        tally_stocks_count: result.summary?.stocks || 0,
+        tally_godowns_count: result.summary?.godowns || 0,
+        tally_cost_centres_count: result.summary?.costCentres || 0,
+        tally_units_count: result.summary?.units || 0
+    })
+    .eq("batch_id", sync_batch_id);
+    
 const masterHandlers = {
 
     GROUP: () =>
