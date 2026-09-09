@@ -65,8 +65,13 @@ function register(connectorId, socket) {
 }
 
 socket.connectorIds.add(connectorId);
-
+//090926 change
+    //pendingConnectors.delete(socket);
+if (!socket.pendingConnectorId) {
     pendingConnectors.delete(socket);
+}
+//090926 change end
+
 
     // Remove old mappings belonging to this socket
 /*040926
