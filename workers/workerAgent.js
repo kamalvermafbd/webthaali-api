@@ -133,34 +133,47 @@ async function reconcileWorker(worker) {
             pm2Process.pm2_env?.status
         );
 
-    if (worker.is_active && !isRunning) {
-
-        console.log(
-            "DRY RUN: WOULD START",
-            worker.pm2_process_name,
-            "WORKER ID:",
-            worker.id
-        );
-
-        return;
-    }
-
-    if (!worker.is_active && isRunning) {
-
-        console.log(
-            "DRY RUN: WOULD STOP",
-            worker.pm2_process_name,
-            "WORKER ID:",
-            worker.id
-        );
-
-        return;
-    }
+   if (worker.is_active && !isRunning) {
 
     console.log(
-        "DRY RUN: NO ACTION",
+        "STARTING WORKER:",
+        worker.pm2_process_name,
+        "WORKER ID:",
+        worker.id
+    );
+
+    await runPM2([
+        "start",
+        worker.script_path,
+        "--name",
+        worker.pm2_process_name,
+        "--",
+        String(worker.id)
+    ]);
+
+    return;
+}
+
+if (!worker.is_active && isRunning) {
+
+    console.log(
+        "STOPPING WORKER:",
         worker.pm2_process_name
     );
+
+    await runPM2([
+        "stop",
+        worker.pm2_process_name
+    ]);
+
+    return;
+}
+
+console.log(
+    "NO ACTION:",
+    worker.pm2_process_name
+);
+
 }
 
 async function reconcileWorkers() {
