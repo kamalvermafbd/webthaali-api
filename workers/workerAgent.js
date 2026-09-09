@@ -215,13 +215,42 @@ async function reconcileWorkers() {
     }
 }
 
+
+async function heartbeatAgent(agentId) {
+
+    const { error } = await supabase
+        .from("worker_agents")
+        .update({
+            last_heartbeat_at: new Date().toISOString()
+        })
+        .eq("id", agentId);
+
+    if (error) {
+        console.error(
+            "Agent heartbeat failed:",
+            error.message
+        );
+    }
+
+}
 async function start() {
 
     console.log(
         "Worker Agent Starting..."
     );
 
+    const agent = await loadAgent();
+
+    await heartbeatAgent(agent.id);
+
     await reconcileWorkers();
+
+    setInterval(
+        async () => {
+            await heartbeatAgent(agent.id);
+        },
+        30000
+    );
 
     setInterval(
         async () => {
@@ -243,7 +272,6 @@ async function start() {
         30000
     );
 }
-
 start().catch(error => {
 
     console.error(
