@@ -375,7 +375,7 @@ if (configuredConfig) {
             `Configured worker ${configuredConfig.worker_id} is not active`
         );
     }
-
+/* 090926 commented
     if (
         worker_type &&
         worker.worker_type !== worker_type
@@ -385,7 +385,7 @@ if (configuredConfig) {
             `Configured worker type mismatch for ${company_code}/${tally_owner}`
         );
     }
-
+*/
     if (
         worker.server_id !==
         configuredConfig.server_id
