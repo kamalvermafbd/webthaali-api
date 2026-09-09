@@ -36375,6 +36375,18 @@ const result = await sendChunkedToConnector(
     }
 );
 
+console.log("===== TALLY MASTER COUNTS =====");
+console.log({
+    groups: result.summary?.groups,
+    ledgers: result.summary?.ledgers,
+    stockGroups: result.summary?.stockGroups,
+    stocks: result.summary?.stocks,
+    godowns: result.summary?.godowns,
+    costCentres: result.summary?.costCentres,
+    units: result.summary?.units
+});
+console.log("================================");
+
 await supabase
     .from("sync_batches")
     .update({
@@ -36387,7 +36399,7 @@ await supabase
         tally_units_count: result.summary?.units || 0
     })
     .eq("batch_id", sync_batch_id);
-    
+
 const masterHandlers = {
 
     GROUP: () =>
