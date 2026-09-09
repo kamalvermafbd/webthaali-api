@@ -19,6 +19,7 @@ async function loadAgent() {
         .select(`
             id,
             agent_name,
+            machine_name,
             server_id,
             is_active
         `)
