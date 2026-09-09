@@ -802,7 +802,7 @@ if (isGeneral) {
                 `worker_type missing for GENERAL batch ${batch.batch_id}`
             );
         }
-
+/*090926
         const normalizedWorkerType =
             String(worker_type).trim().toUpperCase();
 
@@ -819,7 +819,12 @@ if (isGeneral) {
                     `Unsupported GENERAL worker_type: ${worker_type}`
                 );
             }
+*/
+// 090926 started
+const normalizedWorkerType =
+    String(worker_type).trim().toUpperCase();
 
+//
         const { data: workers, error: workersError } =
             await supabase
                 .from("workers")
@@ -836,6 +841,8 @@ if (isGeneral) {
                     runtime_id,
                     runtime_heartbeat_at
                 `)
+
+                /* 090926 commented
                 .eq(
                     "worker_type",
                      normalizedWorkerType
@@ -845,10 +852,23 @@ if (isGeneral) {
                     "id",
                     requiredWorkerId
                 )
+                   
                 .eq(
                     "is_active",
                     true
                 )
+                     */
+// 090926 new inserted
+                .eq(
+                    "worker_type",
+                    normalizedWorkerType
+                )
+                .eq(
+                    "is_active",
+                    true
+                )
+
+                // new inserted ends
                 .not(
                     "runtime_id",
                     "is",
