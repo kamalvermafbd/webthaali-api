@@ -82,6 +82,14 @@ function getTransactionType({
         return "EXPENSE";
     }
 
+        if (voucherType.includes("PAYMENT")) {
+        return "PAYMENT";
+    }
+
+    if (voucherType.includes("RECEIPT")) {
+        return "RECEIPT";
+    }
+    
     console.log("TRANSACTION TYPE DEBUG:", {
     voucherType: header.voucherTypeName,
     voucherGuid: header.guid,
