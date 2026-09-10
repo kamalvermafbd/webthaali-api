@@ -622,6 +622,13 @@ async hasCompletedSync({
 
     }) {
 
+        console.log("BATCH MARK COMPLETED:", {
+    batch_id,
+    module,
+    processed,
+    failed
+});
+
         return this.updateFields({
 
             batch_id,
@@ -666,6 +673,14 @@ async hasCompletedSync({
         error
 
     }) {
+
+        console.log("🔥 BATCH MARK FAILED:", {
+    batch_id,
+    error:
+        typeof error === "string"
+            ? error
+            : error?.message || "Unknown Error"
+});
 
         return this.updateFields({
 

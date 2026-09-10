@@ -411,6 +411,12 @@ function buildBillAllocationRows({
 
         });
 
+        console.log("VOUCHER TYPE DEBUG:", {
+    voucherType: header.voucherTypeName,
+    voucherGuid: header.guid,
+    transactionType
+});
+
     for (const ledger of enrichedLedgers) {
 
         for (const bill of (
