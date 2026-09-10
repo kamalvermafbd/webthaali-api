@@ -341,6 +341,7 @@ const heartbeat =
     );
 }
 
+/*100926
 startWorker()
     .catch(error => {
 
@@ -350,4 +351,14 @@ startWorker()
         );
 
         process.exit(1);
+    });
+    */
+   startWorker()
+    .catch(error => {
+
+        console.error(
+            "BULLMQ WORKER START FAILED:",
+            error
+        );
+
     });
