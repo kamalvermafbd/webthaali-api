@@ -82,6 +82,15 @@ function getTransactionType({
         return "EXPENSE";
     }
 
+    console.log("TRANSACTION TYPE DEBUG:", {
+    voucherType: header.voucherTypeName,
+    voucherGuid: header.guid,
+    ledgers: (ledgers || []).map(l => ({
+        ledgerName: l.ledgerName,
+        ledgerParentName: l.ledgerParentName
+    }))
+});
+
     return null;
 
 }
