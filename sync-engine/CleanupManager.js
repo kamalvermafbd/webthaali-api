@@ -182,7 +182,37 @@ class CleanupManager {
 
             });
 
+            
+
         }
+
+             //--------------------------------------------------
+        // Opening Balance Allocation Cleanup
+        //--------------------------------------------------
+
+        const {
+            error: openingCleanupError,
+            count: openingDeletedCount
+        } = await supabase
+            .from(TABLES.OPENING_BALANCE_ALLOCATIONS)
+            .delete({
+                count: "exact"
+            })
+            .eq("company_code", company_code)
+            .eq("tally_owner", tally_owner)
+            .eq("source_type", "TALLY")
+            .eq("is_active", false);
+
+        if (openingCleanupError) {
+            throw new Error(
+                `Opening balance cleanup failed: ${openingCleanupError.message}`
+            );
+        }
+
+        cleanedTables.push({
+            table: TABLES.OPENING_BALANCE_ALLOCATIONS,
+            deleted: openingDeletedCount || 0
+        });
 
         //--------------------------------------------------
         // Result
