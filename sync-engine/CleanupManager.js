@@ -93,7 +93,7 @@ class CleanupManager {
 
         if (
 
-            batch.batch_status !== "COMPLETED" ||
+            batch.batch_status !== "CLOSED" ||
 
             batch.current_action !== "COMPLETED" ||
 
