@@ -1,3 +1,11 @@
+const { createClient } =
+    require("@supabase/supabase-js");
+
+const supabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_KEY
+);
+
 const BatchQueue =
     require("./BatchQueue");
 
@@ -912,13 +920,100 @@ const {
 
             );
 
-            console.log("========== MASTER ROW BEFORE BUILDER ==========");
-console.dir(rows[0], { depth: null });
+            // ======================================
+// TALLY OPENING BILL ALLOCATIONS
+// ======================================
 
-console.log("========== DB ROW AFTER BUILDER ==========");
-console.dir(dbRows[0], { depth: null });
+const openingBalanceRows = [];
 
-console.log("==============================================");
+if (entity === ENTITY_TYPE.LEDGER) {
+
+    for (const ledger of rows) {
+
+        const allocations =
+            Array.isArray(ledger.openingBillAllocations)
+                ? ledger.openingBillAllocations
+                : [];
+
+        for (const bill of allocations) {
+
+            const balanceType =
+                ledger.openingBalanceType === "CR"
+                    ? "CR"
+                    : "DR";
+
+            openingBalanceRows.push({
+                company_code,
+                tally_owner,
+                ledger_guid: ledger.guid?.trim() || null,
+                bill_name: bill.billName || null,
+                bill_date: bill.billDate || null,
+                due_date: bill.dueDate || null,
+                amount: Math.abs(
+                    Number(bill.openingBalance || 0)
+                ),
+                balance_type: balanceType,
+                source_type: "TALLY",
+                sync_batch_id
+            });
+        }
+    }
+
+    console.log(
+        "TALLY OPENING ALLOCATION ROWS :",
+        openingBalanceRows.length
+    );
+}
+
+const openingBalanceLedgerGuids =
+    entity === ENTITY_TYPE.LEDGER
+        ? rows
+            .filter(ledger =>
+                Array.isArray(ledger.openingBillAllocations)
+            )
+            .map(ledger => ledger.guid?.trim())
+            .filter(Boolean)
+        : [];
+
+// ======================================
+// PREPARE TALLY OPENING ALLOCATION OPERATION
+// ======================================
+
+let openingBalanceOperation = null;
+
+if (
+    entity === ENTITY_TYPE.LEDGER &&
+    openingBalanceLedgerGuids.length > 0
+) {
+
+    openingBalanceOperation = {
+        entity: "OPENING_BALANCE_ALLOCATION",
+        table: "opening_balance_allocations",
+       operation: "OPENING_BALANCE_SYNC",
+        rows: openingBalanceRows,
+        ledgerGuids: openingBalanceLedgerGuids,
+        options: {
+            onConflict:
+                "company_code,tally_owner,ledger_guid,bill_name,source_type"
+        },
+        company_code,
+        tally_owner,
+        sync_batch_id
+    };
+
+    console.log(
+        "TALLY OPENING ALLOCATION OPERATION READY :",
+        openingBalanceRows.length
+    );
+}
+
+        console.log("========== MASTER ROW BEFORE BUILDER ==========");
+        console.dir(rows[0], { depth: null });
+
+        console.log("========== DB ROW AFTER BUILDER ==========");
+        console.dir(dbRows[0], { depth: null });
+
+        console.log("==============================================");
 
         const validation =
 
@@ -980,7 +1075,9 @@ console.log("==============================================");
 
                 });   
 
-
+                if (openingBalanceOperation) {
+                    operations.push(openingBalanceOperation);
+                }
 
 
         }

@@ -123,6 +123,12 @@ if (operation?.table === "tally_vouchers") {
                     operation
                 );
 
+            case "OPENING_BALANCE_SYNC":
+
+            return this.executeOpeningBalanceSync(
+                operation
+            );
+            
             case OPERATION_TYPE.UPDATE:
 
                 return this.executeUpdate(
@@ -307,6 +313,201 @@ console.log("OPTIONS :", options);
     });
 
     return true;
+
+    }
+
+        // ----------------------------------
+    // OPENING BALANCE SYNC
+    // ----------------------------------
+
+    async executeOpeningBalanceSync(operation) {
+
+        const {
+            table,
+            rows = [],
+            ledgerGuids = [],
+            options = {},
+            company_code,
+            tally_owner
+        } = operation;
+
+        if (!company_code || !tally_owner) {
+
+            throw new Error(
+                "Opening balance sync requires company_code and tally_owner"
+            );
+
+        }
+
+        if (
+            !Array.isArray(ledgerGuids) ||
+            ledgerGuids.length === 0
+        ) {
+
+            return true;
+
+        }
+
+        // ----------------------------------
+        // 1. UPSERT CURRENT TALLY ROWS
+        // ----------------------------------
+
+        if (rows.length > 0) {
+
+            const rowsWithBatch =
+                rows.map(row => ({
+                    ...row,
+                    is_active: true,
+                    sync_batch_id:
+                        operation.sync_batch_id
+                }));
+
+            await this.processChunks({
+
+                rows: rowsWithBatch,
+
+                callback: async (chunk) => {
+
+                    const {
+                        data,
+                        error
+                    } = await supabase
+                        .from(table)
+                        .upsert(
+                            chunk,
+                            options
+                        )
+                        .select("*");
+
+                    if (error) {
+
+                        throw new Error(
+                            `OPENING BALANCE UPSERT failed (${table}) : ${error.message}`
+                        );
+
+                    }
+
+                    console.log(
+                        "OPENING BALANCE UPSERT:",
+                        {
+                            requested: chunk.length,
+                            returned: data?.length || 0
+                        }
+                    );
+
+                }
+
+            });
+
+        }
+
+        // ----------------------------------
+        // 2. GET EXISTING TALLY ROWS
+        // ----------------------------------
+
+        const {
+            data: existingRows,
+            error: existingError
+        } = await supabase
+            .from(table)
+            .select(
+                "id,ledger_guid,bill_name"
+            )
+            .eq(
+                "company_code",
+                company_code
+            )
+            .eq(
+                "tally_owner",
+                tally_owner
+            )
+            .eq(
+                "source_type",
+                "TALLY"
+            )
+            .in(
+                "ledger_guid",
+                ledgerGuids
+            );
+
+        if (existingError) {
+
+            throw new Error(
+                `OPENING BALANCE FETCH failed (${table}) : ${existingError.message}`
+            );
+
+        }
+
+        // ----------------------------------
+        // 3. CURRENT TALLY BILL KEYS
+        // ----------------------------------
+
+        const currentKeys = new Set(
+            rows.map(row =>
+                `${row.ledger_guid}::${row.bill_name}`
+            )
+        );
+
+        // ----------------------------------
+        // 4. FIND MISSING TALLY BILLS
+        // ----------------------------------
+
+        const missingIds =
+            (existingRows || [])
+                .filter(row =>
+                    !currentKeys.has(
+                        `${row.ledger_guid}::${row.bill_name}`
+                    )
+                )
+                .map(row => row.id);
+
+        // ----------------------------------
+        // 5. SOFT DEACTIVATE
+        // ----------------------------------
+
+        if (missingIds.length > 0) {
+
+            const {
+                error: inactiveError
+            } = await supabase
+                .from(table)
+                .update({
+                    is_active: false,
+                    updated_at:
+                        new Date().toISOString(),
+                    sync_batch_id:
+                        operation.sync_batch_id
+                })
+                .in(
+                    "id",
+                    missingIds
+                );
+
+            if (inactiveError) {
+
+                throw new Error(
+                    `OPENING BALANCE INACTIVATE failed (${table}) : ${inactiveError.message}`
+                );
+
+            }
+
+        }
+
+        console.log(
+            "OPENING BALANCE SYNC RESULT:",
+            {
+                tallyLedgers:
+                    ledgerGuids.length,
+
+                currentTallyBills:
+                    rows.length,
+
+                deactivatedBills:
+                    missingIds.length
+            }
+        );
+
+        return true;
 
     }
 
