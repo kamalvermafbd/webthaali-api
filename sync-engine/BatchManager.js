@@ -690,6 +690,50 @@ if (!reconciliationRetryResult.success) {
 
 }
 
+// --------------------------------------------------
+// Deactivate TALLY Opening Balance Allocations
+// after parent ledger soft-delete succeeds
+// --------------------------------------------------
+
+if (
+    entity === ENTITY_TYPE.LEDGER &&
+    reconciliation.extraGuids?.length > 0
+) {
+
+    const deletedLedgerGuids =
+        reconciliation.extraGuids
+            .map(row => row.guid)
+            .filter(Boolean);
+
+    if (deletedLedgerGuids.length > 0) {
+
+        const { error: openingBalanceDeactivateError } =
+            await supabase
+                .from(TABLES.OPENING_BALANCE_ALLOCATIONS)
+                .update({
+                    is_active: false,
+                    updated_at: new Date().toISOString()
+                })
+                .eq("company_code", company_code)
+                .eq("tally_owner", tally_owner)
+                .eq("source_type", "TALLY")
+                .in("ledger_guid", deletedLedgerGuids);
+
+        if (openingBalanceDeactivateError) {
+            throw new Error(
+                `Failed to deactivate opening balance allocations: ${
+                    openingBalanceDeactivateError.message
+                }`
+            );
+        }
+
+        console.log(
+            "OPENING BALANCE ALLOCATIONS DEACTIVATED:",
+            deletedLedgerGuids.length
+        );
+    }
+}
+
  if (syncMode === "FULL") {
 
     await SnapshotManager.removeMissingGuids({
