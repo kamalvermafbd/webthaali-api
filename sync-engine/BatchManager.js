@@ -963,6 +963,15 @@ if (entity === ENTITY_TYPE.LEDGER) {
         "TALLY OPENING ALLOCATION ROWS :",
         openingBalanceRows.length
     );
+
+    console.log("SERVER OPENING ALLOCATION CHECK :", {
+        ledgers: rows.length,
+        ledgersWithAllocations: rows.filter(
+            ledger => Array.isArray(ledger.openingBillAllocations)
+        ).length,
+        totalAllocations: openingBalanceRows.length,
+        sample: openingBalanceRows.slice(0, 3)
+    });
 }
 
 const openingBalanceLedgerGuids =
