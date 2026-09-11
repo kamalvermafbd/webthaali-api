@@ -420,7 +420,7 @@ const {
 if (dbError) {
     throw dbError;
 }
-
+/* 11.09.26
 const dbMap = new Map();
 
 for (const row of dbRows || []) {
@@ -436,7 +436,40 @@ for (const row of dbRows || []) {
         Number(row.db_closing_quantity || 0)
     );
 }
+*/
+// 110926 started
+const dbMap = new Map();
 
+for (const row of dbRows || []) {
+
+    const stockGuid =
+        String(row.stock_guid || "").trim();
+
+    const godown =
+        String(row.godown || "").trim();
+
+    const unit =
+        String(row.unit || "")
+            .trim()
+            .toLowerCase();
+
+    const key = [
+        stockGuid,
+        godown,
+        unit
+    ].join("|");
+
+    const quantity =
+        Number(row.db_closing_quantity || 0);
+
+    dbMap.set(
+        key,
+        (dbMap.get(key) || 0) + quantity
+    );
+}
+
+// 110926 ended
+/*
 const reconciliationRows =
     rows.map(row => {
 
@@ -469,7 +502,44 @@ const reconciliationRows =
         };
 
     });
+*/
+// 110926 started
+const reconciliationRows =
+    rows.map(row => {
 
+        const key = [
+            String(row.stock_guid || "").trim(),
+            String(row.godown_name || "").trim(),
+            String(row.unit || "")
+                .trim()
+                .toLowerCase()
+        ].join("|");
+
+        const dbStock =
+            Number(
+                dbMap.get(key) || 0
+            );
+
+        const tallyStock =
+            Number(
+                row.closing_quantity || 0
+            );
+
+        return {
+
+            ...row,
+
+            db_stock_quantity:
+                dbStock,
+
+            balance_difference:
+                tallyStock - dbStock
+
+        };
+
+    });
+
+    // 110926 end
    const {
     error: reconciliationError
 } = await supabase
