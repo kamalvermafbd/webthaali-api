@@ -446,7 +446,9 @@ for (const row of dbRows || []) {
         String(row.stock_guid || "").trim();
 
     const godown =
-        String(row.godown || "").trim();
+    String(row.godown || "")
+        .trim()
+        .toLowerCase();
 
     const unit =
         String(row.unit || "")
@@ -508,12 +510,12 @@ const reconciliationRows =
     rows.map(row => {
 
         const key = [
-            String(row.stock_guid || "").trim(),
-            String(row.godown_name || "").trim(),
-            String(row.unit || "")
-                .trim()
-                .toLowerCase()
-        ].join("|");
+    String(row.stock_guid || "").trim(),
+    String(row.godown_name || "").trim().toLowerCase(),
+    String(row.unit || "")
+        .trim()
+        .toLowerCase()
+].join("|");
 
         const dbStock =
             Number(
