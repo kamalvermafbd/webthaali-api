@@ -420,6 +420,47 @@ const {
 if (dbError) {
     throw dbError;
 }
+
+// ==================================================
+// LOAD TALLY STOCK OPENING - GODOWN WISE
+// ==================================================
+
+const {
+    data: openingRows,
+    error: openingError
+} = await supabase
+    .from("tally_stock_opening_balances")
+    .select(`
+        stock_guid,
+        godown_name,
+        opening_balance
+    `)
+    .eq("company_code", company_code)
+    .eq("tally_owner", tally_owner)
+    .eq("source_type", "TALLY")
+    .eq("is_active", true);
+
+if (openingError) {
+    throw openingError;
+}
+
+const openingMap = new Map();
+
+for (const row of openingRows || []) {
+
+    const key = [
+        String(row.stock_guid || "").trim(),
+        String(row.godown_name || "")
+            .trim()
+            .toLowerCase()
+    ].join("|");
+
+    openingMap.set(
+        key,
+        (openingMap.get(key) || 0) +
+        Number(row.opening_balance || 0)
+    );
+}
 /* 11.09.26
 const dbMap = new Map();
 
@@ -516,7 +557,7 @@ const reconciliationRows =
         .trim()
         .toLowerCase()
 ].join("|");
-
+/* 120926 commented
         const dbStock =
             Number(
                 dbMap.get(key) || 0
@@ -526,7 +567,32 @@ const reconciliationRows =
             Number(
                 row.closing_quantity || 0
             );
+*/
 
+        const dbMovementStock =
+            Number(
+                dbMap.get(key) || 0
+            );
+
+        const openingKey = [
+            String(row.stock_guid || "").trim(),
+            String(row.godown_name || "")
+                .trim()
+                .toLowerCase()
+        ].join("|");
+
+        const openingStock =
+            Number(
+                openingMap.get(openingKey) || 0
+            );
+
+        const dbStock =
+            dbMovementStock + openingStock;
+
+        const tallyStock =
+            Number(
+                row.closing_quantity || 0
+            );
         return {
 
             ...row,
