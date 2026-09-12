@@ -1106,14 +1106,23 @@ if (entity === ENTITY_TYPE.STOCK) {
                 batch_name:
                     godown.batchName || null,
 
-                opening_balance:
-                    godown.openingBalance || null,
+              opening_balance:
+                parseFloat(
+                    String(godown.openingBalance || "")
+                        .match(/^-?\d+(?:\.\d+)?/)?.[0]
+                ) || null,
 
-                opening_rate:
-                    godown.openingRate || null,
+            opening_rate:
+                parseFloat(
+                    String(godown.openingRate || "")
+                        .match(/^-?\d+(?:\.\d+)?/)?.[0]
+                ) || null,
 
-                opening_value:
-                    godown.openingValue || null,
+            opening_value:
+                parseFloat(
+                    String(godown.openingValue || "")
+                        .match(/^-?\d+(?:\.\d+)?/)?.[0]
+                ) || null,
 
                 source_type: "TALLY",
 
