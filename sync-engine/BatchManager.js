@@ -965,8 +965,37 @@ const {
             );
 
             // ======================================
-// TALLY OPENING BILL ALLOCATIONS
+// TALLY STOCK OPENING TOTAL
 // ======================================
+if (entity === ENTITY_TYPE.STOCK) {
+
+    for (let i = 0; i < dbRows.length; i++) {
+
+        const stock = rows[i];
+
+        const openingMatch =
+            String(stock.openingBalance || "")
+                .match(/^-?\d+(?:\.\d+)?/);
+
+        dbRows[i].opening_balance =
+            openingMatch
+                ? parseFloat(openingMatch[0])
+                : null;
+    }
+
+    console.log(
+        "TALLY STOCK OPENING TOTAL UPDATED :",
+        dbRows.map(row => ({
+            stock_guid: row.guid,
+            opening_balance: row.opening_balance
+        }))
+    );
+}
+
+
+            // ======================================
+            // TALLY OPENING BILL ALLOCATIONS
+            // ======================================
 
 const openingBalanceRows = [];
 
