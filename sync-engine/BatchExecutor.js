@@ -129,6 +129,11 @@ if (operation?.table === "tally_vouchers") {
                 operation
             );
             
+            case "STOCK_OPENING_BALANCE_SYNC":
+            return this.executeStockOpeningBalanceSync(
+                operation
+            );
+            
             case OPERATION_TYPE.UPDATE:
 
                 return this.executeUpdate(
@@ -511,6 +516,200 @@ console.log("OPTIONS :", options);
 
     }
 
+        // ----------------------------------
+    // STOCK OPENING BALANCE SYNC
+    // ----------------------------------
+
+    async executeStockOpeningBalanceSync(operation) {
+
+        const {
+            table,
+            rows = [],
+            stockGuids = [],
+            options = {},
+            company_code,
+            tally_owner
+        } = operation;
+
+        if (!company_code || !tally_owner) {
+
+            throw new Error(
+                "Stock opening balance sync requires company_code and tally_owner"
+            );
+
+        }
+
+        if (
+            !Array.isArray(stockGuids) ||
+            stockGuids.length === 0
+        ) {
+
+            return true;
+
+        }
+
+        // ----------------------------------
+        // 1. UPSERT CURRENT TALLY ROWS
+        // ----------------------------------
+
+        if (rows.length > 0) {
+
+            const rowsWithBatch =
+                rows.map(row => ({
+                    ...row,
+                    is_active: true,
+                    sync_batch_id:
+                        operation.sync_batch_id
+                }));
+
+            await this.processChunks({
+
+                rows: rowsWithBatch,
+
+                callback: async (chunk) => {
+
+                    const {
+                        data,
+                        error
+                    } = await supabase
+                        .from(table)
+                        .upsert(
+                            chunk,
+                            options
+                        )
+                        .select("*");
+
+                    if (error) {
+
+                        throw new Error(
+                            `STOCK OPENING BALANCE UPSERT failed (${table}) : ${error.message}`
+                        );
+
+                    }
+
+                    console.log(
+                        "STOCK OPENING BALANCE UPSERT:",
+                        {
+                            requested: chunk.length,
+                            returned: data?.length || 0
+                        }
+                    );
+
+                }
+
+            });
+
+        }
+
+        // ----------------------------------
+        // 2. GET EXISTING TALLY ROWS
+        // ----------------------------------
+
+        const {
+            data: existingRows,
+            error: existingError
+        } = await supabase
+            .from(table)
+            .select(
+                "id,stock_guid,godown_name,batch_name"
+            )
+            .eq(
+                "company_code",
+                company_code
+            )
+            .eq(
+                "tally_owner",
+                tally_owner
+            )
+            .eq(
+                "source_type",
+                "TALLY"
+            )
+            .in(
+                "stock_guid",
+                stockGuids
+            );
+
+        if (existingError) {
+
+            throw new Error(
+                `STOCK OPENING BALANCE FETCH failed (${table}) : ${existingError.message}`
+            );
+
+        }
+
+        // ----------------------------------
+        // 3. CURRENT TALLY STOCK KEYS
+        // ----------------------------------
+
+        const currentKeys = new Set(
+            rows.map(row =>
+                `${row.stock_guid}::${row.godown_name}::${row.batch_name || ""}`
+            )
+        );
+
+        // ----------------------------------
+        // 4. FIND MISSING STOCK OPENINGS
+        // ----------------------------------
+
+        const missingIds =
+            (existingRows || [])
+                .filter(row =>
+                    !currentKeys.has(
+                        `${row.stock_guid}::${row.godown_name}::${row.batch_name || ""}`
+                    )
+                )
+                .map(row => row.id);
+
+        // ----------------------------------
+        // 5. SOFT DEACTIVATE
+        // ----------------------------------
+
+        if (missingIds.length > 0) {
+
+            const {
+                error: inactiveError
+            } = await supabase
+                .from(table)
+                .update({
+                    is_active: false,
+                    updated_at:
+                        new Date().toISOString(),
+                    sync_batch_id:
+                        operation.sync_batch_id
+                })
+                .in(
+                    "id",
+                    missingIds
+                );
+
+            if (inactiveError) {
+
+                throw new Error(
+                    `STOCK OPENING BALANCE INACTIVATE failed (${table}) : ${inactiveError.message}`
+                );
+
+            }
+
+        }
+
+        console.log(
+            "STOCK OPENING BALANCE SYNC RESULT:",
+            {
+                tallyStocks:
+                    stockGuids.length,
+
+                currentStockOpenings:
+                    rows.length,
+
+                deactivatedStockOpenings:
+                    missingIds.length
+            }
+        );
+
+        return true;
+
+    }
     // ----------------------------------
     // UPDATE
     // ----------------------------------

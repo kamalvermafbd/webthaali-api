@@ -214,6 +214,34 @@ class CleanupManager {
             deleted: openingDeletedCount || 0
         });
 
+        // --------------------------------------------------
+        // Stock Opening Balance Cleanup
+        // --------------------------------------------------
+
+        const {
+            error: stockOpeningCleanupError,
+            count: stockOpeningDeletedCount
+        } = await supabase
+            .from(TABLES.STOCK_OPENING_BALANCES)
+            .delete({
+                count: "exact"
+            })
+            .eq("company_code", company_code)
+            .eq("tally_owner", tally_owner)
+            .eq("source_type", "TALLY")
+            .eq("is_active", false);
+
+        if (stockOpeningCleanupError) {
+            throw new Error(
+                `Stock opening balance cleanup failed: ${stockOpeningCleanupError.message}`
+            );
+        }
+
+        cleanedTables.push({
+            table: TABLES.STOCK_OPENING_BALANCES,
+            deleted: stockOpeningDeletedCount || 0
+        });
+
         //--------------------------------------------------
         // Result
         //--------------------------------------------------

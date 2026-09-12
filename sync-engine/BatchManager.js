@@ -1068,6 +1068,120 @@ if (
 
         console.log("==============================================");
 
+        // ======================================
+// TALLY STOCK OPENING BALANCE OPERATION
+// ======================================
+
+const stockOpeningBalanceRows = [];
+
+if (entity === ENTITY_TYPE.STOCK) {
+
+    for (const stock of rows) {
+
+        const openingGodowns =
+            Array.isArray(stock.openingGodowns)
+                ? stock.openingGodowns
+                : [];
+
+        for (const godown of openingGodowns) {
+
+            stockOpeningBalanceRows.push({
+
+                company_code,
+
+                tally_owner,
+
+                stock_guid:
+                    stock.guid?.trim() || null,
+
+                stock_masterid:
+                    stock.masterId ?? null,
+
+                stock_alterid:
+                    stock.alterId ?? null,
+
+                godown_name:
+                    godown.godownName || null,
+
+                batch_name:
+                    godown.batchName || null,
+
+                opening_balance:
+                    godown.openingBalance || null,
+
+                opening_rate:
+                    godown.openingRate || null,
+
+                opening_value:
+                    godown.openingValue || null,
+
+                source_type: "TALLY",
+
+                sync_batch_id
+
+            });
+
+        }
+
+    }
+
+    console.log(
+        "TALLY STOCK OPENING BALANCE ROWS :",
+        stockOpeningBalanceRows.length
+    );
+}
+
+const stockOpeningBalanceStockGuids =
+    entity === ENTITY_TYPE.STOCK
+        ? rows
+            .map(stock => stock.guid?.trim())
+            .filter(Boolean)
+        : [];
+
+let stockOpeningBalanceOperation = null;
+
+if (
+    entity === ENTITY_TYPE.STOCK &&
+    stockOpeningBalanceStockGuids.length > 0
+) {
+
+    stockOpeningBalanceOperation = {
+
+        entity: "STOCK_OPENING_BALANCE",
+
+        table:
+            TABLES.STOCK_OPENING_BALANCES,
+
+        operation:
+            "STOCK_OPENING_BALANCE_SYNC",
+
+        rows:
+            stockOpeningBalanceRows,
+
+        stockGuids:
+            stockOpeningBalanceStockGuids,
+
+        options: {
+
+            onConflict:
+                "company_code,tally_owner,stock_guid,godown_name,batch_name,source_type"
+
+        },
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    };
+
+    console.log(
+        "TALLY STOCK OPENING BALANCE OPERATION READY :",
+        stockOpeningBalanceRows.length
+    );
+}
+
         const validation =
 
             await ValidationPipeline.validate({
@@ -1132,6 +1246,9 @@ if (
                     operations.push(openingBalanceOperation);
                 }
 
+                if (stockOpeningBalanceOperation) {
+                        operations.push(stockOpeningBalanceOperation);
+                    }
 
         }
 

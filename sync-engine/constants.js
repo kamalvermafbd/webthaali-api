@@ -102,6 +102,8 @@ const TABLES = {
 
     OPENING_BALANCE_ALLOCATIONS: "opening_balance_allocations",
 
+    STOCK_OPENING_BALANCES: "tally_stock_opening_balances",
+
     COST_CENTRE_ALLOCATIONS: "tally_costcentre_allocations",
 
     SNAPSHOT: "tally_sync_snapshot",
