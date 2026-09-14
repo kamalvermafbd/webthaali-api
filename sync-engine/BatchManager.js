@@ -992,6 +992,73 @@ if (entity === ENTITY_TYPE.STOCK) {
     );
 }
 
+// ======================================
+// TALLY STOCK REORDER PARAMETERS
+// ======================================
+if (entity === ENTITY_TYPE.STOCK) {
+
+    for (let i = 0; i < dbRows.length; i++) {
+
+        const stock = rows[i];
+
+        dbRows[i].reorder_level =
+            stock.reorderLevel ?? null;
+
+        dbRows[i].minimum_order_quantity =
+            stock.minimumOrderQuantity ?? null;
+
+        dbRows[i].reorder_period =
+            stock.reorderPeriod || null;
+
+        dbRows[i].reorder_period_length =
+            stock.reorderPeriodLength ?? null;
+
+        dbRows[i].reorder_criteria =
+            stock.reorderCriteria || null;
+
+        dbRows[i].minimum_order_period =
+            stock.minimumOrderPeriod || null;
+
+        dbRows[i].minimum_order_period_length =
+            stock.minimumOrderPeriodLength ?? null;
+
+        dbRows[i].minimum_order_criteria =
+            stock.minimumOrderCriteria || null;
+
+        dbRows[i].reorder_as_higher =
+            stock.reorderAsHigher ?? null;
+
+        dbRows[i].min_order_as_higher =
+            stock.minOrderAsHigher ?? null;
+    }
+
+    console.log(
+        "TALLY STOCK REORDER PARAMETERS UPDATED :",
+        dbRows.map(row => ({
+            stock_guid: row.guid,
+            reorder_level: row.reorder_level,
+            minimum_order_quantity:
+                row.minimum_order_quantity,
+            reorder_period:
+                row.reorder_period,
+            reorder_period_length:
+                row.reorder_period_length,
+            reorder_criteria:
+                row.reorder_criteria,
+            minimum_order_period:
+                row.minimum_order_period,
+            minimum_order_period_length:
+                row.minimum_order_period_length,
+            minimum_order_criteria:
+                row.minimum_order_criteria,
+            reorder_as_higher:
+                row.reorder_as_higher,
+            min_order_as_higher:
+                row.min_order_as_higher
+        }))
+    );
+}
+
 
             // ======================================
             // TALLY OPENING BILL ALLOCATIONS
