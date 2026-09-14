@@ -27900,15 +27900,59 @@ const companyInfo = await importCompany({
 });
 */
 
+const {
+  data: existingCompany,
+  error: companyLookupError
+} = await supabase
+  .from("company")
+  .select(
+    is_ca
+      ? "ca_connector_id"
+      : "client_connector_id"
+  )
+  .eq("company_code", company_code)
+  .single();
+
+if (companyLookupError) {
+  return res.json({
+    success: false,
+    error: companyLookupError.message
+  });
+}
+
+const connectorId = is_ca
+  ? existingCompany?.ca_connector_id
+  : existingCompany?.client_connector_id;
+
+if (!connectorId) {
+  return res.json({
+    success: false,
+    error: "Connector not found for this Tally company"
+  });
+}
+
+const connectorSocket =
+  registry.get(
+    connectorId,
+    company_code
+  );
+
+if (!connectorSocket) {
+  return res.json({
+    success: false,
+    error: "Connector is offline"
+  });
+}
+
 const companyInfo = await sendToConnector(
-  socket,
+  connectorSocket,
   "getTallyCompanyInfo",
   {
     company: tally_company
   }
 );
 
-if (!companyInfo.booksBeginningFrom) {
+if (!companyInfo?.booksBeginningFrom) {
   return res.json({
     success: false,
     error: "Books Beginning From not found in Tally company"
