@@ -27894,9 +27894,19 @@ app.post(
 
 }
 
+/*
 const companyInfo = await importCompany({
   company: tally_company
 });
+*/
+
+const companyInfo = await sendToConnector(
+  socket,
+  "getTallyCompanyInfo",
+  {
+    company: tally_company
+  }
+);
 
 if (!companyInfo.booksBeginningFrom) {
   return res.json({
