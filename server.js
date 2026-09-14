@@ -27894,6 +27894,16 @@ app.post(
 
 }
 
+const companyInfo = await importCompany({
+  company: tally_company
+});
+
+if (!companyInfo.booksBeginningFrom) {
+  return res.json({
+    success: false,
+    error: "Books Beginning From not found in Tally company"
+  });
+}
       // =========================
       // BUILD UPDATE OBJECT
       // =========================
@@ -27908,6 +27918,9 @@ app.post(
   updateObj.ca_tally_company_guid =
     tally_company_guid;
 
+  updateObj.ca_tally_books_begining_from =
+    companyInfo.booksBeginningFrom;
+
 } else {
 
   updateObj.client_tally_company =
@@ -27915,6 +27928,10 @@ app.post(
 
   updateObj.client_tally_company_guid =
     tally_company_guid;
+  
+  updateObj.client_tally_books_begining_from =
+    companyInfo.booksBeginningFrom;
+
 
 }
 
