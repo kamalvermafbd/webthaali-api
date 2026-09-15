@@ -1150,6 +1150,8 @@ async function saveVoucherExecutionData({
 
     orphanGuids = {},
 
+    extraVoucherGuids = [],
+
     repairVoucherGuids = [],
 
     repairAction = null,
@@ -1196,6 +1198,8 @@ async function saveVoucherExecutionData({
         executionMode,
 
         orphanGuids,
+
+        extraVoucherGuids,
 
         repairVoucherGuids,
         repairAction,
@@ -1689,6 +1693,7 @@ async function saveVouchers({
     // Child tables that actually need repair
     childRepairTables = [],
     orphanGuids = {},
+    extraVoucherGuids = [],
     repairVoucherGuids = [],
     repairAction = null
 }) {
@@ -2197,17 +2202,7 @@ const incomingGuidSet =
             .map(v => v?.header?.guid?.trim())
             .filter(Boolean)
     );
-// 150926 discoverguid set added
-    const discoveredGuidSet =
-    new Set(
-        (allVoucherGuids || [])
-            .map(x =>
-                typeof x === "string"
-                    ? x.trim()
-                    : x?.guid?.trim()
-            )
-            .filter(Boolean)
-    );
+
 
 // =====================================================
 // FULL GUID DISCOVERY MUST NOT USE INCOMING VOUCHERS
@@ -2218,15 +2213,7 @@ const incomingGuidSet =
 // ReconciliationManager against DB active GUIDs.
 // =====================================================
 
-//const missingVoucherGuids = [];
-
-// 150926 added missingvoucherguids
-const missingVoucherGuids =
-    isFullSync
-        ? [...discoveredGuidSet].filter(
-            guid => !incomingGuidSet.has(guid)
-        )
-        : [];
+const missingVoucherGuids = [];
 
         fs.writeFileSync(
     `./logs/FULL-VOUCHER-GUID-DEBUG-${sync_batch_id}.json`,
@@ -2487,6 +2474,9 @@ const executionResult =
 
         orphanGuids:
             orphanGuids || {},
+
+        extraVoucherGuids:
+    extraVoucherGuids || [],
 
         repairVoucherGuids:
             repairVoucherGuids || [],

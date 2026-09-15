@@ -55,6 +55,8 @@ class VoucherExecutionService {
 
         orphanGuids = {},
 
+        extraVoucherGuids = [],
+
         repairVoucherGuids = [],
         repairAction = null,
         childRepairTables = [],
@@ -78,6 +80,8 @@ class VoucherExecutionService {
                 changedVoucherGuids,
 
                 orphanGuids,
+
+                extraVoucherGuids,
 
                 repairVoucherGuids,
                 repairAction,

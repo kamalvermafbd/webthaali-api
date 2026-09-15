@@ -779,6 +779,7 @@ const softDeleteOperations =
             : [];
 */
 
+/* 150926
 const softDeleteOperations =
     args.orphanGuids
         ? buildSoftDeleteOperations({
@@ -793,6 +794,18 @@ const softDeleteOperations =
 
             orphanGuids:
                 args.orphanGuids
+        })
+        : [];
+*/
+
+const softDeleteOperations =
+    (args.orphanGuids || args.extraVoucherGuids?.length)
+        ? buildSoftDeleteOperations({
+            company_code: args.company_code,
+            tally_owner: args.tally_owner,
+            sync_batch_id: args.sync_batch_id,
+            orphanGuids: args.orphanGuids,
+            extraVoucherGuids: args.extraVoucherGuids
         })
         : [];
 
@@ -1006,7 +1019,8 @@ function buildSoftDeleteOperations({
     company_code,
     tally_owner,
     sync_batch_id,
-    orphanGuids = {}
+    orphanGuids = {},
+    extraVoucherGuids = []
 }) {
 
   
@@ -1129,7 +1143,37 @@ function buildSoftDeleteOperations({
     */
 const operations = [];
 
-const parentVoucherGuids = new Set();
+
+//const parentVoucherGuids = new Set();
+
+const parentVoucherGuids = new Set(
+    (extraVoucherGuids || [])
+        .map(g => typeof g === "string" ? g.trim() : g?.guid?.trim())
+        .filter(Boolean)
+);
+
+
+// =========================================
+// PARENT EXTRA → ALL CHILD HARD DELETE
+// =========================================
+
+for (const voucherGuid of extraVoucherGuids || []) {
+
+    if (!voucherGuid) continue;
+
+    operations.push(
+        ...buildDeleteOperations({
+            company_code,
+            tally_owner,
+            sync_batch_id,
+            voucherGuids: [
+                typeof voucherGuid === "string"
+                    ? voucherGuid.trim()
+                    : voucherGuid?.guid?.trim()
+            ]
+        })
+    );
+}
 
 for (
     const [targetTable, voucherGuids]
@@ -1161,15 +1205,16 @@ for (
 
         })
     );
-
+/* 150926
     voucherGuids.forEach(guid => {
         if (guid) {
             parentVoucherGuids.add(guid);
         }
     });
+    */
 }
 
-/*
+
 // Parent voucher → SOFT DELETE
 if (parentVoucherGuids.size > 0) {
 
@@ -1239,7 +1284,7 @@ if (parentVoucherGuids.size > 0) {
 
     );
 }
-*/
+
 return operations;
 }
 

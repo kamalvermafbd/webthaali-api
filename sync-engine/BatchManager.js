@@ -539,6 +539,7 @@ const reconciliation =
     
 let reconciliationOperations = [];
 
+/*150926
 const ReconciliationOperationBuilder =
     entity === "VOUCHER"
         ? VoucherOperationBuilder
@@ -583,29 +584,11 @@ const ReconciliationOperationBuilder =
 );
 
 
+
+
 if (entity === "VOUCHER") {
 
   
-
-fs.writeFileSync(
-    `./logs/DEBUG-BATCHMANAGER-ORPHAN-DELETE-${batch_id}.json`,
-    JSON.stringify({
-        source: "BatchManager.postExecution",
-        entity,
-        orphanGuids:
-            reconciliation.orphanGuids || {},
-        orphanCounts:
-            Object.fromEntries(
-                Object.entries(
-                    reconciliation.orphanGuids || {}
-                ).map(
-                    ([table, guids]) =>
-                        [table, guids?.length || 0]
-                )
-            ),
-        timestamp: new Date().toISOString()
-    }, null, 2)
-);
     reconciliationOperations.push(
 
         ...VoucherOperationBuilder
@@ -625,6 +608,66 @@ fs.writeFileSync(
     );
 
 }
+
+*/
+
+const ReconciliationOperationBuilder =
+    entity === "VOUCHER"
+        ? VoucherOperationBuilder
+        : MasterOperationBuilder;
+
+reconciliationOperations.push(
+    ...ReconciliationOperationBuilder.buildAlterUpdateOperations({
+        table,
+        company_code,
+        tally_owner,
+        sync_batch_id,
+        alterChanged:
+            reconciliation.alterChanged
+    })
+);
+
+if (entity === "VOUCHER") {
+
+    // PARENT EXTRA
+    reconciliationOperations.push(
+        ...VoucherOperationBuilder.buildSoftDeleteOperations({
+            company_code,
+            tally_owner,
+            sync_batch_id,
+            extraVoucherGuids:
+                reconciliation.extraGuids
+        })
+    );
+
+    // CHILD ORPHAN
+    reconciliationOperations.push(
+        ...VoucherOperationBuilder.buildSoftDeleteOperations({
+            company_code,
+            tally_owner,
+            sync_batch_id,
+            orphanGuids:
+                reconciliation.orphanGuids
+        })
+    );
+
+} else {
+
+    // MASTER EXTRA
+    reconciliationOperations.push(
+        ...MasterOperationBuilder.buildSoftDeleteOperations({
+            table,
+            company_code,
+            tally_owner,
+            sync_batch_id,
+            extraGuids:
+                reconciliation.extraGuids
+        })
+    );
+
+}
+
+
 
 const reconciliationExecution =
 
