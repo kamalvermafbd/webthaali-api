@@ -559,7 +559,8 @@ console.log(
 async function getStockGodownBalance({
     company_code,
     tally_owner,
-    sync_batch_id
+    sync_batch_id,
+     booksBeginningFrom
 }) {
    const is_ca =
     String(tally_owner).toUpperCase() === "CA";
@@ -642,7 +643,7 @@ if (!socket) {
     // =========================
     // GET BOOKS BEGINNING
     // =========================
-
+/*
     const masterResult =
         await sendToConnector(
             socket,
@@ -669,7 +670,14 @@ if (!socket) {
 
     }
 
+*/
 
+if (!booksBeginningFrom) {
+    return {
+        success: false,
+        error: "Books Beginning date not available"
+    };
+}
     // =========================
     // GET GODOWN-WISE STOCK
     // =========================

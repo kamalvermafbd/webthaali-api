@@ -35666,7 +35666,8 @@ app.get("/getStockGodownBalance", async (req, res) => {
 
                 tally_owner,
 
-                sync_batch_id
+                sync_batch_id,
+                booksBeginningFrom: req.query.booksBeginningFrom
 
             });
 
@@ -39845,7 +39846,7 @@ const ledgerReconResponse =
 const ledgerReconResult =
     await ledgerReconResponse.json();
 
-
+/*
 const stockReconResponse =
     await fetch(
         `${req.protocol}://${req.get("host")}` +
@@ -39854,6 +39855,11 @@ const stockReconResponse =
         `&tally_owner=${encodeURIComponent(tally_owner)}` +
         `&sync_batch_id=${encodeURIComponent(sync_batch_id)}`
     );
+*/
+
+const stockReconResponse = await fetch(
+    `${req.protocol}://${req.get("host")}/getStockGodownBalance?company_code=${company_code}&tally_owner=${tally_owner}&sync_batch_id=${sync_batch_id}&booksBeginningFrom=${encodeURIComponent(result?.summary?.booksBeginningFrom || "")}`
+);
 
 const stockReconResult =
     await stockReconResponse.json();
