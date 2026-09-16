@@ -113,6 +113,9 @@ class LedgerRowBuilder {
             opening_balance_type:
                 ledger.openingBalanceType ?? null,
 
+            credit_limit:
+                  ledger.creditLimit ?? 0,
+
             is_bill_wise:
                 ledger.isBillWise ?? false,
 
