@@ -288,6 +288,17 @@ if (skipStockConsumption) {
     return rows;
 }
 
+console.log(
+    "GODOWN BUILDER:",
+    header.guid,
+    header.persistedView,
+    (voucher.inventory || []).map(item => ({
+        stockItem: item.stockItem,
+        movement: item.materialMovement,
+        batches: item.batches?.length || 0
+    }))
+);
+
     for (const item of (voucher.inventory || [])) {
 
         if (
