@@ -279,6 +279,15 @@ function buildInventoryGodownRows({
 
     const header = voucher.header || {};
 
+    const skipStockConsumption = [
+    "Multi Consumption Voucher View",
+    "Consumption Voucher View"
+].includes(header.persistedView);
+
+if (skipStockConsumption) {
+    return rows;
+}
+
     for (const item of (voucher.inventory || [])) {
 
         if (
