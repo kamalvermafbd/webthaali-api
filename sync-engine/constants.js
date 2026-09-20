@@ -96,6 +96,9 @@ const TABLES = {
 
     VOUCHER_INVENTORY: "tally_voucher_inventory",
 
+    VOUCHER_INVENTORY_GODOWNS:
+    "tally_voucher_inventory_godowns",
+
     STOCK_VOUCHERS: "tally_stock_vouchers",
 
     BILL_ALLOCATIONS: "tally_bill_allocations",
@@ -366,6 +369,12 @@ const VOUCHER_COLUMNS = {
         UPDATED_AT: "updated_at"
     },
 
+    [TABLES.VOUCHER_INVENTORY_GODOWNS]: {
+    GUID: "voucher_guid",
+    IS_DELETED: "is_deleted",
+    UPDATED_AT: "updated_at"
+},
+
     [TABLES.STOCK_VOUCHERS]: {
         GUID: "voucher_guid",
         IS_DELETED: "is_deleted",
@@ -407,6 +416,11 @@ const VOUCHER_RECONCILIATION = {
         },
 
         [TABLES.VOUCHER_INVENTORY]: {
+            guidColumn: "voucher_guid",
+            deleteMode: "HARD_DELETE"
+        },
+
+        [TABLES.VOUCHER_INVENTORY_GODOWNS]: {
             guidColumn: "voucher_guid",
             deleteMode: "HARD_DELETE"
         },

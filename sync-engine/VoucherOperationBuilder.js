@@ -507,6 +507,7 @@ function buildSaveOperations({
 
     ledgerRows,
     inventoryRows,
+    inventoryGodownRows,
     stockVoucherRows,
     billAllocationRows,
     costCentreRows,
@@ -570,6 +571,8 @@ function buildSaveOperations({
         [TABLES.VOUCHER_LEDGERS]: ledgerRows,
 
         [TABLES.VOUCHER_INVENTORY]: inventoryRows,
+
+         [TABLES.VOUCHER_INVENTORY_GODOWNS]: inventoryGodownRows,
 
         [TABLES.STOCK_VOUCHERS]: stockVoucherRows,
 

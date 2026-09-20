@@ -33,6 +33,7 @@ const {
 const {
     buildLedgerRows,
     buildInventoryRows,
+    buildInventoryGodownRows,
     buildStockVoucherRows,
     buildBillAllocationRows,
     buildCostCentreRows
@@ -813,6 +814,8 @@ async function saveVoucher({
 
             inventoryRows: [],
 
+            inventoryGodownRows: [],
+
             stockVoucherRows: [],
 
             billAllocationRows: [],
@@ -1172,6 +1175,8 @@ async function saveVoucherExecutionData({
 
     inventoryRows,
 
+    inventoryGodownRows,
+
     stockVoucherRows,
 
     billAllocationRows,
@@ -1217,6 +1222,8 @@ async function saveVoucherExecutionData({
         ledgerRows,
 
         inventoryRows,
+
+        inventoryGodownRows,
 
         stockVoucherRows,
 
@@ -1784,6 +1791,8 @@ let ledgerRows = [];
 
 let inventoryRows = [];
 
+let inventoryGodownRows = [];
+
 let stockVoucherRows = [];
 
 let billAllocationRows = [];
@@ -2109,7 +2118,14 @@ ledgerRows.push(
         tally_owner
     })
 );
-    
+    inventoryGodownRows.push(
+    ...buildInventoryGodownRows({
+        voucher,
+        company_code,
+        tally_owner
+    })
+);
+
 stockVoucherRows.push(
     ...buildStockVoucherRows({
         voucher,
@@ -2350,6 +2366,12 @@ inventoryRows =
 
     });
 
+inventoryGodownRows =
+    filterRowsByVoucherGuids({
+        voucherGuids,
+        rows: inventoryGodownRows
+    });
+
 stockVoucherRows =
     filterRowsByVoucherGuids({
 
@@ -2385,6 +2407,14 @@ if (isChildReconciliation) {
         )
     ) {
         ledgerRows = [];
+    }
+
+    if (
+    !repairChildTables.has(
+        TABLES.VOUCHER_INVENTORY_GODOWNS
+    )
+    ) {
+        inventoryGodownRows = [];
     }
 
     if (
@@ -2500,6 +2530,8 @@ const executionResult =
         ledgerRows,
 
         inventoryRows,
+
+        inventoryGodownRows,
 
         stockVoucherRows,
 

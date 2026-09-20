@@ -4,7 +4,8 @@ const {
 
 
 const {
-    buildInventoryRows
+    buildInventoryRows,
+    buildInventoryGodownRows
 } = require("./VoucherInventoryRowBuilder");
 
 const {
@@ -129,6 +130,8 @@ module.exports = {
     buildCostCentreRows,
 
     buildInventoryRows,
+
+     buildInventoryGodownRows,
 
     buildStockVoucherRows
 

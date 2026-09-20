@@ -44,7 +44,7 @@ class VoucherExecutionService {
 
         ledgerRows,
         inventoryRows,
-
+        inventoryGodownRows,
         stockVoucherRows,
 
         billAllocationRows,
@@ -94,7 +94,7 @@ class VoucherExecutionService {
                 ledgerRows,
 
                 inventoryRows,
-
+                inventoryGodownRows,
                 stockVoucherRows,
 
                 billAllocationRows,

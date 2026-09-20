@@ -269,8 +269,105 @@ function buildInventoryRows({
 
 }
 
+function buildInventoryGodownRows({
+    voucher,
+    company_code,
+    tally_owner
+}) {
+
+    const rows = [];
+
+    const header = voucher.header || {};
+
+    for (const item of (voucher.inventory || [])) {
+
+        if (
+            item.inventoryNode !==
+            "ALLINVENTORYENTRIES.LIST"
+        ) {
+            continue;
+        }
+
+        for (const batch of (item.batches || [])) {
+
+            rows.push({
+
+                voucher_guid:
+                    safeTrim(header.guid),
+
+                company_code,
+
+                tally_owner,
+
+                stock_guid:
+                    item.stockGuid ?? null,
+
+                stock_masterid:
+                    item.stockMasterIdResolved ?? null,
+
+                stock_item:
+                    safeTrim(item.stockItem) || null,
+
+                godown:
+                    safeTrim(batch.godown) || null,
+
+                actual_qty:
+                    batch.actualQty || null,
+
+                actual_qty_value:
+    batch.actualQtyValue ??
+    (
+        Number.parseFloat(
+            String(batch.actualQty || "").split(" ")[0]
+        ) || null
+    ),
+
+                billed_qty:
+                    batch.billedQty || null,
+
+              billed_qty_value:
+    batch.billedQtyValue ??
+    (
+        Number.parseFloat(
+            String(batch.billedQty || "").split(" ")[0]
+        ) || null
+    ),
+
+                unit:
+                    safeTrim(item.unit) || null,
+
+                rate:
+                    batch.rate || null,
+
+                rate_value:
+                    batch.rateValue ?? null,
+
+                amount:
+                    batch.amount ?? null,
+
+                batch_name:
+                    batch.batchName || null,
+
+                batch_id:
+                    batch.batchId ?? null,
+
+                destination_godown:
+                    batch.destinationGodown || null,
+
+                material_movement:
+                    item.materialMovement ?? null
+
+            });
+
+        }
+
+    }
+
+    return rows;
+}
 module.exports = {
 
-    buildInventoryRows
+    buildInventoryRows,
+    buildInventoryGodownRows
 
 };
