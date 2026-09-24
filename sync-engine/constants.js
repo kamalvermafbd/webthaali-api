@@ -118,7 +118,7 @@ const TABLES = {
 
 const VALIDATION_SELECT_COLUMNS = {
 
-    [TABLES.GROUPS]: "guid,alter_id",
+   [TABLES.GROUPS]: "guid,alter_id,parent_guid",
 
     [TABLES.STOCK_GROUPS]: "guid,alter_id",
 

@@ -309,7 +309,7 @@ if (rows.length === 0) {
                 continue;
 
             }
-
+/* 240926
             if (incomingValue > dbValue) {
 
             changedRows.push(row);
@@ -319,7 +319,22 @@ if (rows.length === 0) {
         }
 
             unchangedRows.push(row);
+*/
+        if (
+            incomingValue > dbValue ||
+            (
+                table === "tally_sync_groups" &&
+                String(existing.parent_guid || "").trim() !==
+                String(row.parent_guid || "").trim()
+            )
+        ) {
 
+            changedRows.push(row);
+
+            continue;
+        }
+
+        unchangedRows.push(row);
         }        
 
 
