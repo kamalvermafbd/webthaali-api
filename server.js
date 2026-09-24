@@ -40499,7 +40499,346 @@ app.get("/getBalanceSheetLedgerMonthDetail", async (req, res) => {
   }
 });
 
+// ============================================================
+// PROFIT & LOSS LEDGER SUMMARY API
+// ============================================================
+app.get("/getProfitLossLedgerSummary", async (req, res) => {
+  try {
 
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    const fy_start_date =
+      String(req.query.fy_start_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    if (!fy_start_date) {
+      return res.json({
+        success: false,
+        error: "fy_start_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_profit_loss_ledger_summary",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_ledger_guid: ledger_guid,
+        p_fy_start_date: fy_start_date,
+        p_as_of_date: as_of_date
+      }
+    );
+
+    if (error) {
+      console.error(
+        "PROFIT & LOSS LEDGER SUMMARY RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "PROFIT & LOSS LEDGER SUMMARY API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// PROFIT & LOSS LEDGER MONTH DETAIL API
+// ============================================================
+app.get("/getProfitLossLedgerMonthDetail", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    const fy_start_date =
+      String(req.query.fy_start_date || "").trim();
+
+    const month_start =
+      String(req.query.month_start || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    if (!fy_start_date) {
+      return res.json({
+        success: false,
+        error: "fy_start_date missing"
+      });
+    }
+
+    if (!month_start) {
+      return res.json({
+        success: false,
+        error: "month_start missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_profit_loss_ledger_month_detail",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_ledger_guid: ledger_guid,
+        p_fy_start_date: fy_start_date,
+        p_month_start: month_start,
+        p_as_of_date: as_of_date
+      }
+    );
+
+    if (error) {
+      console.error(
+        "PROFIT & LOSS LEDGER MONTH DETAIL RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "PROFIT & LOSS LEDGER MONTH DETAIL API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ============================================================
+// PROFIT & LOSS DRILLDOWN API
+// ============================================================
+app.get("/getProfitLossDrilldown", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const node_type =
+      String(req.query.node_type || "").trim().toUpperCase();
+
+    const node_guid =
+      String(req.query.node_guid || "").trim();
+
+    const fy_start_date =
+      String(req.query.fy_start_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!node_type) {
+      return res.json({
+        success: false,
+        error: "node_type missing"
+      });
+    }
+
+   if (node_type !== "ROOT" && !node_guid) {
+  return res.json({
+    success: false,
+    error: "node_guid missing"
+  });
+}
+
+    if (!fy_start_date) {
+      return res.json({
+        success: false,
+        error: "fy_start_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+   const { data, error } = await supabase.rpc(
+  "get_profit_loss_drilldown",
+  {
+    p_company_code: company_code,
+    p_tally_owner: tally_owner,
+    p_node_type: node_type,
+    p_node_guid: node_guid,
+    p_from_date: fy_start_date,
+    p_to_date: as_of_date
+  }
+);
+
+    if (error) {
+      console.error(
+        "PROFIT & LOSS DRILLDOWN RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "PROFIT & LOSS DRILLDOWN API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
 // =========================
 // TEST SAVE GROUPS
 // =========================
