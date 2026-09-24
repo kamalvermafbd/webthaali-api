@@ -40724,6 +40724,113 @@ app.get("/getProfitLossLedgerMonthDetail", async (req, res) => {
 });
 
 // ============================================================
+// PROFIT & LOSS SUMMARY API
+// ============================================================
+app.get("/getProfitLossSummary", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const fy_start_date =
+      String(req.query.fy_start_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const valuation_method =
+      String(req.query.valuation_method || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!fy_start_date) {
+      return res.json({
+        success: false,
+        error: "fy_start_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    if (!valuation_method) {
+      return res.json({
+        success: false,
+        error: "valuation_method missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_profit_loss_summary",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_from_date: fy_start_date,
+        p_to_date: as_of_date,
+        p_as_of_date: as_of_date,
+        p_valuation_method: valuation_method
+      }
+    );
+
+    if (error) {
+      console.error(
+        "PROFIT & LOSS SUMMARY RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "PROFIT & LOSS SUMMARY API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ============================================================
 // PROFIT & LOSS DRILLDOWN API
 // ============================================================
 app.get("/getProfitLossDrilldown", async (req, res) => {
