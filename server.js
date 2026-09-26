@@ -40976,7 +40976,185 @@ app.post("/testSaveGroups", async (req, res) => {
 
 });
 
- 
+ // ============================================================
+// CASH FLOW API
+// ============================================================
+app.get("/getCashFlow", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const from_date =
+      String(req.query.from_date || "").trim();
+
+    const to_date =
+      String(req.query.to_date || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!from_date) {
+      return res.json({
+        success: false,
+        error: "from_date missing"
+      });
+    }
+
+    if (!to_date) {
+      return res.json({
+        success: false,
+        error: "to_date missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_cash_flow_core",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_from_date: from_date,
+        p_to_date: to_date
+      }
+    );
+
+    if (error) {
+      console.error(
+        "CASH FLOW RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "CASH FLOW API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// FUND FLOW API
+// ============================================================
+app.get("/getFundFlow", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_fund_flow_core",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_as_of_date: as_of_date
+      }
+    );
+
+    if (error) {
+      console.error(
+        "FUND FLOW RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
 
 server.listen(
   process.env.PORT,
