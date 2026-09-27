@@ -117,7 +117,7 @@ class LedgerRowBuilder {
                   ledger.creditLimit ?? 0,
 
              credit_period_days:
-                ledger.creditPeriodDays ?? null,
+                ledger.creditPeriod ?? null,
 
             is_bill_wise:
                 ledger.isBillWise ?? false,
