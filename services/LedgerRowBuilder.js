@@ -30,7 +30,14 @@ class LedgerRowBuilder {
 
         const timestamp =
     now || new Date().toISOString();
-    
+    console.log(
+    "LEDGER CREDIT PERIOD DEBUG:",
+    ledger.name,
+    "creditPeriod=",
+    ledger.creditPeriod,
+    "credit_period=",
+    ledger.credit_period
+);
 
         return {
 
@@ -115,6 +122,8 @@ class LedgerRowBuilder {
 
             credit_limit:
                   ledger.creditLimit ?? 0,
+
+                  
 
              credit_period_days:
     ledger.credit_period ?? null,
