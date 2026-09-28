@@ -41156,6 +41156,910 @@ app.get("/getFundFlow", async (req, res) => {
   }
 });
 
+// ============================================================
+// FUND FLOW CONFIGURATION APIs
+// ============================================================
+
+
+// ============================================================
+// 1. GET LEDGER CONFIG
+// ============================================================
+app.get("/getFundFlowLedgerConfig", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("fund_flow_ledger_config")
+      .select("*")
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .order("id", { ascending: true });
+
+    if (error) {
+      console.error("FUND FLOW LEDGER CONFIG GET ERROR:", error);
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error("FUND FLOW LEDGER CONFIG GET API ERROR:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 2. SAVE LEDGER CONFIG
+// ============================================================
+app.post("/saveFundFlowLedgerConfig", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    const tally_owner =
+      String(req.body.tally_owner || "").trim().toUpperCase();
+
+    const id =
+      req.body.id ? Number(req.body.id) : null;
+
+    const ledger_guid =
+      String(req.body.ledger_guid || "").trim();
+
+    const fixed_installments_enabled =
+      Boolean(req.body.fixed_installments_enabled);
+
+    const installment_count =
+      req.body.installment_count === null ||
+      req.body.installment_count === undefined ||
+      req.body.installment_count === ""
+        ? null
+        : Number(req.body.installment_count);
+
+    const default_credit_period_days =
+      req.body.default_credit_period_days === null ||
+      req.body.default_credit_period_days === undefined ||
+      req.body.default_credit_period_days === ""
+        ? null
+        : Number(req.body.default_credit_period_days);
+
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    if (
+      fixed_installments_enabled &&
+      (!installment_count || installment_count < 1)
+    ) {
+      return res.json({
+        success: false,
+        error: "installment_count must be greater than 0"
+      });
+    }
+
+
+    const payload = {
+      company_code,
+      tally_owner,
+      ledger_guid,
+      fixed_installments_enabled,
+      installment_count,
+      default_credit_period_days,
+      updated_at: new Date().toISOString()
+    };
+
+
+    let data;
+    let error;
+
+
+    // -----------------------------
+    // UPDATE
+    // -----------------------------
+    if (id) {
+
+      const result = await supabase
+        .from("fund_flow_ledger_config")
+        .update(payload)
+        .eq("id", id)
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .select()
+        .single();
+
+      data = result.data;
+      error = result.error;
+
+    }
+
+    // -----------------------------
+    // INSERT
+    // -----------------------------
+    else {
+
+      const result = await supabase
+        .from("fund_flow_ledger_config")
+        .insert({
+          ...payload,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      data = result.data;
+      error = result.error;
+    }
+
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW LEDGER CONFIG SAVE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW LEDGER CONFIG SAVE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 3. DELETE LEDGER CONFIG
+// ============================================================
+app.delete("/deleteFundFlowLedgerConfig", async (req, res) => {
+
+  try {
+
+    const id = Number(req.body.id);
+
+    if (!id) {
+      return res.json({
+        success: false,
+        error: "id missing"
+      });
+    }
+
+    const { error } = await supabase
+      .from("fund_flow_ledger_config")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW LEDGER CONFIG DELETE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW LEDGER CONFIG DELETE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 4. GET FINANCING CONFIG
+// ============================================================
+app.get("/getFundFlowFinancingConfig", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("fund_flow_financing_config")
+      .select("*")
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .order("id", { ascending: true });
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW FINANCING CONFIG GET ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW FINANCING CONFIG GET API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 5. SAVE FINANCING CONFIG
+// ============================================================
+app.post("/saveFundFlowFinancingConfig", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    const tally_owner =
+      String(req.body.tally_owner || "").trim().toUpperCase();
+
+    const id =
+      req.body.id ? Number(req.body.id) : null;
+
+    const ledger_guid =
+      String(req.body.ledger_guid || "").trim();
+
+    const finance_amount =
+      Number(req.body.finance_amount);
+
+    const first_repayment_date =
+      String(req.body.first_repayment_date || "").trim();
+
+    const installment_count =
+      Number(req.body.installment_count);
+
+    const installment_amount =
+      Number(req.body.installment_amount);
+
+    const frequency_type =
+      String(req.body.frequency_type || "MONTHLY").trim().toUpperCase();
+
+    const frequency_value =
+      req.body.frequency_value === undefined ||
+      req.body.frequency_value === null ||
+      req.body.frequency_value === ""
+        ? 1
+        : Number(req.body.frequency_value);
+
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    if (!Number.isFinite(finance_amount) || finance_amount <= 0) {
+      return res.json({
+        success: false,
+        error: "Invalid finance_amount"
+      });
+    }
+
+    if (!first_repayment_date) {
+      return res.json({
+        success: false,
+        error: "first_repayment_date missing"
+      });
+    }
+
+    if (!Number.isInteger(installment_count) || installment_count < 1) {
+      return res.json({
+        success: false,
+        error: "Invalid installment_count"
+      });
+    }
+
+    if (
+      !Number.isFinite(installment_amount) ||
+      installment_amount <= 0
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid installment_amount"
+      });
+    }
+
+    if (!Number.isInteger(frequency_value) || frequency_value < 1) {
+      return res.json({
+        success: false,
+        error: "Invalid frequency_value"
+      });
+    }
+
+
+    const payload = {
+      company_code,
+      tally_owner,
+      ledger_guid,
+      finance_amount,
+      first_repayment_date,
+      installment_count,
+      installment_amount,
+      frequency_type,
+      frequency_value,
+      updated_at: new Date().toISOString()
+    };
+
+
+    let data;
+    let error;
+
+
+    // -----------------------------
+    // UPDATE
+    // -----------------------------
+    if (id) {
+
+      const result = await supabase
+        .from("fund_flow_financing_config")
+        .update(payload)
+        .eq("id", id)
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .select()
+        .single();
+
+      data = result.data;
+      error = result.error;
+
+    }
+
+    // -----------------------------
+    // INSERT
+    // -----------------------------
+    else {
+
+      const result = await supabase
+        .from("fund_flow_financing_config")
+        .insert({
+          ...payload,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      data = result.data;
+      error = result.error;
+    }
+
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW FINANCING CONFIG SAVE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW FINANCING CONFIG SAVE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 6. DELETE FINANCING CONFIG
+// ============================================================
+app.delete("/deleteFundFlowFinancingConfig", async (req, res) => {
+
+  try {
+
+    const id = Number(req.body.id);
+
+    if (!id) {
+      return res.json({
+        success: false,
+        error: "id missing"
+      });
+    }
+
+    const { error } = await supabase
+      .from("fund_flow_financing_config")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW FINANCING CONFIG DELETE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW FINANCING CONFIG DELETE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 7. GET RECURRING EXPENSE CONFIG
+// ============================================================
+app.get("/getFundFlowRecurringExpense", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("fund_flow_recurring_expense")
+      .select("*")
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .order("id", { ascending: true });
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW RECURRING EXPENSE GET ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW RECURRING EXPENSE GET API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 8. SAVE RECURRING EXPENSE CONFIG
+// ============================================================
+app.post("/saveFundFlowRecurringExpense", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    const tally_owner =
+      String(req.body.tally_owner || "").trim().toUpperCase();
+
+    const id =
+      req.body.id ? Number(req.body.id) : null;
+
+    const expense_ledger_guid =
+      String(req.body.expense_ledger_guid || "").trim();
+
+    const expense_ledger_name =
+      String(req.body.expense_ledger_name || "").trim();
+
+    const party_ledger_guid =
+      String(req.body.party_ledger_guid || "").trim();
+
+    const party_ledger_name =
+      String(req.body.party_ledger_name || "").trim();
+
+    const monthly_amount =
+      Number(req.body.monthly_amount);
+
+    const start_date =
+      String(req.body.start_date || "").trim();
+
+    const end_date =
+      req.body.end_date
+        ? String(req.body.end_date).trim()
+        : null;
+
+    const frequency_type =
+      String(req.body.frequency_type || "MONTHLY")
+        .trim()
+        .toUpperCase();
+
+    const is_active =
+      req.body.is_active === undefined
+        ? true
+        : Boolean(req.body.is_active);
+
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!expense_ledger_guid) {
+      return res.json({
+        success: false,
+        error: "expense_ledger_guid missing"
+      });
+    }
+
+    if (!expense_ledger_name) {
+      return res.json({
+        success: false,
+        error: "expense_ledger_name missing"
+      });
+    }
+
+    if (!party_ledger_guid) {
+      return res.json({
+        success: false,
+        error: "party_ledger_guid missing"
+      });
+    }
+
+    if (!party_ledger_name) {
+      return res.json({
+        success: false,
+        error: "party_ledger_name missing"
+      });
+    }
+
+    if (!Number.isFinite(monthly_amount) || monthly_amount <= 0) {
+      return res.json({
+        success: false,
+        error: "Invalid monthly_amount"
+      });
+    }
+
+    if (!start_date) {
+      return res.json({
+        success: false,
+        error: "start_date missing"
+      });
+    }
+
+
+    const payload = {
+      company_code,
+      tally_owner,
+      expense_ledger_guid,
+      expense_ledger_name,
+      party_ledger_guid,
+      party_ledger_name,
+      monthly_amount,
+      start_date,
+      end_date,
+      frequency_type,
+      is_active,
+      updated_at: new Date().toISOString()
+    };
+
+
+    let data;
+    let error;
+
+
+    // -----------------------------
+    // UPDATE
+    // -----------------------------
+    if (id) {
+
+      const result = await supabase
+        .from("fund_flow_recurring_expense")
+        .update(payload)
+        .eq("id", id)
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .select()
+        .single();
+
+      data = result.data;
+      error = result.error;
+
+    }
+
+    // -----------------------------
+    // INSERT
+    // -----------------------------
+    else {
+
+      const result = await supabase
+        .from("fund_flow_recurring_expense")
+        .insert({
+          ...payload,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      data = result.data;
+      error = result.error;
+    }
+
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW RECURRING EXPENSE SAVE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW RECURRING EXPENSE SAVE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 9. DELETE RECURRING EXPENSE CONFIG
+// ============================================================
+app.delete("/deleteFundFlowRecurringExpense", async (req, res) => {
+
+  try {
+
+    const id = Number(req.body.id);
+
+    if (!id) {
+      return res.json({
+        success: false,
+        error: "id missing"
+      });
+    }
+
+    const { error } = await supabase
+      .from("fund_flow_recurring_expense")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW RECURRING EXPENSE DELETE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW RECURRING EXPENSE DELETE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
 server.listen(
   process.env.PORT,
   () => {
