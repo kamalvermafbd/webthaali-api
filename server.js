@@ -42229,10 +42229,9 @@ app.get("/getFundFlowRecurringExpenseLedgers", async (req, res) => {
     // ==========================================
     // FALLBACK: GENERIC FUZZY PARTY MATCH
     // ==========================================
-
     if (matchedVouchers.length === 0) {
 
-      const levenshteinDistance = (a, b) => {
+      const damerauLevenshteinDistance = (a, b) => {
 
         const matrix = Array.from(
           { length: b.length + 1 },
@@ -42251,14 +42250,30 @@ app.get("/getFundFlowRecurringExpenseLedgers", async (req, res) => {
 
           for (let j = 1; j <= a.length; j++) {
 
-            matrix[i][j] =
-              b[i - 1] === a[j - 1]
-                ? matrix[i - 1][j - 1]
-                : Math.min(
-                    matrix[i - 1][j] + 1,
-                    matrix[i][j - 1] + 1,
-                    matrix[i - 1][j - 1] + 1
-                  );
+            const cost =
+              a[j - 1] === b[i - 1]
+                ? 0
+                : 1;
+
+            matrix[i][j] = Math.min(
+              matrix[i - 1][j] + 1,
+              matrix[i][j - 1] + 1,
+              matrix[i - 1][j - 1] + cost
+            );
+
+            // Adjacent character transposition
+            if (
+              i > 1 &&
+              j > 1 &&
+              a[j - 1] === b[i - 2] &&
+              a[j - 2] === b[i - 1]
+            ) {
+              matrix[i][j] = Math.min(
+                matrix[i][j],
+                matrix[i - 2][j - 2] + cost
+              );
+            }
+
           }
         }
 
@@ -42272,7 +42287,7 @@ app.get("/getFundFlowRecurringExpenseLedgers", async (req, res) => {
         }
 
         const distance =
-          levenshteinDistance(a, b);
+          damerauLevenshteinDistance(a, b);
 
         return 1 -
           distance /
@@ -42295,7 +42310,6 @@ app.get("/getFundFlowRecurringExpenseLedgers", async (req, res) => {
 
       });
     }
-
     const voucherGuids = matchedVouchers
       .map(v => v.guid)
       .filter(Boolean);
