@@ -41204,9 +41204,59 @@ app.get("/getFundFlowLedgerConfig", async (req, res) => {
       });
     }
 
+    // =========================
+    // LOAD LEDGER NAMES
+    // =========================
+
+    const ledgerGuids = (data || [])
+      .map(row => row.ledger_guid)
+      .filter(Boolean);
+
+    let ledgerMap = new Map();
+
+    if (ledgerGuids.length > 0) {
+
+      const { data: ledgers, error: ledgerError } =
+        await supabase
+          .from("tally_sync_ledgers")
+          .select("guid,name")
+          .eq("company_code", company_code)
+          .eq("tally_owner", tally_owner)
+          .in("guid", ledgerGuids);
+
+      if (ledgerError) {
+        console.error(
+          "FUND FLOW LEDGER MASTER LOOKUP ERROR:",
+          ledgerError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: ledgerError.message
+        });
+      }
+
+      ledgerMap = new Map(
+        (ledgers || []).map(ledger => [
+          ledger.guid,
+          ledger.name
+        ])
+      );
+    }
+
+    // =========================
+    // ADD LEDGER NAME
+    // =========================
+
+    const enrichedData = (data || []).map(row => ({
+      ...row,
+      ledger_name:
+        ledgerMap.get(row.ledger_guid) || null
+    }));
+
     return res.json({
       success: true,
-      data: data || []
+      data: enrichedData
     });
 
   } catch (err) {
@@ -41219,7 +41269,6 @@ app.get("/getFundFlowLedgerConfig", async (req, res) => {
     });
   }
 });
-
 
 // ============================================================
 // 2. SAVE LEDGER CONFIG
@@ -41477,9 +41526,63 @@ app.get("/getFundFlowFinancingConfig", async (req, res) => {
       });
     }
 
+
+    // =========================
+    // LOAD LEDGER NAMES
+    // =========================
+
+    const ledgerGuids = (data || [])
+      .map(row => row.ledger_guid)
+      .filter(Boolean);
+
+    let ledgerMap = new Map();
+
+    if (ledgerGuids.length > 0) {
+
+      const { data: ledgers, error: ledgerError } =
+        await supabase
+          .from("tally_sync_ledgers")
+          .select("guid,name")
+          .eq("company_code", company_code)
+          .eq("tally_owner", tally_owner)
+          .in("guid", ledgerGuids);
+
+      if (ledgerError) {
+
+        console.error(
+          "FUND FLOW FINANCING LEDGER MASTER LOOKUP ERROR:",
+          ledgerError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: ledgerError.message
+        });
+      }
+
+      ledgerMap = new Map(
+        (ledgers || []).map(ledger => [
+          ledger.guid,
+          ledger.name
+        ])
+      );
+    }
+
+
+    // =========================
+    // ADD LEDGER NAME
+    // =========================
+
+    const enrichedData = (data || []).map(row => ({
+      ...row,
+      ledger_name:
+        ledgerMap.get(row.ledger_guid) || null
+    }));
+
+
     return res.json({
       success: true,
-      data: data || []
+      data: enrichedData
     });
 
   } catch (err) {
