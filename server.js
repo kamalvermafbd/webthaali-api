@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const express = require("express");
+const { google } = require("googleapis");
 
 const http = require("http");
 
@@ -346,6 +347,104 @@ const supabase =
     process.env.SUPABASE_SERVICE_KEY
   );
 
+  // ==========================================
+// GOOGLE GMAIL OAUTH
+// ==========================================
+
+const googleOAuth2Client =
+  new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI
+  );
+
+const GMAIL_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.send",
+  "openid",
+  "email",
+  "profile"
+];
+
+const createGmailOAuthState = (company_code) => {
+
+  const payload = JSON.stringify({
+    company_code,
+    timestamp: Date.now()
+  });
+
+  const encodedPayload =
+    Buffer.from(payload).toString("base64url");
+
+  const signature =
+    crypto
+      .createHmac(
+        "sha256",
+        process.env.GOOGLE_CLIENT_SECRET
+      )
+      .update(encodedPayload)
+      .digest("base64url");
+
+  return `${encodedPayload}.${signature}`;
+};
+
+const verifyGmailOAuthState = (state) => {
+
+  try {
+
+    const [encodedPayload, signature] =
+      String(state || "").split(".");
+
+    if (!encodedPayload || !signature) {
+      return null;
+    }
+
+    const expectedSignature =
+      crypto
+        .createHmac(
+          "sha256",
+          process.env.GOOGLE_CLIENT_SECRET
+        )
+        .update(encodedPayload)
+        .digest("base64url");
+
+    if (
+      !crypto.timingSafeEqual(
+        Buffer.from(signature),
+        Buffer.from(expectedSignature)
+      )
+    ) {
+      return null;
+    }
+
+    const payload =
+      JSON.parse(
+        Buffer.from(
+          encodedPayload,
+          "base64url"
+        ).toString("utf8")
+      );
+
+    // State expires after 10 minutes
+    if (
+      !payload.timestamp ||
+      Date.now() - payload.timestamp > 10 * 60 * 1000
+    ) {
+      return null;
+    }
+
+    return payload;
+
+  } catch (err) {
+
+    console.error(
+      "GMAIL OAUTH STATE VERIFY ERROR:",
+      err
+    );
+
+    return null;
+  }
+};
+
 const transporter =
   nodemailer.createTransport({
 
@@ -367,6 +466,282 @@ console.log(
   "EMAIL USER:",
   process.env.EMAIL_USER
 );
+
+// ==========================================
+// GMAIL CONNECT
+// ==========================================
+
+app.get("/gmail/connect", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(
+        req.query.company_code || ""
+      ).trim();
+
+    if (!company_code) {
+
+      return res.status(400).json({
+        success: false,
+        error: "company_code missing"
+      });
+
+    }
+
+    // Verify company exists
+    const { data: company, error } =
+      await supabase
+        .from("company")
+        .select("company_code")
+        .eq("company_code", company_code)
+        .maybeSingle();
+
+    if (error) {
+
+      console.error(
+        "GMAIL CONNECT COMPANY LOOKUP ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+
+    }
+
+    if (!company) {
+
+      return res.status(404).json({
+        success: false,
+        error: "Company not found"
+      });
+
+    }
+
+    const state =
+      createGmailOAuthState(
+        company_code
+      );
+
+    const authUrl =
+      googleOAuth2Client.generateAuthUrl({
+        access_type: "offline",
+        prompt: "consent",
+        scope: GMAIL_SCOPES,
+        state
+      });
+
+    return res.redirect(authUrl);
+
+  } catch (err) {
+
+    console.error(
+      "GMAIL CONNECT ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+
+  }
+
+});
+
+// ==========================================
+// GMAIL OAUTH CALLBACK
+// ==========================================
+
+app.get("/gmail/callback", async (req, res) => {
+
+  try {
+
+    const code =
+      String(
+        req.query.code || ""
+      ).trim();
+
+    const state =
+      String(
+        req.query.state || ""
+      ).trim();
+
+    if (!code || !state) {
+
+      return res.status(400).send(
+        "Gmail authorization failed."
+      );
+
+    }
+
+    const stateData =
+      verifyGmailOAuthState(state);
+
+    if (!stateData) {
+
+      return res.status(400).send(
+        "Invalid or expired Gmail authorization state."
+      );
+
+    }
+
+    const company_code =
+      String(
+        stateData.company_code || ""
+      ).trim();
+
+    if (!company_code) {
+
+      return res.status(400).send(
+        "Company code missing."
+      );
+
+    }
+
+    // ==========================================
+    // EXCHANGE GOOGLE AUTHORIZATION CODE
+    // ==========================================
+
+    const {
+      tokens
+    } =
+      await googleOAuth2Client.getToken(code);
+
+    if (!tokens || !tokens.access_token) {
+
+      throw new Error(
+        "Google did not return an access token."
+      );
+
+    }
+
+    googleOAuth2Client.setCredentials(
+      tokens
+    );
+
+    // ==========================================
+    // GET CONNECTED GMAIL ADDRESS
+    // ==========================================
+
+    const oauth2 =
+      google.oauth2({
+        auth: googleOAuth2Client,
+        version: "v2"
+      });
+
+    const { data: userInfo } =
+      await oauth2.userinfo.get();
+
+    const gmail_email =
+      String(
+        userInfo.email || ""
+      ).trim();
+
+    if (!gmail_email) {
+
+      throw new Error(
+        "Unable to determine Gmail address."
+      );
+
+    }
+
+    // ==========================================
+    // SAVE GMAIL CONNECTION
+    // ==========================================
+
+    const updateData = {
+
+      gmail_email,
+
+      gmail_access_token:
+        tokens.access_token || null,
+
+      gmail_refresh_token:
+        tokens.refresh_token || null,
+
+      gmail_token_expiry:
+        tokens.expiry_date
+          ? new Date(
+              tokens.expiry_date
+            ).toISOString()
+          : null,
+
+      gmail_connected: true,
+
+      gmail_connected_at:
+        new Date().toISOString()
+
+    };
+
+    // IMPORTANT:
+    // On reconnect Google may not send
+    // a new refresh_token.
+    //
+    // So preserve the existing refresh token.
+
+    if (!tokens.refresh_token) {
+
+      delete updateData.gmail_refresh_token;
+
+    }
+
+    const {
+      error: updateError
+    } = await supabase
+      .from("company")
+      .update(updateData)
+      .eq(
+        "company_code",
+        company_code
+      );
+
+    if (updateError) {
+
+      console.error(
+        "GMAIL COMPANY UPDATE ERROR:",
+        updateError
+      );
+
+      throw updateError;
+
+    }
+
+    console.log(
+      "GMAIL CONNECTED:",
+      company_code,
+      gmail_email
+    );
+
+    // Temporary success response.
+    // Later we will redirect to Fund Flow page.
+
+    return res.send(`
+      <html>
+        <body style="font-family:Arial;padding:40px">
+          <h2>Gmail Connected Successfully</h2>
+          <p>${gmail_email}</p>
+          <p>You can close this window and return to Billey.</p>
+        </body>
+      </html>
+    `);
+
+  } catch (err) {
+
+    console.error(
+      "GMAIL OAUTH CALLBACK ERROR:",
+      err
+    );
+
+    return res.status(500).send(
+      "Unable to connect Gmail."
+    );
+
+  }
+
+});
 
 app.get("/", (req, res) => {
 
@@ -42310,7 +42685,7 @@ app.get("/getFundFlowRecurringExpenseLedgers", async (req, res) => {
 
       });
     }
-    
+
     const voucherGuids = matchedVouchers
       .map(v => v.guid)
       .filter(Boolean);
