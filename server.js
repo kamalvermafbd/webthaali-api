@@ -467,6 +467,288 @@ console.log(
   process.env.EMAIL_USER
 );
 
+// ============================================================
+// DEBTOR EMAIL SUMMARY API
+// ============================================================
+app.get("/getDebtorEmailSummary", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const opening_date =
+      String(req.query.opening_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!opening_date) {
+      return res.json({
+        success: false,
+        error: "opening_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_debtor_email_summary",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_opening_date: opening_date,
+        p_as_of_date: as_of_date
+      }
+    );
+
+    if (error) {
+      console.error(
+        "DEBTOR EMAIL SUMMARY RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    // -----------------------------
+    // FIND REQUESTED LEDGER
+    // -----------------------------
+
+    const debtor = (data || []).find(
+      row => row.ledger_guid === ledger_guid
+    );
+
+    return res.json({
+      success: true,
+      data: debtor || null
+    });
+
+  } catch (err) {
+
+    console.error(
+      "DEBTOR EMAIL SUMMARY API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ============================================================
+// SEND DEBTOR EMAIL API
+// ============================================================
+app.post("/sendDebtorEmail", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    const to =
+      String(req.body.to || "").trim();
+
+    const subject =
+      String(req.body.subject || "").trim();
+
+    const message =
+      String(req.body.message || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (!to) {
+      return res.json({
+        success: false,
+        error: "to missing"
+      });
+    }
+
+    if (!subject) {
+      return res.json({
+        success: false,
+        error: "subject missing"
+      });
+    }
+
+    if (!message) {
+      return res.json({
+        success: false,
+        error: "message missing"
+      });
+    }
+
+    // -----------------------------
+    // GET COMPANY GMAIL DETAILS
+    // -----------------------------
+
+    const { data: company, error: companyError } =
+      await supabase
+        .from("company")
+        .select("gmail_email, gmail_refresh_token")
+        .eq("company_code", company_code)
+        .maybeSingle();
+
+    if (companyError) {
+      console.error(
+        "SEND DEBTOR EMAIL COMPANY ERROR:",
+        companyError
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: companyError.message
+      });
+    }
+
+    if (!company) {
+      return res.json({
+        success: false,
+        error: "Company not found"
+      });
+    }
+
+    if (!company.gmail_refresh_token) {
+      return res.json({
+        success: false,
+        error: "Gmail is not connected for this company"
+      });
+    }
+
+    // -----------------------------
+    // GMAIL OAUTH CLIENT
+    // -----------------------------
+
+    const oauth2Client = new google.auth.OAuth2(
+      GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET,
+      GOOGLE_REDIRECT_URI
+    );
+
+    oauth2Client.setCredentials({
+      refresh_token: company.gmail_refresh_token
+    });
+
+    // -----------------------------
+    // GMAIL API
+    // -----------------------------
+
+    const gmail = google.gmail({
+      version: "v1",
+      auth: oauth2Client
+    });
+
+    // -----------------------------
+    // CREATE MIME EMAIL
+    // -----------------------------
+
+    const mimeMessage = [
+      `From: ${company.gmail_email}`,
+      `To: ${to}`,
+      `Subject: ${subject}`,
+      "MIME-Version: 1.0",
+      "Content-Type: text/plain; charset=UTF-8",
+      "",
+      message
+    ].join("\r\n");
+
+    const encodedMessage =
+      Buffer.from(mimeMessage)
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+
+    // -----------------------------
+    // SEND
+    // -----------------------------
+
+    const result = await gmail.users.messages.send({
+      userId: "me",
+      requestBody: {
+        raw: encodedMessage
+      }
+    });
+
+    console.log(
+      "DEBTOR EMAIL SENT:",
+      company_code,
+      to,
+      result.data.id
+    );
+
+    return res.json({
+      success: true,
+      message: "Email sent successfully",
+      message_id: result.data.id || null
+    });
+
+  } catch (err) {
+
+    console.error(
+      "SEND DEBTOR EMAIL API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
 // ==========================================
 // GMAIL CONNECT
 // ==========================================
@@ -41434,6 +41716,8 @@ app.get("/getProfitLossDrilldown", async (req, res) => {
     });
   }
 });
+
+
 // =========================
 // TEST SAVE GROUPS
 // =========================
