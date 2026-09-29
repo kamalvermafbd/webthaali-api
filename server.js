@@ -554,7 +554,6 @@ app.get("/gmail/connect", async (req, res) => {
 // ==========================================
 // GMAIL OAUTH CALLBACK
 // ==========================================
-
 app.get("/gmail/callback", async (req, res) => {
 
   try {
@@ -569,6 +568,32 @@ app.get("/gmail/callback", async (req, res) => {
         req.query.state || ""
       ).trim();
 
+    const oauthError =
+      String(
+        req.query.error || ""
+      ).trim();
+
+    // ==========================================
+    // GOOGLE OAUTH CANCELLED / FAILED
+    // ==========================================
+
+    if (oauthError) {
+
+      console.log(
+        "GMAIL OAUTH CANCELLED:",
+        oauthError
+      );
+
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/fund-flow?gmail=cancelled`
+      );
+
+    }
+
+    // ==========================================
+    // VALIDATE GOOGLE RESPONSE
+    // ==========================================
+
     if (!code || !state) {
 
       return res.status(400).send(
@@ -576,6 +601,10 @@ app.get("/gmail/callback", async (req, res) => {
       );
 
     }
+
+    // ==========================================
+    // VERIFY OAUTH STATE
+    // ==========================================
 
     const stateData =
       verifyGmailOAuthState(state);
@@ -676,17 +705,19 @@ app.get("/gmail/callback", async (req, res) => {
 
     };
 
-    // IMPORTANT:
-    // On reconnect Google may not send
-    // a new refresh_token.
-    //
-    // So preserve the existing refresh token.
+    // ==========================================
+    // PRESERVE EXISTING REFRESH TOKEN
+    // ==========================================
 
     if (!tokens.refresh_token) {
 
       delete updateData.gmail_refresh_token;
 
     }
+
+    // ==========================================
+    // UPDATE COMPANY
+    // ==========================================
 
     const {
       error: updateError
@@ -709,24 +740,23 @@ app.get("/gmail/callback", async (req, res) => {
 
     }
 
+    // ==========================================
+    // SUCCESS LOG
+    // ==========================================
+
     console.log(
       "GMAIL CONNECTED:",
       company_code,
       gmail_email
     );
 
-    // Temporary success response.
-    // Later we will redirect to Fund Flow page.
+    // ==========================================
+    // REDIRECT BACK TO BILLEY
+    // ==========================================
 
-    return res.send(`
-      <html>
-        <body style="font-family:Arial;padding:40px">
-          <h2>Gmail Connected Successfully</h2>
-          <p>${gmail_email}</p>
-          <p>You can close this window and return to Billey.</p>
-        </body>
-      </html>
-    `);
+    return res.redirect(
+      `${process.env.FRONTEND_URL}/fund-flow?gmail=connected`
+    );
 
   } catch (err) {
 
@@ -738,6 +768,89 @@ app.get("/gmail/callback", async (req, res) => {
     return res.status(500).send(
       "Unable to connect Gmail."
     );
+
+  }
+
+});
+
+// ==========================================
+// GMAIL STATUS
+// ==========================================
+
+app.get("/gmail/status", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(
+        req.query.company_code || ""
+      ).trim();
+
+    if (!company_code) {
+
+      return res.status(400).json({
+        success: false,
+        error: "company_code missing"
+      });
+
+    }
+
+    const {
+      data: company,
+      error
+    } = await supabase
+      .from("company")
+      .select(
+        "gmail_email, gmail_connected"
+      )
+      .eq(
+        "company_code",
+        company_code
+      )
+      .maybeSingle();
+
+    if (error) {
+
+      console.error(
+        "GMAIL STATUS ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+
+    }
+
+    if (!company) {
+
+      return res.status(404).json({
+        success: false,
+        error: "Company not found"
+      });
+
+    }
+
+    return res.json({
+      success: true,
+      connected:
+        company.gmail_connected === true,
+      gmail_email:
+        company.gmail_email || null
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GMAIL STATUS EXCEPTION:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
 
   }
 
