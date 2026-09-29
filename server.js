@@ -671,11 +671,20 @@ app.post("/sendDebtorEmail", async (req, res) => {
     // GMAIL OAUTH CLIENT
     // -----------------------------
 
-    const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI
-);
+  const oauth2Client = new google.auth.OAuth2();
+
+oauth2Client._clientId =
+  process.env.GOOGLE_CLIENT_ID;
+
+oauth2Client._clientSecret =
+  process.env.GOOGLE_CLIENT_SECRET;
+
+oauth2Client._redirectUri =
+  process.env.GOOGLE_REDIRECT_URI;
+
+oauth2Client.setCredentials({
+  refresh_token: company.gmail_refresh_token
+});
 
     oauth2Client.setCredentials({
       refresh_token: company.gmail_refresh_token
