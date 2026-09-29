@@ -42190,16 +42190,21 @@ app.get("/getFundFlowRecurringExpenseLedgers", async (req, res) => {
       });
     }
 
-    // ==========================================
+        // ==========================================
     // 1. FIND VOUCHERS FOR SELECTED PARTY
     // ==========================================
 
+    const normalizePartyName = (value) =>
+      String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+
     const { data: vouchers, error: voucherError } = await supabase
       .from("tally_vouchers")
-      .select("guid")
+      .select("guid, party_ledger")
       .eq("company_code", company_code)
       .eq("tally_owner", tally_owner)
-      .eq("party_ledger", party_ledger);
+      .not("party_ledger", "is", null);
 
     if (voucherError) {
       console.error(
@@ -42213,7 +42218,85 @@ app.get("/getFundFlowRecurringExpenseLedgers", async (req, res) => {
       });
     }
 
-    const voucherGuids = (vouchers || [])
+    const selectedParty = normalizePartyName(party_ledger);
+
+    // First try exact normalized match
+    let matchedVouchers = (vouchers || []).filter(
+      row =>
+        normalizePartyName(row.party_ledger) === selectedParty
+    );
+
+    // ==========================================
+    // FALLBACK: GENERIC FUZZY PARTY MATCH
+    // ==========================================
+
+    if (matchedVouchers.length === 0) {
+
+      const levenshteinDistance = (a, b) => {
+
+        const matrix = Array.from(
+          { length: b.length + 1 },
+          () => Array(a.length + 1).fill(0)
+        );
+
+        for (let i = 0; i <= b.length; i++) {
+          matrix[i][0] = i;
+        }
+
+        for (let j = 0; j <= a.length; j++) {
+          matrix[0][j] = j;
+        }
+
+        for (let i = 1; i <= b.length; i++) {
+
+          for (let j = 1; j <= a.length; j++) {
+
+            matrix[i][j] =
+              b[i - 1] === a[j - 1]
+                ? matrix[i - 1][j - 1]
+                : Math.min(
+                    matrix[i - 1][j] + 1,
+                    matrix[i][j - 1] + 1,
+                    matrix[i - 1][j - 1] + 1
+                  );
+          }
+        }
+
+        return matrix[b.length][a.length];
+      };
+
+      const similarity = (a, b) => {
+
+        if (!a || !b) {
+          return 0;
+        }
+
+        const distance =
+          levenshteinDistance(a, b);
+
+        return 1 -
+          distance /
+          Math.max(a.length, b.length);
+      };
+
+      matchedVouchers = (vouchers || []).filter(row => {
+
+        const voucherParty =
+          normalizePartyName(row.party_ledger);
+
+        if (!voucherParty) {
+          return false;
+        }
+
+        return similarity(
+          selectedParty,
+          voucherParty
+        ) >= 0.85;
+
+      });
+    }
+
+    const voucherGuids = matchedVouchers
       .map(v => v.guid)
       .filter(Boolean);
 
