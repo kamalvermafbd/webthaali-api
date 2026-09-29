@@ -42163,6 +42163,255 @@ app.delete("/deleteFundFlowRecurringExpense", async (req, res) => {
   }
 });
 
+app.get("/getFundFlowRecurringExpenseLedgers", async (req, res) => {
+  try {
+    const company_code = String(req.query.company_code || "").trim();
+    const tally_owner = String(req.query.tally_owner || "").trim().toUpperCase();
+    const party_ledger = String(req.query.party_ledger || "").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!party_ledger) {
+      return res.json({
+        success: false,
+        error: "party_ledger missing"
+      });
+    }
+
+    // ==========================================
+    // 1. FIND VOUCHERS FOR SELECTED PARTY
+    // ==========================================
+
+    const { data: vouchers, error: voucherError } = await supabase
+      .from("tally_vouchers")
+      .select("guid")
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .eq("party_ledger", party_ledger);
+
+    if (voucherError) {
+      console.error(
+        "FUND FLOW RECURRING EXPENSE VOUCHER LOOKUP ERROR:",
+        voucherError
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: voucherError.message
+      });
+    }
+
+    const voucherGuids = (vouchers || [])
+      .map(v => v.guid)
+      .filter(Boolean);
+
+    if (voucherGuids.length === 0) {
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
+    // ==========================================
+    // 2. FIND LEDGERS USED IN THOSE VOUCHERS
+    // ==========================================
+
+    const { data: voucherLedgers, error: voucherLedgerError } =
+      await supabase
+        .from("tally_voucher_ledgers")
+        .select("ledger_guid, ledger_name, voucher_guid")
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .in("voucher_guid", voucherGuids);
+
+    if (voucherLedgerError) {
+      console.error(
+        "FUND FLOW RECURRING EXPENSE LEDGER LOOKUP ERROR:",
+        voucherLedgerError
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: voucherLedgerError.message
+      });
+    }
+
+    const ledgerGuids = [
+      ...new Set(
+        (voucherLedgers || [])
+          .map(row => row.ledger_guid)
+          .filter(Boolean)
+      )
+    ];
+
+    if (ledgerGuids.length === 0) {
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
+    // ==========================================
+    // 3. GET LEDGER MASTER + PARENT
+    // ==========================================
+
+    const { data: ledgerMasters, error: ledgerMasterError } =
+      await supabase
+        .from("tally_sync_ledgers")
+        .select("guid, name, parent")
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .in("guid", ledgerGuids);
+
+    if (ledgerMasterError) {
+      console.error(
+        "FUND FLOW RECURRING EXPENSE LEDGER MASTER ERROR:",
+        ledgerMasterError
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: ledgerMasterError.message
+      });
+    }
+
+    // ==========================================
+    // 4. ONLY DIRECT / INDIRECT EXPENSES
+    // ==========================================
+
+    const allowedExpenseLedgers = new Set(
+      (ledgerMasters || [])
+        .filter(
+          ledger =>
+            ledger.parent === "Direct Expenses" ||
+            ledger.parent === "Indirect Expenses"
+        )
+        .map(ledger => ledger.guid)
+    );
+
+    // ==========================================
+    // 5. FINAL UNIQUE EXPENSE LEDGER LIST
+    // ==========================================
+
+    const result = [
+      ...new Map(
+        (voucherLedgers || [])
+          .filter(row => allowedExpenseLedgers.has(row.ledger_guid))
+          .map(row => [
+            row.ledger_guid,
+            {
+              ledger_guid: row.ledger_guid,
+              ledger_name:
+                (ledgerMasters || []).find(
+                  ledger => ledger.guid === row.ledger_guid
+                )?.name || row.ledger_name
+            }
+          ])
+      ).values()
+    ].sort((a, b) =>
+      String(a.ledger_name || "").localeCompare(
+        String(b.ledger_name || "")
+      )
+    );
+
+    return res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (err) {
+    console.error(
+      "FUND FLOW RECURRING EXPENSE LEDGERS API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+app.get("/getFundFlowRecurringExpenseParties", async (req, res) => {
+  try {
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("tally_sync_ledgers")
+      .select("guid, name, parent")
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .in("parent", [
+        "Sundry Creditors",
+        "Sundry Debtors"
+      ])
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error(
+        "FUND FLOW RECURRING PARTY LEDGER ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    const result = (data || []).map(row => ({
+      ledger_guid: row.guid,
+      ledger_name: row.name
+    }));
+
+    return res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (err) {
+    console.error(
+      "FUND FLOW RECURRING PARTY LEDGER API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
 server.listen(
   process.env.PORT,
   () => {
