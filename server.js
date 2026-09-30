@@ -834,96 +834,7 @@ app.post("/saveFundFlowAutoEmailSettings", async (req, res) => {
   }
 });
 
-
-// ============================================================
-// SEND DEBTOR EMAIL API
-// ============================================================
-app.post("/sendDebtorEmail", async (req, res) => {
-  try {
-
-    const company_code =
-      String(req.body.company_code || "").trim();
-
-    const to =
-      String(req.body.to || "").trim();
-
-    const subject =
-      String(req.body.subject || "").trim();
-
-    const message =
-      String(req.body.message || "").trim();
-
-    // -----------------------------
-    // VALIDATION
-    // -----------------------------
-
-    if (!company_code) {
-      return res.json({
-        success: false,
-        error: "company_code missing"
-      });
-    }
-
-    if (!to) {
-      return res.json({
-        success: false,
-        error: "to missing"
-      });
-    }
-
-    if (!subject) {
-      return res.json({
-        success: false,
-        error: "subject missing"
-      });
-    }
-
-    if (!message) {
-      return res.json({
-        success: false,
-        error: "message missing"
-      });
-    }
-
-    // -----------------------------
-    // GET COMPANY GMAIL DETAILS
-    // -----------------------------
-
-    const { data: company, error: companyError } =
-      await supabase
-        .from("company")
-        .select("gmail_email, gmail_refresh_token")
-        .eq("company_code", company_code)
-        .maybeSingle();
-
-    if (companyError) {
-      console.error(
-        "SEND DEBTOR EMAIL COMPANY ERROR:",
-        companyError
-      );
-
-      return res.status(500).json({
-        success: false,
-        error: companyError.message
-      });
-    }
-
-    if (!company) {
-      return res.json({
-        success: false,
-        error: "Company not found"
-      });
-    }
-
-    if (!company.gmail_refresh_token) {
-      return res.json({
-        success: false,
-        error: "Gmail is not connected for this company"
-      });
-    }
-
-
-    // ==========================================================
+// ==========================================================
 // GET PARTY POSITION
 // ==========================================================
 
@@ -1015,6 +926,96 @@ app.get("/getPartyPosition", async (req, res) => {
     });
   }
 });
+
+// ============================================================
+// SEND DEBTOR EMAIL API
+// ============================================================
+app.post("/sendDebtorEmail", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    const to =
+      String(req.body.to || "").trim();
+
+    const subject =
+      String(req.body.subject || "").trim();
+
+    const message =
+      String(req.body.message || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (!to) {
+      return res.json({
+        success: false,
+        error: "to missing"
+      });
+    }
+
+    if (!subject) {
+      return res.json({
+        success: false,
+        error: "subject missing"
+      });
+    }
+
+    if (!message) {
+      return res.json({
+        success: false,
+        error: "message missing"
+      });
+    }
+
+    // -----------------------------
+    // GET COMPANY GMAIL DETAILS
+    // -----------------------------
+
+    const { data: company, error: companyError } =
+      await supabase
+        .from("company")
+        .select("gmail_email, gmail_refresh_token")
+        .eq("company_code", company_code)
+        .maybeSingle();
+
+    if (companyError) {
+      console.error(
+        "SEND DEBTOR EMAIL COMPANY ERROR:",
+        companyError
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: companyError.message
+      });
+    }
+
+    if (!company) {
+      return res.json({
+        success: false,
+        error: "Company not found"
+      });
+    }
+
+    if (!company.gmail_refresh_token) {
+      return res.json({
+        success: false,
+        error: "Gmail is not connected for this company"
+      });
+    }
+
+
+    
 
     // -----------------------------
     // GMAIL OAUTH CLIENT
