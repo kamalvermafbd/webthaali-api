@@ -554,6 +554,24 @@ app.get("/getDebtorEmailSummary", async (req, res) => {
     }
 
     // -----------------------------
+// GET COMPANY NAME
+// -----------------------------
+
+const { data: company, error: companyError } =
+  await supabase
+    .from("company")
+    .select("businessname")
+    .eq("company_code", company_code)
+    .maybeSingle();
+
+if (companyError) {
+  console.error(
+    "COMPANY NAME FETCH ERROR:",
+    companyError
+  );
+}
+
+    // -----------------------------
     // FIND REQUESTED LEDGER
     // -----------------------------
 
@@ -561,10 +579,17 @@ app.get("/getDebtorEmailSummary", async (req, res) => {
       row => row.ledger_guid === ledger_guid
     );
 
-    return res.json({
-      success: true,
-      data: debtor || null
-    });
+   return res.json({
+  success: true,
+  data: debtor
+    ? {
+        ...debtor,
+        company_name:
+          company?.businessname ||
+          company_code
+      }
+    : null
+});
 
   } catch (err) {
 
