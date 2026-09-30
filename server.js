@@ -922,6 +922,100 @@ app.post("/sendDebtorEmail", async (req, res) => {
       });
     }
 
+
+    // ==========================================================
+// GET PARTY POSITION
+// ==========================================================
+
+app.get("/getPartyPosition", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const from_date =
+      String(req.query.from_date || "").trim();
+
+    const to_date =
+      String(req.query.to_date || "").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!from_date) {
+      return res.json({
+        success: false,
+        error: "from_date missing"
+      });
+    }
+
+    if (!to_date) {
+      return res.json({
+        success: false,
+        error: "to_date missing"
+      });
+    }
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_party_position",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_from_date: from_date,
+          p_to_date: to_date
+        }
+      );
+
+    if (error) {
+      console.error(
+        "GET PARTY POSITION ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+    console.error(
+      "GET PARTY POSITION API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
     // -----------------------------
     // GMAIL OAUTH CLIENT
     // -----------------------------
