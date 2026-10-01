@@ -3,19 +3,13 @@ require("dotenv").config();
 const crypto = require("crypto");
 const { createClient } = require("@supabase/supabase-js");
 
-const nodemailer =
-    require("nodemailer");
+const { Resend } =
+    require("resend");
 
-const transporter =
-    nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-            user:
-                process.env.EMAIL_USER,
-            pass:
-                process.env.EMAIL_PASS
-        }
-    });
+const resend =
+    new Resend(
+        process.env.RESEND_API_KEY
+    );
 
 const supabase = createClient(
     process.env.SUPABASE_URL,
@@ -251,20 +245,29 @@ Billey
 
     try {
 
-        await transporter.sendMail({
+     const result =
+    await resend.emails.send({
 
-            from:
-                process.env.EMAIL_USER,
+        from:
+            "Billey <noreply@billey.in>",
 
-            to:
-                companyEmail,
+        to:
+            companyEmail,
 
-            subject,
+        subject,
 
-            text:
-                message
+        text:
+            message
 
-        });
+    });
+
+if (result.error) {
+
+    throw new Error(
+        result.error.message ||
+        "Resend email failed"
+    );
+}
 
         const {
             error: updateError
