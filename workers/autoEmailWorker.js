@@ -198,24 +198,95 @@ async function runAutoEmailProcessor() {
     );
 
 
-    /*
-     * Actual processing will be added next:
-     *
-     * 1. Load active companies
-     * 2. Check Gmail registration
-     * 3. Send missing-Gmail notification
-     * 4. Load fund_flow_auto_email_settings
-     * 5. Find eligible invoices
-     * 6. Check fund_flow_auto_email_log
-     * 7. Send BEFORE_DUE / ON_DUE_DATE emails
-     * 8. Write SENT / FAILED log
-     */
+   // =========================================================
+// LOAD ACTIVE COMPANIES
+// =========================================================
+
+const {
+    data: companies,
+    error: companyError
+} = await supabase
+    .from("company")
+    .select(`
+        company_code,
+        businessname,
+        email,
+        is_active,
+        gmail_email,
+        gmail_refresh_token,
+        gmail_connected,
+        gmail_auto_scheduler_last_notified_at
+    `)
+    .eq(
+        "is_active",
+        true
+    )
+    .order(
+        "company_code",
+        {
+            ascending: true
+        }
+    );
+
+
+if (companyError) {
+
+    throw new Error(
+        "ACTIVE COMPANY FETCH FAILED: " +
+        companyError.message
+    );
+}
+
+
+console.log(
+    "ACTIVE COMPANIES FOUND:",
+    companies?.length || 0
+);
+
+
+for (
+    const company
+    of companies || []
+) {
+
+    console.log(
+        "AUTO EMAIL COMPANY CHECK:",
+        company.company_code,
+        company.businessname
+    );
+
+
+    const gmailRegistered =
+        company.gmail_connected === true &&
+        Boolean(
+            String(
+                company.gmail_email || ""
+            ).trim()
+        ) &&
+        Boolean(
+            String(
+                company.gmail_refresh_token || ""
+            ).trim()
+        );
+
+
+    if (!gmailRegistered) {
+
+        console.log(
+            "GMAIL NOT REGISTERED:",
+            company.company_code
+        );
+
+        continue;
+    }
 
 
     console.log(
-        "AUTO EMAIL PROCESSOR FINISHED:",
-        new Date().toISOString()
+        "GMAIL REGISTERED:",
+        company.company_code,
+        company.gmail_email
     );
+}
 }
 
 
