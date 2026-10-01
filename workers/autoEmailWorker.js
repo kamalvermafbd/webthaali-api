@@ -3,6 +3,20 @@ require("dotenv").config();
 const crypto = require("crypto");
 const { createClient } = require("@supabase/supabase-js");
 
+const nodemailer =
+    require("nodemailer");
+
+const transporter =
+    nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+            user:
+                process.env.EMAIL_USER,
+            pass:
+                process.env.EMAIL_PASS
+        }
+    });
+
 const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_SERVICE_KEY
@@ -177,6 +191,121 @@ function startRuntimeHeartbeat() {
         );
 }
 
+// =========================================================
+// GMAIL REGISTRATION NOTIFICATION
+// =========================================================
+
+async function notifyMissingGmail(company) {
+
+    const companyEmail =
+        String(company.email || "").trim();
+
+    if (!companyEmail) {
+
+        console.log(
+            "COMPANY EMAIL MISSING:",
+            company.company_code
+        );
+
+        return;
+    }
+
+    const lastNotified =
+        company.gmail_auto_scheduler_last_notified_at
+            ? new Date(
+                company.gmail_auto_scheduler_last_notified_at
+            )
+            : null;
+
+    const oneDayAgo =
+        Date.now() -
+        (24 * 60 * 60 * 1000);
+
+    if (
+        lastNotified &&
+        !Number.isNaN(lastNotified.getTime()) &&
+        lastNotified.getTime() >= oneDayAgo
+    ) {
+
+        console.log(
+            "GMAIL NOTIFICATION ALREADY SENT TODAY:",
+            company.company_code
+        );
+
+        return;
+    }
+
+    const subject =
+        "Auto Email Scheduler - Email Registration Required";
+
+    const message = `
+Dear ${company.businessname || "Customer"},
+
+Auto Email Scheduler is not active for your company.
+
+Please register/connect your email ID with the Auto Email Scheduler from Company Settings to enable automatic customer email reminders.
+
+Regards,
+Billey
+`.trim();
+
+    try {
+
+        await transporter.sendMail({
+
+            from:
+                process.env.EMAIL_USER,
+
+            to:
+                companyEmail,
+
+            subject,
+
+            text:
+                message
+
+        });
+
+        const {
+            error: updateError
+        } = await supabase
+            .from("company")
+            .update({
+                gmail_auto_scheduler_last_notified_at:
+                    new Date().toISOString()
+            })
+            .eq(
+                "company_code",
+                company.company_code
+            );
+
+        if (updateError) {
+
+            console.error(
+                "GMAIL NOTIFICATION TIMESTAMP UPDATE ERROR:",
+                company.company_code,
+                updateError.message
+            );
+
+            return;
+        }
+
+        console.log(
+            "GMAIL REGISTRATION NOTIFICATION SENT:",
+            company.company_code,
+            companyEmail
+        );
+
+    } catch (error) {
+
+        console.error(
+            "GMAIL REGISTRATION NOTIFICATION FAILED:",
+            company.company_code,
+            error.message
+        );
+
+    }
+}
 
 // =========================================================
 // AUTO EMAIL PROCESSOR
@@ -272,13 +401,15 @@ for (
 
     if (!gmailRegistered) {
 
-        console.log(
-            "GMAIL NOT REGISTERED:",
-            company.company_code
-        );
+    console.log(
+        "GMAIL NOT REGISTERED:",
+        company.company_code
+    );
 
-        continue;
-    }
+    await notifyMissingGmail(company);
+
+    continue;
+}
 
 
     console.log(
