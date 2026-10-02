@@ -610,6 +610,8 @@ if (companyError) {
 });
 
 
+
+
 // =========================================================
 // FUND FLOW AUTO EMAIL SETTINGS - GET
 // =========================================================
@@ -680,12 +682,49 @@ app.get("/getFundFlowAutoEmailSettings", async (req, res) => {
       });
     }
 
+    if (!data) {
+  const { data: defaultData, error: defaultError } = await supabase
+    .from("fund_flow_auto_email_defaults")
+    .select(`
+      id,
+      company_code,
+      tally_owner,
+      auto_email_enabled,
+      before_due_enabled,
+      before_due_days,
+      on_due_date_enabled,
+      email_time,
+      created_at,
+      updated_at
+    `)
+    .eq("company_code", company_code)
+    .eq("tally_owner", tally_owner)
+    .maybeSingle();
+
+  if (defaultError) {
+    return res.status(500).json({
+      success: false,
+      error: defaultError.message
+    });
+  }
+
+  return res.json({
+    success: true,
+    data: defaultData
+      ? { ...defaultData, ledger_guid, is_default: true }
+      : null
+  });
+}
+
     // No row = settings have never been configured.
     // Frontend should show all switches OFF.
     return res.json({
-      success: true,
-      data: data || null
-    });
+  success: true,
+  data: {
+    ...data,
+    is_default: false
+  }
+});
 
   } catch (err) {
     console.error(
@@ -699,6 +738,7 @@ app.get("/getFundFlowAutoEmailSettings", async (req, res) => {
     });
   }
 });
+
 
 // =========================================================
 // FUND FLOW AUTO EMAIL SETTINGS - SAVE
@@ -828,6 +868,204 @@ app.post("/saveFundFlowAutoEmailSettings", async (req, res) => {
   } catch (err) {
     console.error(
       "FUND FLOW AUTO EMAIL SETTINGS SAVE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ==========================================================
+// GET FUND FLOW AUTO EMAIL DEFAULT SETTINGS
+// ==========================================================
+
+app.get("/getFundFlowAutoEmailDefaults", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim();
+
+    if (!company_code || !tally_owner) {
+      return res.status(400).json({
+        success: false,
+        error: "company_code and tally_owner are required"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("fund_flow_auto_email_defaults")
+      .select(`
+        id,
+        company_code,
+        tally_owner,
+        auto_email_enabled,
+        before_due_enabled,
+        before_due_days,
+        on_due_date_enabled,
+        email_time,
+        created_at,
+        updated_at
+      `)
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .maybeSingle();
+
+    if (error) {
+      console.error(
+        "GET FUND FLOW AUTO EMAIL DEFAULTS ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || null
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GET FUND FLOW AUTO EMAIL DEFAULTS EXCEPTION:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Internal server error"
+    });
+
+  }
+
+});
+
+// =========================================================
+// FUND FLOW AUTO EMAIL DEFAULT SETTINGS - SAVE
+// =========================================================
+
+app.post("/saveFundFlowAutoEmailDefaults", async (req, res) => {
+  try {
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    const tally_owner =
+      String(req.body.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const auto_email_enabled =
+      Boolean(req.body.auto_email_enabled);
+
+    const before_due_enabled =
+      Boolean(req.body.before_due_enabled);
+
+    const on_due_date_enabled =
+      Boolean(req.body.on_due_date_enabled);
+
+    const before_due_days =
+      Number(req.body.before_due_days ?? 3);
+
+    const email_time =
+      String(req.body.email_time || "09:00:00").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (
+      !Number.isInteger(before_due_days) ||
+      before_due_days < 1 ||
+      before_due_days > 30
+    ) {
+      return res.json({
+        success: false,
+        error: "before_due_days must be between 1 and 30"
+      });
+    }
+
+    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(email_time)) {
+      return res.json({
+        success: false,
+        error: "Invalid email_time"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("fund_flow_auto_email_defaults")
+      .upsert(
+        {
+          company_code,
+          tally_owner,
+
+          auto_email_enabled,
+          before_due_enabled,
+          before_due_days,
+          on_due_date_enabled,
+          email_time,
+
+          updated_at: new Date().toISOString()
+        },
+        {
+          onConflict: "company_code,tally_owner"
+        }
+      )
+      .select(`
+        id,
+        company_code,
+        tally_owner,
+        auto_email_enabled,
+        before_due_enabled,
+        before_due_days,
+        on_due_date_enabled,
+        email_time,
+        created_at,
+        updated_at
+      `)
+      .single();
+
+    if (error) {
+      console.error(
+        "FUND FLOW AUTO EMAIL DEFAULT SETTINGS SAVE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Auto email default settings saved successfully",
+      data
+    });
+
+  } catch (err) {
+    console.error(
+      "FUND FLOW AUTO EMAIL DEFAULT SETTINGS SAVE API ERROR:",
       err
     );
 
