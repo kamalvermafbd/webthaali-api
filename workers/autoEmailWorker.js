@@ -6,6 +6,10 @@ const { createClient } = require("@supabase/supabase-js");
 const { Resend } =
     require("resend");
 
+const {
+    sendGmailEmail
+} = require("../utils/gmailSender");
+
 const resend =
     new Resend(
         process.env.RESEND_API_KEY
@@ -420,6 +424,620 @@ for (
         company.company_code,
         company.gmail_email
     );
+
+
+        // =========================================================
+    // LOAD AUTO EMAIL SETTINGS
+    // =========================================================
+
+    const {
+        data: settingsRows,
+        error: settingsError
+    } = await supabase
+        .from("fund_flow_auto_email_settings")
+        .select(`
+            company_code,
+            tally_owner,
+            ledger_guid,
+            auto_email_enabled,
+            before_due_enabled,
+            before_due_days,
+            on_due_date_enabled,
+            email_time
+        `)
+        .eq(
+            "company_code",
+            company.company_code
+        );
+
+    if (settingsError) {
+
+        console.error(
+            "AUTO EMAIL SETTINGS FETCH FAILED:",
+            company.company_code,
+            settingsError.message
+        );
+
+        continue;
+    }
+
+    console.log(
+        "AUTO EMAIL SETTINGS FOUND:",
+        company.company_code,
+        settingsRows?.length || 0
+    );
+
+        // =========================================================
+    // PROCESS ENABLED AUTO EMAIL SETTINGS
+    // =========================================================
+
+        for (const settings of settingsRows || []) {
+
+        if (settings.auto_email_enabled !== true) {
+            continue;
+        }
+
+        console.log(
+            "AUTO EMAIL ENABLED:",
+            company.company_code,
+            settings.tally_owner,
+            settings.ledger_guid
+        );
+
+            // =====================================================
+        // LOAD FUND FLOW FOR THIS LEDGER
+        // =====================================================
+
+        const asOfDate =
+            new Date().toISOString().slice(0, 10);
+
+        const {
+            data: fundFlowRows,
+            error: fundFlowError
+        } = await supabase.rpc(
+            "get_fund_flow_core",
+            {
+                p_company_code: company.company_code,
+                p_tally_owner: settings.tally_owner,
+                p_as_of_date: asOfDate
+            }
+        );
+
+        if (fundFlowError) {
+
+            console.error(
+                "FUND FLOW FETCH FAILED:",
+                company.company_code,
+                settings.ledger_guid,
+                fundFlowError.message
+            );
+
+            continue;
+        }
+
+        const ledgerRows =
+            (fundFlowRows || []).filter(
+                row =>
+                    row.ledger_guid === settings.ledger_guid &&
+                    row.party_type === "CUSTOMER"
+            );
+
+        console.log(
+            "FUND FLOW ROWS FOUND:",
+            company.company_code,
+            settings.ledger_guid,
+            ledgerRows.length
+        );
+
+        if (!ledgerRows.length) {
+            continue;
+        }
+
+                // =====================================================
+        // FIND DUE REMINDER INVOICES
+        // =====================================================
+
+        const today =
+            new Date().toISOString().slice(0, 10);
+
+        const eligibleRows = [];
+
+        for (const row of ledgerRows) {
+
+            if (!row.due_date || !row.bill_name) {
+                continue;
+            }
+
+            const dueDate =
+                String(row.due_date).slice(0, 10);
+
+            const dueDateMs =
+                new Date(`${dueDate}T00:00:00`).getTime();
+
+            const todayMs =
+                new Date(`${today}T00:00:00`).getTime();
+
+            const daysUntilDue =
+                Math.round(
+                    (dueDateMs - todayMs) /
+                    (24 * 60 * 60 * 1000)
+                );
+
+            let emailType = null;
+
+            if (
+                settings.before_due_enabled === true &&
+                daysUntilDue === Number(settings.before_due_days)
+            ) {
+                emailType = "BEFORE_DUE";
+            }
+
+            if (
+                settings.on_due_date_enabled === true &&
+                daysUntilDue === 0
+            ) {
+                emailType = "ON_DUE_DATE";
+            }
+
+            if (!emailType) {
+                continue;
+            }
+
+            eligibleRows.push({
+                ...row,
+                email_type: emailType
+            });
+        }
+
+        console.log(
+            "AUTO EMAIL ELIGIBLE ROWS:",
+            company.company_code,
+            settings.ledger_guid,
+            eligibleRows.length
+        );
+
+        if (!eligibleRows.length) {
+            continue;
+        }
+
+                // =====================================================
+        // CHECK AUTO EMAIL LOG
+        // =====================================================
+
+        const rowsToSend = [];
+
+        for (const row of eligibleRows) {
+
+            const { data: existingLog, error: logCheckError } =
+                await supabase
+                    .from("fund_flow_auto_email_log")
+                    .select("id, status")
+                    .eq("company_code", company.company_code)
+                    .eq("tally_owner", settings.tally_owner)
+                    .eq("ledger_guid", settings.ledger_guid)
+                    .eq("bill_name", row.bill_name)
+                    .eq("due_date", row.due_date)
+                    .eq("email_type", row.email_type)
+                    .maybeSingle();
+
+            if (logCheckError) {
+
+                console.error(
+                    "AUTO EMAIL LOG CHECK FAILED:",
+                    company.company_code,
+                    row.bill_name,
+                    logCheckError.message
+                );
+
+                continue;
+            }
+
+            if (
+                existingLog &&
+                (
+                    existingLog.status === "SENT" ||
+                    existingLog.status === "PROCESSING"
+                )
+            ) {
+                console.log(
+                    "AUTO EMAIL ALREADY PROCESSED:",
+                    company.company_code,
+                    row.bill_name,
+                    row.email_type
+                );
+
+                continue;
+            }
+
+            rowsToSend.push(row);
+        }
+
+        console.log(
+            "AUTO EMAIL ROWS READY TO SEND:",
+            company.company_code,
+            settings.ledger_guid,
+            rowsToSend.length
+        );
+
+        if (!rowsToSend.length) {
+            continue;
+        }
+
+                // =====================================================
+        // CHECK EMAIL TIME
+        // =====================================================
+
+        const currentTime =
+            new Date().toTimeString().slice(0, 5);
+
+        const configuredEmailTime =
+            String(settings.email_time || "09:00:00")
+                .slice(0, 5);
+
+        if (currentTime < configuredEmailTime) {
+
+            console.log(
+                "AUTO EMAIL WAITING FOR EMAIL TIME:",
+                company.company_code,
+                settings.ledger_guid,
+                "CURRENT:",
+                currentTime,
+                "CONFIGURED:",
+                configuredEmailTime
+            );
+
+            continue;
+        }
+
+                // =====================================================
+        // GET CUSTOMER EMAIL
+        // =====================================================
+
+        const { data: debtorData, error: debtorError } =
+            await supabase.rpc(
+                "get_debtor_email_summary",
+                {
+                    p_company_code: company.company_code,
+                    p_tally_owner: settings.tally_owner,
+                    p_opening_date: asOfDate,
+                    p_as_of_date: asOfDate
+                }
+            );
+
+        if (debtorError) {
+
+            console.error(
+                "DEBTOR EMAIL SUMMARY FETCH FAILED:",
+                company.company_code,
+                settings.ledger_guid,
+                debtorError.message
+            );
+
+            continue;
+        }
+
+        const debtor =
+            (debtorData || []).find(
+                row =>
+                    row.ledger_guid ===
+                    settings.ledger_guid
+            );
+
+        if (!debtor) {
+
+            console.log(
+                "DEBTOR NOT FOUND:",
+                company.company_code,
+                settings.ledger_guid
+            );
+
+            continue;
+        }
+
+        const recipientEmail =
+            String(debtor.email || "").trim();
+
+        if (!recipientEmail) {
+
+            console.log(
+                "DEBTOR EMAIL MISSING:",
+                company.company_code,
+                settings.ledger_guid
+            );
+
+            continue;
+        }
+
+        console.log(
+            "AUTO EMAIL RECIPIENT:",
+            company.company_code,
+            recipientEmail
+        );
+
+                // =====================================================
+        // BUILD AUTO EMAIL MESSAGE
+        // =====================================================
+
+        const totalOutstanding =
+            Number(debtor.total_outstanding || 0);
+
+        const totalOverdue =
+            Number(debtor.overdue_amount || 0);
+
+        const totalDue =
+            Number(debtor.due_amount || 0);
+
+        let messageIntro = "";
+
+        if (totalOverdue > 0 && totalDue > 0) {
+
+            messageIntro =
+                `Your total outstanding balance is ₹${totalOutstanding.toFixed(2)}, of which ₹${totalOverdue.toFixed(2)} is currently overdue. The remaining ₹${totalDue.toFixed(2)} is not yet due and is payable as per its respective due date.\n\n` +
+                `We request you to kindly arrange payment of the overdue amount of ₹${totalOverdue.toFixed(2)} at the earliest.`;
+
+        } else if (totalOverdue > 0) {
+
+            messageIntro =
+                `Your total outstanding balance is ₹${totalOutstanding.toFixed(2)}, which is currently overdue.\n\n` +
+                `We request you to kindly arrange payment of the overdue amount of ₹${totalOverdue.toFixed(2)} at the earliest.`;
+
+        } else {
+
+            messageIntro =
+                `Your total outstanding balance is ₹${totalOutstanding.toFixed(2)}, which is not yet due and is payable as per its respective due date.`;
+        }
+
+
+        const overdueRows =
+            rowsToSend.filter(
+                row => row.email_type === "ON_DUE_DATE"
+            );
+
+        const beforeDueRows =
+            rowsToSend.filter(
+                row => row.email_type === "BEFORE_DUE"
+            );
+
+
+        let message =
+            `${messageIntro}\n\n`;
+
+
+        // =====================================================
+        // OVERDUE DETAILS
+        // =====================================================
+
+        if (overdueRows.length) {
+
+            message +=
+                `OVERDUE DETAILS\n` +
+                `------------------------------\n`;
+
+            for (const row of overdueRows) {
+
+                const dueDate =
+                    String(row.due_date).slice(0, 10);
+
+                const invoiceDate =
+                    row.voucher_date
+                        ? String(row.voucher_date).slice(0, 10)
+                        : "-";
+
+                const amount =
+                    Number(row.net_cash_required || 0);
+
+                message +=
+                    `Invoice: ${row.bill_name}\n` +
+                    `Invoice Date: ${invoiceDate}\n` +
+                    `Due Date: ${dueDate}\n` +
+                    `Outstanding: ₹${amount.toFixed(2)}\n\n`;
+            }
+        }
+
+
+        // =====================================================
+        // FALLING DUE / UPCOMING
+        // =====================================================
+
+        if (beforeDueRows.length) {
+
+            message +=
+                `FALLING DUE / UPCOMING\n` +
+                `------------------------------\n`;
+
+            for (const row of beforeDueRows) {
+
+                const dueDate =
+                    String(row.due_date).slice(0, 10);
+
+                const invoiceDate =
+                    row.voucher_date
+                        ? String(row.voucher_date).slice(0, 10)
+                        : "-";
+
+                const amount =
+                    Number(row.net_cash_required || 0);
+
+                const dueDateMs =
+                    new Date(`${dueDate}T00:00:00`).getTime();
+
+                const todayMs =
+                    new Date(
+                        `${today}T00:00:00`
+                    ).getTime();
+
+                const dueIn =
+                    Math.max(
+                        0,
+                        Math.round(
+                            (dueDateMs - todayMs) /
+                            (24 * 60 * 60 * 1000)
+                        )
+                    );
+
+                message +=
+                    `Invoice: ${row.bill_name}\n` +
+                    `Invoice Date: ${invoiceDate}\n` +
+                    `Due Date: ${dueDate}\n` +
+                    `Outstanding: ₹${amount.toFixed(2)}\n` +
+                    `Due In: ${dueIn} day(s)\n\n`;
+            }
+        }
+
+
+        message +=
+            `Regards,\n` +
+            `${company.businessname || "Billey"}`;
+
+                    // =====================================================
+        // CREATE PROCESSING LOGS
+        // =====================================================
+
+        const processingLogIds = [];
+
+        for (const row of rowsToSend) {
+
+            const { data: logRow, error: logInsertError } =
+                await supabase
+                    .from("fund_flow_auto_email_log")
+                    .insert({
+                        company_code: company.company_code,
+                        tally_owner: settings.tally_owner,
+                        ledger_guid: settings.ledger_guid,
+                        bill_name: row.bill_name,
+                        due_date: row.due_date,
+                        email_type: row.email_type,
+                        recipient_email: recipientEmail,
+                        status: "PROCESSING"
+                    })
+                    .select("id")
+                    .single();
+
+            if (logInsertError) {
+
+                console.error(
+                    "AUTO EMAIL PROCESSING LOG FAILED:",
+                    company.company_code,
+                    row.bill_name,
+                    row.email_type,
+                    logInsertError.message
+                );
+
+                continue;
+            }
+
+            processingLogIds.push(logRow.id);
+        }
+
+        console.log(
+            "AUTO EMAIL PROCESSING LOGS CREATED:",
+            company.company_code,
+            processingLogIds.length
+        );
+
+        if (!processingLogIds.length) {
+            continue;
+        }
+
+                // =====================================================
+        // SEND AUTO EMAIL THROUGH GMAIL
+        // =====================================================
+
+        try {
+
+            const emailSubject =
+                rowsToSend.length === 1
+                    ? `Outstanding Payment Reminder - ${debtor.ledger_name || "Customer"}`
+                    : `Outstanding Payment Reminder - ${debtor.ledger_name || "Customer"}`;
+
+            const gmailResult =
+                await sendGmailEmail({
+                    gmail_email:
+                        company.gmail_email,
+
+                    gmail_refresh_token:
+                        company.gmail_refresh_token,
+
+                    to:
+                        recipientEmail,
+
+                    subject:
+                        emailSubject,
+
+                    message
+                });
+
+            console.log(
+                "AUTO EMAIL SENT:",
+                company.company_code,
+                recipientEmail,
+                gmailResult.message_id
+            );
+
+            // =================================================
+            // MARK LOGS AS SENT
+            // =================================================
+
+            const { error: sentUpdateError } =
+                await supabase
+                    .from("fund_flow_auto_email_log")
+                    .update({
+                        status: "SENT",
+                        sent_at: new Date().toISOString(),
+                        error_message: null
+                    })
+                    .in(
+                        "id",
+                        processingLogIds
+                    );
+
+            if (sentUpdateError) {
+
+                console.error(
+                    "AUTO EMAIL SENT LOG UPDATE FAILED:",
+                    company.company_code,
+                    sentUpdateError.message
+                );
+
+            }
+
+        } catch (emailError) {
+
+            console.error(
+                "AUTO EMAIL SEND FAILED:",
+                company.company_code,
+                recipientEmail,
+                emailError.message
+            );
+
+            // ===============================================
+            // MARK LOGS AS FAILED
+            // ===============================================
+
+            const { error: failedUpdateError } =
+                await supabase
+                    .from("fund_flow_auto_email_log")
+                    .update({
+                        status: "FAILED",
+                        error_message:
+                            String(emailError.message || "Email send failed")
+                    })
+                    .in(
+                        "id",
+                        processingLogIds
+                    );
+
+            if (failedUpdateError) {
+
+                console.error(
+                    "AUTO EMAIL FAILED LOG UPDATE ERROR:",
+                    company.company_code,
+                    failedUpdateError.message
+                );
+            }
+        }
+
+    }
 }
 }
 
