@@ -216,6 +216,10 @@ const {
     sendChunkedToConnector
 } = require("./utils/sendChunkedToConnector");
 
+const {
+  sendGmailEmail
+} = require("./utils/gmailSender");
+
 const BatchStatusManager =
     require("./sync-engine/BatchStatusManager");
 
@@ -1124,13 +1128,10 @@ app.post("/sendDebtorEmail", async (req, res) => {
       });
     }
 
-
-    
-
     // -----------------------------
     // GMAIL OAUTH CLIENT
     // -----------------------------
-
+/*
   const oauth2Client = new google.auth.OAuth2();
 
 oauth2Client._clientId =
@@ -1190,18 +1191,27 @@ oauth2Client.setCredentials({
         raw: encodedMessage
       }
     });
+*/
+
+    const result = await sendGmailEmail({
+      gmail_email: company.gmail_email,
+      gmail_refresh_token: company.gmail_refresh_token,
+      to,
+      subject,
+      message
+    });
 
     console.log(
       "DEBTOR EMAIL SENT:",
       company_code,
       to,
-      result.data.id
+      result.message_id
     );
 
     return res.json({
       success: true,
       message: "Email sent successfully",
-      message_id: result.data.id || null
+      message_id: result.message_id || null
     });
 
   } catch (err) {
