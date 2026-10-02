@@ -351,7 +351,9 @@ const {
         gmail_email,
         gmail_refresh_token,
         gmail_connected,
-        gmail_auto_scheduler_last_notified_at
+        gmail_auto_scheduler_last_notified_at,
+        license_from,
+        license_till
     `)
     .eq(
         "is_active",
@@ -391,6 +393,21 @@ for (
         company.businessname
     );
 
+    const today = new Date().toISOString().slice(0, 10);
+
+const subscriptionActive =
+    company.license_from &&
+    company.license_till &&
+    today >= String(company.license_from).slice(0, 10) &&
+    today <= String(company.license_till).slice(0, 10);
+
+if (!subscriptionActive) {
+    console.log(
+        "AUTO EMAIL SKIP - SUBSCRIPTION INACTIVE:",
+        company.company_code
+    );
+    continue;
+}
 
     const gmailRegistered =
         company.gmail_connected === true &&
@@ -754,140 +771,352 @@ for (
             recipientEmail
         );
 
-                // =====================================================
-        // BUILD AUTO EMAIL MESSAGE
-        // =====================================================
+            // =====================================================
+// BUILD AUTO EMAIL MESSAGE
+// =====================================================
 
-        const totalOutstanding =
-            Number(debtor.total_outstanding || 0);
+const totalOutstanding =
+    Number(debtor.total_outstanding || 0);
 
-        const totalOverdue =
-            Number(debtor.overdue_amount || 0);
+const totalOverdue =
+    Number(debtor.overdue_amount || 0);
 
-        const totalDue =
-            Number(debtor.due_amount || 0);
+const fallingDueAmount =
+    Math.max(
+        totalOutstanding - totalOverdue,
+        0
+    );
 
-        let messageIntro = "";
+const customerRows =
+    ledgerRows.filter(
+        row =>
+            row.party_type === "CUSTOMER" &&
+            Number(row.net_cash_required || 0) > 0
+    );
 
-        if (totalOverdue > 0 && totalDue > 0) {
+const overdueInvoiceRows =
+    customerRows
+        .filter(
+            row => row.status === "OVERDUE"
+        )
+        .sort(
+            (a, b) =>
+                String(a.due_date || "")
+                    .localeCompare(
+                        String(b.due_date || "")
+                    )
+        );
 
-            messageIntro =
-                `Your total outstanding balance is ₹${totalOutstanding.toFixed(2)}, of which ₹${totalOverdue.toFixed(2)} is currently overdue. The remaining ₹${totalDue.toFixed(2)} is not yet due and is payable as per its respective due date.\n\n` +
-                `We request you to kindly arrange payment of the overdue amount of ₹${totalOverdue.toFixed(2)} at the earliest.`;
+const fallingDueRows =
+    customerRows
+        .filter(
+            row => row.status === "UPCOMING"
+        )
+        .sort(
+            (a, b) =>
+                String(a.due_date || "")
+                    .localeCompare(
+                        String(b.due_date || "")
+                    )
+        );
 
-        } else if (totalOverdue > 0) {
+const UPCOMING_ALERT_DAYS = 7;
 
-            messageIntro =
-                `Your total outstanding balance is ₹${totalOutstanding.toFixed(2)}, which is currently overdue.\n\n` +
-                `We request you to kindly arrange payment of the overdue amount of ₹${totalOverdue.toFixed(2)} at the earliest.`;
+function formatEmailDate(dateValue) {
 
-        } else {
+    if (!dateValue) {
+        return "-";
+    }
 
-            messageIntro =
-                `Your total outstanding balance is ₹${totalOutstanding.toFixed(2)}, which is not yet due and is payable as per its respective due date.`;
+    const d =
+        new Date(
+            `${String(dateValue).slice(0, 10)}T00:00:00`
+        );
+
+    if (Number.isNaN(d.getTime())) {
+        return String(dateValue);
+    }
+
+    return d.toLocaleDateString(
+        "en-IN",
+        {
+            day: "2-digit",
+            month: "short",
+            year: "numeric"
         }
+    );
+}
+
+function getDaysUntilDue(dueDate) {
+
+    if (!dueDate) {
+        return 0;
+    }
+
+    const dueDateMs =
+        new Date(
+            `${String(dueDate).slice(0, 10)}T00:00:00`
+        ).getTime();
+
+    const todayMs =
+        new Date(
+            `${today}T00:00:00`
+        ).getTime();
+
+    return Math.max(
+        Math.floor(
+            (dueDateMs - todayMs) /
+            (24 * 60 * 60 * 1000)
+        ),
+        0
+    );
+}
+
+const nearDueRows =
+    fallingDueRows.filter(
+        row =>
+            getDaysUntilDue(row.due_date) <=
+            UPCOMING_ALERT_DAYS
+    );
+
+let messageIntro = "";
 
 
-        const overdueRows =
-            rowsToSend.filter(
-                row => row.email_type === "ON_DUE_DATE"
+// =====================================================
+// TRIGGER-SPECIFIC MESSAGE
+// =====================================================
+
+// BEFORE DUE
+if (
+    rowsToSend.some(
+        row => row.email_type === "BEFORE_DUE"
+    )
+) {
+
+    const beforeDueTriggerRows =
+        rowsToSend.filter(
+            row =>
+                row.email_type === "BEFORE_DUE"
+        );
+
+    if (
+        beforeDueTriggerRows.length === 1
+    ) {
+
+        const row =
+            beforeDueTriggerRows[0];
+
+        const days =
+            getDaysUntilDue(
+                row.due_date
             );
 
-        const beforeDueRows =
-            rowsToSend.filter(
-                row => row.email_type === "BEFORE_DUE"
+        const dueDate =
+            formatEmailDate(
+                row.due_date
             );
 
+        const amount =
+            Number(
+                row.net_cash_required || 0
+            );
 
-        let message =
-            `${messageIntro}\n\n`;
+        messageIntro =
+            `This is a reminder that Invoice ${row.bill_name} for ₹${amount.toFixed(2)} is due in ${days} day${days === 1 ? "" : "s"} on ${dueDate}. We request you to kindly arrange the payment by the due date.`;
 
+    } else {
 
-        // =====================================================
-        // OVERDUE DETAILS
-        // =====================================================
+        const triggerAmount =
+            beforeDueTriggerRows.reduce(
+                (sum, row) =>
+                    sum +
+                    Number(
+                        row.net_cash_required || 0
+                    ),
+                0
+            );
 
-        if (overdueRows.length) {
-
-            message +=
-                `OVERDUE DETAILS\n` +
-                `------------------------------\n`;
-
-            for (const row of overdueRows) {
-
-                const dueDate =
-                    String(row.due_date).slice(0, 10);
-
-                const invoiceDate =
-                    row.voucher_date
-                        ? String(row.voucher_date).slice(0, 10)
-                        : "-";
-
-                const amount =
-                    Number(row.net_cash_required || 0);
-
-                message +=
-                    `Invoice: ${row.bill_name}\n` +
-                    `Invoice Date: ${invoiceDate}\n` +
-                    `Due Date: ${dueDate}\n` +
-                    `Outstanding: ₹${amount.toFixed(2)}\n\n`;
-            }
-        }
+        messageIntro =
+            `This is a reminder that ₹${triggerAmount.toFixed(2)} is due within the next ${Number(settings.before_due_days)} day${Number(settings.before_due_days) === 1 ? "" : "s"}. We request you to kindly arrange the payment by the respective due date.`;
+    }
 
 
-        // =====================================================
-        // FALLING DUE / UPCOMING
-        // =====================================================
+// ON DUE DATE
+} else if (
+    rowsToSend.some(
+        row => row.email_type === "ON_DUE_DATE"
+    )
+) {
 
-        if (beforeDueRows.length) {
+    const dueTodayRows =
+        rowsToSend.filter(
+            row =>
+                row.email_type === "ON_DUE_DATE"
+        );
 
-            message +=
-                `FALLING DUE / UPCOMING\n` +
-                `------------------------------\n`;
+    if (
+        dueTodayRows.length === 1
+    ) {
 
-            for (const row of beforeDueRows) {
+        const row =
+            dueTodayRows[0];
 
-                const dueDate =
-                    String(row.due_date).slice(0, 10);
+        const amount =
+            Number(
+                row.net_cash_required || 0
+            );
 
-                const invoiceDate =
-                    row.voucher_date
-                        ? String(row.voucher_date).slice(0, 10)
-                        : "-";
+        messageIntro =
+            `This is a reminder that Invoice ${row.bill_name} for ₹${amount.toFixed(2)} is due today. We request you to kindly arrange the payment today.`;
 
-                const amount =
-                    Number(row.net_cash_required || 0);
+    } else {
 
-                const dueDateMs =
-                    new Date(`${dueDate}T00:00:00`).getTime();
+        const dueTodayAmount =
+            dueTodayRows.reduce(
+                (sum, row) =>
+                    sum +
+                    Number(
+                        row.net_cash_required || 0
+                    ),
+                0
+            );
 
-                const todayMs =
-                    new Date(
-                        `${today}T00:00:00`
-                    ).getTime();
+        messageIntro =
+            `This is a reminder that invoices totaling ₹${dueTodayAmount.toFixed(2)} are due today. We request you to kindly arrange the payment today.`;
+    }
+}
 
-                const dueIn =
-                    Math.max(
-                        0,
-                        Math.round(
-                            (dueDateMs - todayMs) /
-                            (24 * 60 * 60 * 1000)
-                        )
-                    );
 
-                message +=
-                    `Invoice: ${row.bill_name}\n` +
-                    `Invoice Date: ${invoiceDate}\n` +
-                    `Due Date: ${dueDate}\n` +
-                    `Outstanding: ₹${amount.toFixed(2)}\n` +
-                    `Due In: ${dueIn} day(s)\n\n`;
-            }
-        }
+// =====================================================
+// EMAIL BODY
+// =====================================================
 
+let message =
+    `Dear ${debtor.ledger_name || "Customer"},\n\n` +
+    `This is a reminder regarding your account with ${company.businessname || "Billey"}.\n\n` +
+    `${messageIntro}\n\n`;
+
+
+// =====================================================
+// OUTSTANDING STATUS
+// =====================================================
+
+message +=
+    `OUTSTANDING STATUS\n` +
+    `------------------\n` +
+    `Total Outstanding : ₹${totalOutstanding.toFixed(2)}\n` +
+    `Total Overdue     : ₹${totalOverdue.toFixed(2)}\n` +
+    `Total Falling Due : ₹${fallingDueAmount.toFixed(2)}\n\n`;
+
+
+// =====================================================
+// OVERDUE DETAILS
+// =====================================================
+
+if (
+    overdueInvoiceRows.length > 0
+) {
+
+    message +=
+        `OVERDUE DETAILS\n` +
+        `---------------\n`;
+
+    for (
+        const row
+        of overdueInvoiceRows
+    ) {
+
+        const dueDate =
+            formatEmailDate(
+                row.due_date
+            );
+
+        const invoiceDate =
+            formatEmailDate(
+                row.voucher_date
+            );
+
+        const amount =
+            Number(
+                row.net_cash_required || 0
+            );
+
+        const delayDays =
+            Math.max(
+                Math.floor(
+                    (
+                        new Date(
+                            `${today}T00:00:00`
+                        ).getTime() -
+                        new Date(
+                            `${String(row.due_date).slice(0, 10)}T00:00:00`
+                        ).getTime()
+                    ) /
+                    (24 * 60 * 60 * 1000)
+                ),
+                0
+            );
 
         message +=
-            `Regards,\n` +
-            `${company.businessname || "Billey"}`;
+            `Invoice: ${row.bill_name}\n` +
+            `Invoice Date: ${invoiceDate}\n` +
+            `Due Date: ${dueDate}\n` +
+            `Outstanding: ₹${amount.toFixed(2)}\n` +
+            `Delay: ${delayDays} day${delayDays === 1 ? "" : "s"}\n\n`;
+    }
+}
+
+
+// =====================================================
+// FALLING DUE / UPCOMING
+// =====================================================
+
+if (
+    fallingDueRows.length > 0
+) {
+
+    message +=
+        `FALLING DUE / UPCOMING\n` +
+        `----------------------\n`;
+
+    for (
+        const row
+        of fallingDueRows
+    ) {
+
+        const dueDate =
+            formatEmailDate(
+                row.due_date
+            );
+
+        const invoiceDate =
+            formatEmailDate(
+                row.voucher_date
+            );
+
+        const amount =
+            Number(
+                row.net_cash_required || 0
+            );
+
+        const dueIn =
+            getDaysUntilDue(
+                row.due_date
+            );
+
+        message +=
+            `Invoice: ${row.bill_name}\n` +
+            `Invoice Date: ${invoiceDate}\n` +
+            `Due Date: ${dueDate}\n` +
+            `Outstanding: ₹${amount.toFixed(2)}\n` +
+            `Due In: ${dueIn} day${dueIn === 1 ? "" : "s"}\n\n`;
+    }
+}
+
+
+message +=
+    `Regards,\n` +
+    `${company.businessname || "Billey"}`;
 
                     // =====================================================
         // CREATE PROCESSING LOGS
