@@ -904,6 +904,17 @@ app.get("/getRecentFundFlowAutoEmailLog", async (req, res) => {
       Date.now() - 48 * 60 * 60 * 1000
     ).toISOString();
 
+    // DEBUG: exact values frontend is sending
+    console.log(
+      "RECENT AUTO EMAIL CHECK:",
+      {
+        company_code,
+        tally_owner,
+        ledger_guid,
+        recentSince
+      }
+    );
+
     const { data, error } = await supabase
       .from("fund_flow_auto_email_log")
       .select(`
@@ -928,6 +939,12 @@ app.get("/getRecentFundFlowAutoEmailLog", async (req, res) => {
         ascending: false
       })
       .limit(1);
+
+    // DEBUG: exact DB result
+    console.log(
+      "RECENT AUTO EMAIL DB RESULT:",
+      data
+    );
 
     if (error) {
       console.error(
@@ -966,7 +983,6 @@ app.get("/getRecentFundFlowAutoEmailLog", async (req, res) => {
     });
   }
 });
-
 // ==========================================================
 // GET FUND FLOW AUTO EMAIL DEFAULT SETTINGS
 // ==========================================================
