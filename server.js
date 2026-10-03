@@ -892,11 +892,7 @@ app.get("/getRecentFundFlowAutoEmailLog", async (req, res) => {
     const ledger_guid =
       String(req.query.ledger_guid || "").trim();
 
-    if (
-      !company_code ||
-      !tally_owner ||
-      !ledger_guid
-    ) {
+    if (!company_code || !tally_owner || !ledger_guid) {
       return res.status(400).json({
         success: false,
         error:
@@ -904,33 +900,34 @@ app.get("/getRecentFundFlowAutoEmailLog", async (req, res) => {
       });
     }
 
-    const recentSince =
-      new Date(
-        Date.now() - 24 * 60 * 60 * 1000
-      ).toISOString();
+    const recentSince = new Date(
+      Date.now() - 24 * 60 * 60 * 1000
+    ).toISOString();
 
-    const { data, error } =
-      await supabase
-        .from("fund_flow_auto_email_log")
-        .select(`
-          id,
-          bill_name,
-          due_date,
-          email_type,
-          recipient_email,
-          status,
-          sent_at
-        `)
-        .eq("company_code", company_code)
-        .eq("tally_owner", tally_owner)
-        .eq("ledger_guid", ledger_guid)
-        .eq("status", "SENT")
-        .gte("sent_at", recentSince)
-        .order("sent_at", {
-          ascending: false
-        })
-        .limit(1)
-        .maybeSingle();
+    const { data, error } = await supabase
+      .from("fund_flow_auto_email_log")
+      .select(`
+        id,
+        company_code,
+        tally_owner,
+        ledger_guid,
+        bill_name,
+        due_date,
+        email_type,
+        recipient_email,
+        status,
+        sent_at
+      `)
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .eq("ledger_guid", ledger_guid)
+      .eq("status", "SENT")
+      .not("sent_at", "is", null)
+      .gte("sent_at", recentSince)
+      .order("sent_at", {
+        ascending: false
+      })
+      .limit(1);
 
     if (error) {
       console.error(
@@ -944,9 +941,15 @@ app.get("/getRecentFundFlowAutoEmailLog", async (req, res) => {
       });
     }
 
+    const recentEmail =
+      Array.isArray(data) && data.length > 0
+        ? data[0]
+        : null;
+
     return res.json({
       success: true,
-      data: data || null
+      has_recent_auto_email: Boolean(recentEmail),
+      data: recentEmail
     });
 
   } catch (err) {
@@ -958,7 +961,7 @@ app.get("/getRecentFundFlowAutoEmailLog", async (req, res) => {
     return res.status(500).json({
       success: false,
       error:
-        err.message ||
+        err?.message ||
         "Internal server error"
     });
   }

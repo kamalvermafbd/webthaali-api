@@ -443,52 +443,222 @@ if (!subscriptionActive) {
     );
 
 
-        // =========================================================
-    // LOAD AUTO EMAIL SETTINGS
-    // =========================================================
+     // =========================================================
+// LOAD AUTO EMAIL SETTINGS + COMPANY DEFAULTS
+// =========================================================
+
+const {
+    data: settingsRows,
+    error: settingsError
+} = await supabase
+    .from("fund_flow_auto_email_settings")
+    .select(`
+        company_code,
+        tally_owner,
+        ledger_guid,
+        auto_email_enabled,
+        before_due_enabled,
+        before_due_days,
+        on_due_date_enabled,
+        email_time
+    `)
+    .eq(
+        "company_code",
+        company.company_code
+    );
+
+if (settingsError) {
+
+    console.error(
+        "AUTO EMAIL SETTINGS FETCH FAILED:",
+        company.company_code,
+        settingsError.message
+    );
+
+    continue;
+}
+
+
+// =========================================================
+// LOAD COMPANY DEFAULTS
+// =========================================================
+
+const {
+    data: defaultRows,
+    error: defaultError
+} = await supabase
+    .from("fund_flow_auto_email_defaults")
+    .select(`
+        company_code,
+        tally_owner,
+        auto_email_enabled,
+        before_due_enabled,
+        before_due_days,
+        on_due_date_enabled,
+        email_time
+    `)
+    .eq(
+        "company_code",
+        company.company_code
+    );
+
+if (defaultError) {
+
+    console.error(
+        "AUTO EMAIL DEFAULTS FETCH FAILED:",
+        company.company_code,
+        defaultError.message
+    );
+
+    continue;
+}
+
+
+// =========================================================
+// BUILD EFFECTIVE SETTINGS
+// INDIVIDUAL SETTINGS ALWAYS OVERRIDE DEFAULT
+// =========================================================
+
+const effectiveSettingsRows = [
+    ...(settingsRows || [])
+];
+
+const individualSettingKeys =
+    new Set(
+        (settingsRows || []).map(
+            settings =>
+                `${settings.tally_owner}::${settings.ledger_guid}`
+        )
+    );
+
+
+// =========================================================
+// APPLY COMPANY DEFAULTS TO CUSTOMERS
+// WHO DO NOT HAVE INDIVIDUAL SETTINGS
+// =========================================================
+
+for (const defaultSettings of defaultRows || []) {
+
+    if (
+        defaultSettings.auto_email_enabled !== true
+    ) {
+        continue;
+    }
+
+    const asOfDate =
+        new Date().toISOString().slice(0, 10);
 
     const {
-        data: settingsRows,
-        error: settingsError
-    } = await supabase
-        .from("fund_flow_auto_email_settings")
-        .select(`
-            company_code,
-            tally_owner,
-            ledger_guid,
-            auto_email_enabled,
-            before_due_enabled,
-            before_due_days,
-            on_due_date_enabled,
-            email_time
-        `)
-        .eq(
-            "company_code",
-            company.company_code
-        );
+        data: fundFlowRows,
+        error: fundFlowError
+    } = await supabase.rpc(
+        "get_fund_flow_core",
+        {
+            p_company_code:
+                company.company_code,
 
-    if (settingsError) {
+            p_tally_owner:
+                defaultSettings.tally_owner,
+
+            p_as_of_date:
+                asOfDate
+        }
+    );
+
+    if (fundFlowError) {
 
         console.error(
-            "AUTO EMAIL SETTINGS FETCH FAILED:",
+            "DEFAULT FUND FLOW FETCH FAILED:",
             company.company_code,
-            settingsError.message
+            defaultSettings.tally_owner,
+            fundFlowError.message
         );
 
         continue;
     }
 
-    console.log(
-        "AUTO EMAIL SETTINGS FOUND:",
-        company.company_code,
-        settingsRows?.length || 0
-    );
+    const customerLedgerGuids =
+        [
+            ...new Set(
+                (fundFlowRows || [])
+                    .filter(
+                        row =>
+                            row.party_type ===
+                            "CUSTOMER" &&
+                            row.ledger_guid
+                    )
+                    .map(
+                        row =>
+                            row.ledger_guid
+                    )
+            )
+        ];
 
+    for (
+        const ledgerGuid
+        of customerLedgerGuids
+    ) {
+
+        const key =
+            `${defaultSettings.tally_owner}::${ledgerGuid}`;
+
+        // Individual settings exist:
+        // NEVER apply company default.
+        if (
+            individualSettingKeys.has(key)
+        ) {
+            continue;
+        }
+
+        effectiveSettingsRows.push({
+            company_code:
+                company.company_code,
+
+            tally_owner:
+                defaultSettings.tally_owner,
+
+            ledger_guid:
+                ledgerGuid,
+
+            auto_email_enabled:
+                defaultSettings.auto_email_enabled,
+
+            before_due_enabled:
+                defaultSettings.before_due_enabled,
+
+            before_due_days:
+                defaultSettings.before_due_days,
+
+            on_due_date_enabled:
+                defaultSettings.on_due_date_enabled,
+
+            email_time:
+                defaultSettings.email_time
+        });
+    }
+}
+
+
+console.log(
+    "AUTO EMAIL EFFECTIVE SETTINGS FOUND:",
+    company.company_code,
+    effectiveSettingsRows.length
+);
+
+
+// =========================================================
+// PROCESS EFFECTIVE SETTINGS
+// =========================================================
+
+for (
+    const settings
+    of effectiveSettingsRows
+) {
         // =========================================================
     // PROCESS ENABLED AUTO EMAIL SETTINGS
     // =========================================================
 
-        for (const settings of settingsRows || []) {
+      
 
         if (settings.auto_email_enabled !== true) {
             continue;
