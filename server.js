@@ -878,6 +878,91 @@ app.post("/saveFundFlowAutoEmailSettings", async (req, res) => {
   }
 });
 
+// =====================================================
+// GET RECENT FUND FLOW AUTO EMAIL LOG
+// =====================================================
+app.get("/getRecentFundFlowAutoEmailLog", async (req, res) => {
+  try {
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    if (
+      !company_code ||
+      !tally_owner ||
+      !ledger_guid
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "company_code, tally_owner and ledger_guid are required"
+      });
+    }
+
+    const recentSince =
+      new Date(
+        Date.now() - 24 * 60 * 60 * 1000
+      ).toISOString();
+
+    const { data, error } =
+      await supabase
+        .from("fund_flow_auto_email_log")
+        .select(`
+          id,
+          bill_name,
+          due_date,
+          email_type,
+          recipient_email,
+          status,
+          sent_at
+        `)
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .eq("ledger_guid", ledger_guid)
+        .eq("status", "SENT")
+        .gte("sent_at", recentSince)
+        .order("sent_at", {
+          ascending: false
+        })
+        .limit(1)
+        .maybeSingle();
+
+    if (error) {
+      console.error(
+        "GET RECENT FUND FLOW AUTO EMAIL LOG ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || null
+    });
+
+  } catch (err) {
+    console.error(
+      "GET RECENT FUND FLOW AUTO EMAIL LOG EXCEPTION:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error:
+        err.message ||
+        "Internal server error"
+    });
+  }
+});
 
 // ==========================================================
 // GET FUND FLOW AUTO EMAIL DEFAULT SETTINGS
