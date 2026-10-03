@@ -901,7 +901,7 @@ app.get("/getRecentFundFlowAutoEmailLog", async (req, res) => {
     }
 
     const recentSince = new Date(
-      Date.now() - 24 * 60 * 60 * 1000
+      Date.now() - 48 * 60 * 60 * 1000
     ).toISOString();
 
     const { data, error } = await supabase
