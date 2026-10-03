@@ -21,9 +21,9 @@ const supabase = createClient(
 );
 
 const RUN_INTERVAL_MS =
-  //  30 * 60 * 1000; // 30 minutes
-    60 * 1000; // 1 minute
+    1 * 60 * 1000; // 30 minutes
     
+
 let worker = null;
 let runtimeId = null;
 let runtimeHeartbeat = null;
@@ -839,6 +839,18 @@ for (
             }
 
             if (
+    existingLog &&
+    existingLog.status === "MISSING_EMAIL"
+) {
+    console.log(
+        "AUTO EMAIL WAITING FOR CUSTOMER EMAIL:",
+        company.company_code,
+        row.bill_name,
+        row.email_type
+    );
+}
+
+            if (
                 existingLog &&
                 (
                     existingLog.status === "SENT" ||
@@ -855,7 +867,11 @@ for (
                 continue;
             }
 
-            rowsToSend.push(row);
+            rowsToSend.push({
+    ...row,
+    existing_log_id: existingLog?.id || null,
+    existing_log_status: existingLog?.status || null
+});
         }
 
         console.log(
@@ -941,18 +957,120 @@ for (
         }
 
         const recipientEmail =
-            String(debtor.email || "").trim();
+    String(debtor.email || "").trim();
 
-        if (!recipientEmail) {
+if (!recipientEmail) {
+
+    console.log(
+        "DEBTOR EMAIL MISSING:",
+        company.company_code,
+        settings.ledger_guid,
+        rowsToSend.map(row => ({
+            bill_name: row.bill_name,
+            due_date: row.due_date,
+            email_type: row.email_type
+        }))
+    );
+
+    // Existing log ko MISSING_EMAIL mark karo.
+    for (const row of rowsToSend) {
+
+        const { data: missingLog, error: missingLogError } =
+            await supabase
+                .from("fund_flow_auto_email_log")
+                .upsert({
+                    company_code: company.company_code,
+                    tally_owner: settings.tally_owner,
+                    ledger_guid: settings.ledger_guid,
+                    bill_name: row.bill_name,
+                    due_date: row.due_date,
+                    email_type: row.email_type,
+                    recipient_email: null,
+                    status: "MISSING_EMAIL",
+                    error_message: "Customer email ID missing"
+                }, {
+                    onConflict:
+                        "company_code,tally_owner,ledger_guid,bill_name,due_date,email_type"
+                })
+                .select("id")
+                .single();
+
+        if (missingLogError) {
+            console.error(
+                "MISSING EMAIL LOG FAILED:",
+                company.company_code,
+                row.bill_name,
+                missingLogError.message
+            );
+        }
+    }
+
+        const companyEmail =
+        String(company.email || "").trim();
+
+    if (companyEmail) {
+
+        const missingInvoiceText =
+            rowsToSend
+                .map(row =>
+                    `Invoice: ${row.bill_name}\nDue Date: ${formatEmailDate(row.due_date)}\nEmail Type: ${row.email_type}`
+                )
+                .join("\n\n");
+
+        const notificationMessage = `
+Dear ${company.businessname || "Customer"},
+
+The scheduled customer email could not be sent because the customer's email ID is missing.
+
+${missingInvoiceText}
+
+Please update the customer's correct email ID in Tally and then sync Tally with Billey.
+
+After the sync, the system will automatically check again and send the pending scheduled email.
+
+Regards,
+Billey
+`.trim();
+
+        try {
+
+            const result =
+                await resend.emails.send({
+                    from:
+                        "Billey <noreply@billey.in>",
+                    to:
+                        companyEmail,
+                    subject:
+                        `Customer Email ID Missing - ${debtor.ledger_name || "Customer"}`,
+                    text:
+                        notificationMessage
+                });
+
+            if (result.error) {
+                throw new Error(
+                    result.error.message ||
+                    "Missing email notification failed"
+                );
+            }
 
             console.log(
-                "DEBTOR EMAIL MISSING:",
+                "MISSING CUSTOMER EMAIL NOTIFICATION SENT:",
                 company.company_code,
-                settings.ledger_guid
+                companyEmail
             );
 
-            continue;
+        } catch (notificationError) {
+
+            console.error(
+                "MISSING CUSTOMER EMAIL NOTIFICATION FAILED:",
+                company.company_code,
+                notificationError.message
+            );
         }
+    }
+
+    continue;
+}
 
         console.log(
             "AUTO EMAIL RECIPIENT:",
@@ -1313,39 +1431,64 @@ message +=
 
         const processingLogIds = [];
 
-        for (const row of rowsToSend) {
+for (const row of rowsToSend) {
 
-            const { data: logRow, error: logInsertError } =
-                await supabase
-                    .from("fund_flow_auto_email_log")
-                    .insert({
-                        company_code: company.company_code,
-                        tally_owner: settings.tally_owner,
-                        ledger_guid: settings.ledger_guid,
-                        bill_name: row.bill_name,
-                        due_date: row.due_date,
-                        email_type: row.email_type,
-                        recipient_email: recipientEmail,
-                        status: "PROCESSING"
-                    })
-                    .select("id")
-                    .single();
+    let logRow = null;
+    let logError = null;
 
-            if (logInsertError) {
+    if (row.existing_log_id) {
 
-                console.error(
-                    "AUTO EMAIL PROCESSING LOG FAILED:",
-                    company.company_code,
-                    row.bill_name,
-                    row.email_type,
-                    logInsertError.message
-                );
+        const result = await supabase
+            .from("fund_flow_auto_email_log")
+            .update({
+                recipient_email: recipientEmail,
+                status: "PROCESSING",
+                sent_at: null,
+                error_message: null
+            })
+            .eq("id", row.existing_log_id)
+            .select("id")
+            .single();
 
-                continue;
-            }
+        logRow = result.data;
+        logError = result.error;
 
-            processingLogIds.push(logRow.id);
-        }
+    } else {
+
+        const result = await supabase
+            .from("fund_flow_auto_email_log")
+            .insert({
+                company_code: company.company_code,
+                tally_owner: settings.tally_owner,
+                ledger_guid: settings.ledger_guid,
+                bill_name: row.bill_name,
+                due_date: row.due_date,
+                email_type: row.email_type,
+                recipient_email: recipientEmail,
+                status: "PROCESSING"
+            })
+            .select("id")
+            .single();
+
+        logRow = result.data;
+        logError = result.error;
+    }
+
+    if (logError) {
+
+        console.error(
+            "AUTO EMAIL PROCESSING LOG FAILED:",
+            company.company_code,
+            row.bill_name,
+            row.email_type,
+            logError.message
+        );
+
+        continue;
+    }
+
+    processingLogIds.push(logRow.id);
+}
 
         console.log(
             "AUTO EMAIL PROCESSING LOGS CREATED:",
