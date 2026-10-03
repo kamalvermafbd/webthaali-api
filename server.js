@@ -1514,7 +1514,6 @@ app.get("/getDebtorCustomerBehavior", async (req, res) => {
 // ==========================================================
 // GET DEBTOR TRENDS
 // ==========================================================
-
 app.get("/getDebtorTrends", async (req, res) => {
   try {
 
@@ -1531,6 +1530,9 @@ app.get("/getDebtorTrends", async (req, res) => {
 
     const as_of_date =
       String(req.query.as_of_date || "").trim();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
 
     if (!company_code) {
       return res.json({
@@ -1563,6 +1565,13 @@ app.get("/getDebtorTrends", async (req, res) => {
       });
     }
 
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
     const { data, error } =
       await supabase.rpc(
         "get_debtor_trends",
@@ -1570,7 +1579,8 @@ app.get("/getDebtorTrends", async (req, res) => {
           p_company_code: company_code,
           p_tally_owner: tally_owner,
           p_opening_date: opening_date,
-          p_as_of_date: as_of_date
+          p_as_of_date: as_of_date,
+          p_ledger_guid: ledger_guid
         }
       );
 
@@ -1604,7 +1614,6 @@ app.get("/getDebtorTrends", async (req, res) => {
     });
   }
 });
-
 // ==========================================================
 // GET DEBTOR RISK
 // ==========================================================
