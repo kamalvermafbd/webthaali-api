@@ -21,8 +21,9 @@ const supabase = createClient(
 );
 
 const RUN_INTERVAL_MS =
-    30 * 60 * 1000; // 30 minutes
-
+  //  30 * 60 * 1000; // 30 minutes
+    60 * 1000; // 1 minute
+    
 let worker = null;
 let runtimeId = null;
 let runtimeHeartbeat = null;
