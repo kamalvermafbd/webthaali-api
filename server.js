@@ -1291,6 +1291,428 @@ app.get("/getDebtorAgeing", async (req, res) => {
 });
 
 // ==========================================================
+// GET DEBTOR HEALTH
+// ==========================================================
+
+app.get("/getDebtorHealth", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const opening_date =
+      String(req.query.opening_date || "").trim();
+
+    const from_date =
+      String(req.query.from_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!opening_date) {
+      return res.json({
+        success: false,
+        error: "opening_date missing"
+      });
+    }
+
+    if (!from_date) {
+      return res.json({
+        success: false,
+        error: "from_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_debtor_health",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_opening_date: opening_date,
+          p_from_date: from_date,
+          p_as_of_date: as_of_date
+        }
+      );
+
+    if (error) {
+      console.error(
+        "GET DEBTOR HEALTH ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    const healthRows =
+      ledger_guid
+        ? (data || []).filter(
+            row =>
+              row.ledger_guid === ledger_guid
+          )
+        : (data || []);
+
+    return res.json({
+      success: true,
+      data: healthRows
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GET DEBTOR HEALTH API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ==========================================================
+// GET DEBTOR CUSTOMER BEHAVIOR
+// ==========================================================
+
+app.get("/getDebtorCustomerBehavior", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const opening_date =
+      String(req.query.opening_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!opening_date) {
+      return res.json({
+        success: false,
+        error: "opening_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_debtor_customer_behavior",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_opening_date: opening_date,
+          p_as_of_date: as_of_date
+        }
+      );
+
+    if (error) {
+      console.error(
+        "GET DEBTOR CUSTOMER BEHAVIOR ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    const behaviorRows =
+      ledger_guid
+        ? (data || []).filter(
+            row =>
+              row.ledger_guid === ledger_guid
+          )
+        : (data || []);
+
+    return res.json({
+      success: true,
+      data: behaviorRows
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GET DEBTOR CUSTOMER BEHAVIOR API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ==========================================================
+// GET DEBTOR TRENDS
+// ==========================================================
+
+app.get("/getDebtorTrends", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const opening_date =
+      String(req.query.opening_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!opening_date) {
+      return res.json({
+        success: false,
+        error: "opening_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_debtor_trends",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_opening_date: opening_date,
+          p_as_of_date: as_of_date
+        }
+      );
+
+    if (error) {
+      console.error(
+        "GET DEBTOR TRENDS ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GET DEBTOR TRENDS API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ==========================================================
+// GET DEBTOR RISK
+// ==========================================================
+
+app.get("/getDebtorRisk", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const opening_date =
+      String(req.query.opening_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!opening_date) {
+      return res.json({
+        success: false,
+        error: "opening_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_debtor_risk",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_opening_date: opening_date,
+          p_as_of_date: as_of_date
+        }
+      );
+
+    if (error) {
+      console.error(
+        "GET DEBTOR RISK ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    const riskRows =
+      ledger_guid
+        ? (data || []).filter(
+            row =>
+              row.ledger_guid === ledger_guid
+          )
+        : (data || []);
+
+    return res.json({
+      success: true,
+      data: riskRows
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GET DEBTOR RISK API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+
+// ==========================================================
 // GET PARTY POSITION
 // ==========================================================
 
