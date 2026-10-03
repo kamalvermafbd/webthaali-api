@@ -393,13 +393,31 @@ for (
         company.businessname
     );
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today =
+    new Date().toISOString().slice(0, 10);
+
+console.log(
+    "AUTO EMAIL SUBSCRIPTION DEBUG:",
+    company.company_code,
+    {
+        today,
+        license_from: company.license_from,
+        license_till: company.license_till,
+        is_active: company.is_active
+    }
+);
 
 const subscriptionActive =
-    company.license_from &&
-    company.license_till &&
+    Boolean(company.license_from) &&
+    Boolean(company.license_till) &&
     today >= String(company.license_from).slice(0, 10) &&
     today <= String(company.license_till).slice(0, 10);
+
+console.log(
+    "AUTO EMAIL SUBSCRIPTION RESULT:",
+    company.company_code,
+    subscriptionActive
+);
 
 if (!subscriptionActive) {
     console.log(
