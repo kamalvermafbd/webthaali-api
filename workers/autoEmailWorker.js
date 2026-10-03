@@ -1008,7 +1008,14 @@ if (!recipientEmail) {
         const companyEmail =
         String(company.email || "").trim();
 
-    if (companyEmail) {
+    const shouldNotifyCompany =
+    companyEmail &&
+    rowsToSend.some(
+        row =>
+            row.existing_log_status !== "MISSING_EMAIL"
+    );
+
+if (shouldNotifyCompany) {
 
         const missingInvoiceText =
             rowsToSend
