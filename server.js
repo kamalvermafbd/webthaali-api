@@ -2341,10 +2341,10 @@ app.get("/", (req, res) => {
 
 
 // ==========================================================
-// GET STOCK MOVEMENT
+// GET TALLY STOCK MOVEMENT
 // ==========================================================
 
-app.get("/getStockMovement", async (req, res) => {
+app.get("/getTallyStockMovement", async (req, res) => {
   try {
 
     const company_code =
@@ -2416,7 +2416,7 @@ app.get("/getStockMovement", async (req, res) => {
 
     if (error) {
       console.error(
-        "GET STOCK MOVEMENT ERROR:",
+        "GET TALLY STOCK MOVEMENT ERROR:",
         error
       );
 
@@ -2436,7 +2436,7 @@ app.get("/getStockMovement", async (req, res) => {
   } catch (err) {
 
     console.error(
-      "GET STOCK MOVEMENT API ERROR:",
+      "GET TALLY STOCK MOVEMENT API ERROR:",
       err
     );
 
@@ -2449,10 +2449,10 @@ app.get("/getStockMovement", async (req, res) => {
 
 
 // ==========================================================
-// GET STOCK AGEING LAYERS
+// GET TALLY STOCK AGEING LAYERS
 // ==========================================================
 
-app.get("/getStockAgeingLayers", async (req, res) => {
+app.get("/getTallyStockAgeingLayers", async (req, res) => {
   try {
 
     const company_code =
@@ -2524,7 +2524,7 @@ app.get("/getStockAgeingLayers", async (req, res) => {
 
     if (error) {
       console.error(
-        "GET STOCK AGEING LAYERS ERROR:",
+        "GET TALLY STOCK AGEING LAYERS ERROR:",
         error
       );
 
@@ -2544,7 +2544,7 @@ app.get("/getStockAgeingLayers", async (req, res) => {
   } catch (err) {
 
     console.error(
-      "GET STOCK AGEING LAYERS API ERROR:",
+      "GET TALLY STOCK AGEING LAYERS API ERROR:",
       err
     );
 
@@ -2557,10 +2557,10 @@ app.get("/getStockAgeingLayers", async (req, res) => {
 
 
 // ==========================================================
-// GET STOCK AGEING SUMMARY
+// GET TALLY STOCK AGEING SUMMARY
 // ==========================================================
 
-app.get("/getStockAgeingSummary", async (req, res) => {
+app.get("/getTallyStockAgeingSummary", async (req, res) => {
   try {
 
     const company_code =
@@ -2632,7 +2632,7 @@ app.get("/getStockAgeingSummary", async (req, res) => {
 
     if (error) {
       console.error(
-        "GET STOCK AGEING SUMMARY ERROR:",
+        "GET TALLY STOCK AGEING SUMMARY ERROR:",
         error
       );
 
@@ -2652,7 +2652,7 @@ app.get("/getStockAgeingSummary", async (req, res) => {
   } catch (err) {
 
     console.error(
-      "GET STOCK AGEING SUMMARY API ERROR:",
+      "GET TALLY STOCK AGEING SUMMARY API ERROR:",
       err
     );
 
@@ -2665,10 +2665,10 @@ app.get("/getStockAgeingSummary", async (req, res) => {
 
 
 // ==========================================================
-// GET STOCK HEALTH
+// GET TALLY STOCK HEALTH
 // ==========================================================
 
-app.get("/getStockHealth", async (req, res) => {
+app.get("/getTallyStockHealth", async (req, res) => {
   try {
 
     const company_code =
@@ -2757,7 +2757,7 @@ app.get("/getStockHealth", async (req, res) => {
 
     if (error) {
       console.error(
-        "GET STOCK HEALTH ERROR:",
+        "GET TALLY STOCK HEALTH ERROR:",
         error
       );
 
@@ -2777,7 +2777,7 @@ app.get("/getStockHealth", async (req, res) => {
   } catch (err) {
 
     console.error(
-      "GET STOCK HEALTH API ERROR:",
+      "GET TALLY STOCK HEALTH API ERROR:",
       err
     );
 
@@ -2790,10 +2790,10 @@ app.get("/getStockHealth", async (req, res) => {
 
 
 // ==========================================================
-// GET STOCK HEALTH ANALYTICS
+// GET TALLY STOCK HEALTH ANALYTICS
 // ==========================================================
 
-app.get("/getStockHealthAnalytics", async (req, res) => {
+app.get("/getTallyStockHealthAnalytics", async (req, res) => {
   try {
 
     const company_code =
@@ -2882,7 +2882,7 @@ app.get("/getStockHealthAnalytics", async (req, res) => {
 
     if (error) {
       console.error(
-        "GET STOCK HEALTH ANALYTICS ERROR:",
+        "GET TALLY STOCK HEALTH ANALYTICS ERROR:",
         error
       );
 
@@ -2902,7 +2902,7 @@ app.get("/getStockHealthAnalytics", async (req, res) => {
   } catch (err) {
 
     console.error(
-      "GET STOCK HEALTH ANALYTICS API ERROR:",
+      "GET TALLY STOCK HEALTH ANALYTICS API ERROR:",
       err
     );
 
@@ -2915,10 +2915,10 @@ app.get("/getStockHealthAnalytics", async (req, res) => {
 
 
 // ==========================================================
-// GET STOCK HEALTH CLASSIFICATION
+// GET TALLY STOCK HEALTH CLASSIFICATION
 // ==========================================================
 
-app.get("/getStockHealthClassification", async (req, res) => {
+app.get("/getTallyStockHealthClassification", async (req, res) => {
   try {
 
     const company_code =
@@ -3007,7 +3007,7 @@ app.get("/getStockHealthClassification", async (req, res) => {
 
     if (error) {
       console.error(
-        "GET STOCK HEALTH CLASSIFICATION ERROR:",
+        "GET TALLY STOCK HEALTH CLASSIFICATION ERROR:",
         error
       );
 
@@ -3027,7 +3027,7 @@ app.get("/getStockHealthClassification", async (req, res) => {
   } catch (err) {
 
     console.error(
-      "GET STOCK HEALTH CLASSIFICATION API ERROR:",
+      "GET TALLY STOCK HEALTH CLASSIFICATION API ERROR:",
       err
     );
 
@@ -3040,10 +3040,10 @@ app.get("/getStockHealthClassification", async (req, res) => {
 
 
 // ==========================================================
-// GET STOCK REORDER HEALTH
+// GET TALLY STOCK REORDER HEALTH
 // ==========================================================
 
-app.get("/getStockReorderHealth", async (req, res) => {
+app.get("/getTallyStockReorderHealth", async (req, res) => {
   try {
 
     const company_code =
@@ -3132,7 +3132,7 @@ app.get("/getStockReorderHealth", async (req, res) => {
 
     if (error) {
       console.error(
-        "GET STOCK REORDER HEALTH ERROR:",
+        "GET TALLY STOCK REORDER HEALTH ERROR:",
         error
       );
 
@@ -3152,7 +3152,7 @@ app.get("/getStockReorderHealth", async (req, res) => {
   } catch (err) {
 
     console.error(
-      "GET STOCK REORDER HEALTH API ERROR:",
+      "GET TALLY STOCK REORDER HEALTH API ERROR:",
       err
     );
 
@@ -3165,10 +3165,10 @@ app.get("/getStockReorderHealth", async (req, res) => {
 
 
 // ==========================================================
-// GET STOCK HEALTH REPORT
+// GET TALLY STOCK HEALTH REPORT
 // ==========================================================
 
-app.get("/getStockHealthReport", async (req, res) => {
+app.get("/getTallyStockHealthReport", async (req, res) => {
   try {
 
     const company_code =
@@ -3257,7 +3257,7 @@ app.get("/getStockHealthReport", async (req, res) => {
 
     if (error) {
       console.error(
-        "GET STOCK HEALTH REPORT ERROR:",
+        "GET TALLY STOCK HEALTH REPORT ERROR:",
         error
       );
 
@@ -3277,7 +3277,7 @@ app.get("/getStockHealthReport", async (req, res) => {
   } catch (err) {
 
     console.error(
-      "GET STOCK HEALTH REPORT API ERROR:",
+      "GET TALLY STOCK HEALTH REPORT API ERROR:",
       err
     );
 
