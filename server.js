@@ -3289,6 +3289,251 @@ app.get("/getTallyStockHealthReport", async (req, res) => {
 });
 
 
+// ==========================================================
+// GET TALLY STOCK HEALTH POLICY
+// ==========================================================
+
+app.get("/getTallyStockHealthPolicy", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+
+    // -----------------------------
+    // FETCH POLICY
+    // -----------------------------
+
+    const { data, error } = await supabase
+      .from("stock_health_policy")
+      .select(
+        "company_code, tally_owner, fast_moving_days, non_moving_days, slow_moving_days, dead_days"
+      )
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .maybeSingle();
+
+
+    if (error) {
+      console.error(
+        "GET TALLY STOCK HEALTH POLICY ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    // -----------------------------
+    // DEFAULT POLICY
+    // -----------------------------
+
+    const policy = data || {
+      company_code,
+      tally_owner,
+      fast_moving_days: 30,
+      non_moving_days: 30,
+      slow_moving_days: 90,
+      dead_days: 180
+    };
+
+
+    return res.json({
+      success: true,
+      data: policy
+    });
+
+
+  } catch (err) {
+
+    console.error(
+      "GET TALLY STOCK HEALTH POLICY API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ==========================================================
+// SAVE TALLY STOCK HEALTH POLICY
+// ==========================================================
+
+app.post("/saveTallyStockHealthPolicy", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    const tally_owner =
+      String(req.body.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const fast_moving_days =
+      Number(req.body.fast_moving_days);
+
+    const non_moving_days =
+      Number(req.body.non_moving_days);
+
+    const slow_moving_days =
+      Number(req.body.slow_moving_days);
+
+    const dead_days =
+      Number(req.body.dead_days);
+
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (
+      !Number.isFinite(fast_moving_days) ||
+      !Number.isFinite(non_moving_days) ||
+      !Number.isFinite(slow_moving_days) ||
+      !Number.isFinite(dead_days)
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid policy values"
+      });
+    }
+
+    if (
+      fast_moving_days <= 0 ||
+      non_moving_days <= 0 ||
+      slow_moving_days <= 0 ||
+      dead_days <= 0
+    ) {
+      return res.json({
+        success: false,
+        error: "Policy values must be greater than 0"
+      });
+    }
+
+    if (
+      fast_moving_days > non_moving_days ||
+      non_moving_days >= slow_moving_days ||
+      slow_moving_days >= dead_days
+    ) {
+      return res.json({
+        success: false,
+        error:
+          "Policy order must be Fast <= Non-Moving < Slow < Dead"
+      });
+    }
+
+
+    // -----------------------------
+    // UPSERT POLICY
+    // -----------------------------
+
+    const { data, error } = await supabase
+      .from("stock_health_policy")
+      .upsert(
+        {
+          company_code,
+          tally_owner,
+          fast_moving_days,
+          non_moving_days,
+          slow_moving_days,
+          dead_days,
+          updated_at: new Date().toISOString()
+        },
+        {
+          onConflict: "company_code,tally_owner"
+        }
+      )
+      .select(
+        "company_code, tally_owner, fast_moving_days, non_moving_days, slow_moving_days, dead_days"
+      )
+      .single();
+
+
+    if (error) {
+      console.error(
+        "SAVE TALLY STOCK HEALTH POLICY ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data
+    });
+
+
+  } catch (err) {
+
+    console.error(
+      "SAVE TALLY STOCK HEALTH POLICY API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
 app.post("/sync/start", async (req, res) => {
 
   console.log(
