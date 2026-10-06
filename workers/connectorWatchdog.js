@@ -13,10 +13,9 @@ const {
     dispatchBatch
 } = require("./queueExistingBatch");
 
-
 let watchdogTimer = null;
 let watchdogRunning = false;
-
+const waitingConnectorSince = new Map();
 
 // ------------------------------------------------------------
 // CHECK CONNECTOR WATCHDOG
@@ -82,7 +81,6 @@ async function checkConnectorWatchdog({
             return;
         }
 
-
         // ----------------------------------------------------
         // 2. Check every batch
         // ----------------------------------------------------
@@ -107,7 +105,6 @@ async function checkConnectorWatchdog({
                     continue;
                 }
 
-
                 // ------------------------------------------------
                 // 3. Find connector belonging to this batch
                 // ------------------------------------------------
@@ -116,7 +113,6 @@ async function checkConnectorWatchdog({
                     tallyOwner === "CA"
                         ? "ca_connector_id"
                         : "client_connector_id";
-
 
                 const { data: company, error: companyError } =
                     await supabase
@@ -127,7 +123,6 @@ async function checkConnectorWatchdog({
                         `)
                         .eq("company_code", companyCode)
                         .maybeSingle();
-
 
                 if (companyError) {
 
@@ -140,7 +135,6 @@ async function checkConnectorWatchdog({
                     continue;
                 }
 
-
                 if (!company) {
 
                     console.log(
@@ -151,12 +145,10 @@ async function checkConnectorWatchdog({
                     continue;
                 }
 
-
                 const connectorId =
                     String(
                         company[connectorField] || ""
                     ).trim();
-
 
                 if (!connectorId) {
 
@@ -172,14 +164,12 @@ async function checkConnectorWatchdog({
                     continue;
                 }
 
-
                 // ------------------------------------------------
                 // 4. Get connector socket
                 // ------------------------------------------------
 
                 const socket =
                     registry.get(connectorId);
-
 
                 // =================================================
                 // CASE A
@@ -188,42 +178,7 @@ async function checkConnectorWatchdog({
 
                 if (!socket) {
 
-                    const activityTime =
-                        batch.last_activity_at
-                            ? new Date(
-                                batch.last_activity_at
-                            ).getTime()
-                            : 0;
-
-                    const activityAge =
-                        activityTime
-                            ? Date.now() - activityTime
-                            : Infinity;
-
-                    const activityAgeSeconds =
-                        Number.isFinite(activityAge)
-                            ? Math.floor(
-                                activityAge / 1000
-                            )
-                            : null;
-
-
-                    console.log(
-                        "⚠️ CONNECTOR WATCHDOG: CONNECTOR OFFLINE",
-                        {
-                            batch_id: batch.batch_id,
-                            company_code: companyCode,
-                            connector_id: connectorId,
-                            stage: batch.current_stage,
-                            activity_age_seconds:
-                                activityAgeSeconds
-                        }
-                    );
-
-
-                    // ------------------------------------------------
-                    // Only WAITING_CONNECTOR gets timeout treatment
-                    // ------------------------------------------------
+                    const now = Date.now();
 
                     if (
                         batch.current_stage ===
@@ -231,7 +186,43 @@ async function checkConnectorWatchdog({
                     ) {
 
                         if (
-                            activityAge >=
+                            !waitingConnectorSince.has(
+                                batch.batch_id
+                            )
+                        ) {
+                            waitingConnectorSince.set(
+                                batch.batch_id,
+                                now
+                            );
+                        }
+
+                        const waitingSince =
+                            waitingConnectorSince.get(
+                                batch.batch_id
+                            );
+
+                        const waitingAge =
+                            now - waitingSince;
+
+                        const waitingAgeSeconds =
+                            Math.floor(
+                                waitingAge / 1000
+                            );
+
+                        console.log(
+                            "⚠️ CONNECTOR WATCHDOG: CONNECTOR OFFLINE",
+                            {
+                                batch_id: batch.batch_id,
+                                company_code: companyCode,
+                                connector_id: connectorId,
+                                stage: batch.current_stage,
+                                waiting_age_seconds:
+                                    waitingAgeSeconds
+                            }
+                        );
+
+                        if (
+                            waitingAge >=
                             HEARTBEAT_TIMEOUT_MS
                         ) {
 
@@ -246,20 +237,24 @@ async function checkConnectorWatchdog({
                                 }
                             );
 
+                            waitingConnectorSince.delete(
+                                batch.batch_id
+                            );
 
                             await BatchStatusManager.markFailed({
                                 batch_id: batch.batch_id,
                                 error:
                                     "Connector offline / heartbeat timeout"
                             });
-
                         }
 
+                        continue;
                     }
 
+                    // Connector is offline, but this batch is not
+                    // WAITING_CONNECTOR. Do not force-fail it here.
                     continue;
                 }
-
 
                 // =================================================
                 // CASE B
@@ -275,6 +270,10 @@ async function checkConnectorWatchdog({
                     "WAITING_CONNECTOR"
                 ) {
 
+                    waitingConnectorSince.delete(
+                        batch.batch_id
+                    );
+
                     console.log(
                         "🔄 CONNECTOR BACK: RESTARTING BATCH",
                         {
@@ -283,7 +282,6 @@ async function checkConnectorWatchdog({
                             connector_id: connectorId
                         }
                     );
-
 
                     // ------------------------------------------------
                     // Reset only this waiting batch.
@@ -328,7 +326,6 @@ async function checkConnectorWatchdog({
                         .select()
                         .maybeSingle();
 
-
                     if (resetError) {
 
                         console.error(
@@ -339,7 +336,6 @@ async function checkConnectorWatchdog({
 
                         continue;
                     }
-
 
                     // Another watchdog cycle may already have
                     // handled this batch.
@@ -352,7 +348,6 @@ async function checkConnectorWatchdog({
 
                         continue;
                     }
-
 
                     // ------------------------------------------------
                     // Re-dispatch through existing queue system.
@@ -395,7 +390,6 @@ async function checkConnectorWatchdog({
                     continue;
                 }
 
-
                 // =================================================
                 // CASE C
                 // Normal PROCESSING + RUNNING batch
@@ -405,7 +399,6 @@ async function checkConnectorWatchdog({
                     Number(
                         socket.lastHeartbeat || 0
                     );
-
 
                 if (!lastHeartbeat) {
 
@@ -421,7 +414,6 @@ async function checkConnectorWatchdog({
                     continue;
                 }
 
-
                 const heartbeatAge =
                     Date.now() - lastHeartbeat;
 
@@ -429,7 +421,6 @@ async function checkConnectorWatchdog({
                     Math.floor(
                         heartbeatAge / 1000
                     );
-
 
                 // ------------------------------------------------
                 // Healthy connector
@@ -458,7 +449,6 @@ async function checkConnectorWatchdog({
                     continue;
                 }
 
-
                 // ------------------------------------------------
                 // Heartbeat stale
                 // ------------------------------------------------
@@ -476,7 +466,6 @@ async function checkConnectorWatchdog({
                     }
                 );
 
-
                 // ------------------------------------------------
                 // Mark RUNNING batch failed
                 // ------------------------------------------------
@@ -486,7 +475,6 @@ async function checkConnectorWatchdog({
                     error:
                         "Connector heartbeat timeout"
                 });
-
 
             } catch (batchError) {
 
@@ -499,7 +487,6 @@ async function checkConnectorWatchdog({
             }
 
         }
-
 
     } catch (error) {
 
@@ -515,7 +502,6 @@ async function checkConnectorWatchdog({
     }
 
 }
-
 
 // ------------------------------------------------------------
 // START WATCHDOG
@@ -535,7 +521,6 @@ function startConnectorWatchdog({
         return;
     }
 
-
     console.log(
         "🚀 CONNECTOR WATCHDOG STARTED",
         {
@@ -547,13 +532,11 @@ function startConnectorWatchdog({
         }
     );
 
-
     // First check
     checkConnectorWatchdog({
         supabase,
         registry
     });
-
 
     // Continuous checks
     watchdogTimer =
@@ -568,7 +551,6 @@ function startConnectorWatchdog({
 
 }
 
-
 // ------------------------------------------------------------
 // STOP WATCHDOG
 // ------------------------------------------------------------
@@ -579,20 +561,17 @@ function stopConnectorWatchdog() {
         return;
     }
 
-
     clearInterval(
         watchdogTimer
     );
 
     watchdogTimer = null;
 
-
     console.log(
         "🛑 CONNECTOR WATCHDOG STOPPED"
     );
 
 }
-
 
 // ------------------------------------------------------------
 // EXPORT
