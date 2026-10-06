@@ -230,6 +230,10 @@ const BatchStatusManager =
     require("./sync-engine/BatchStatusManager");
 
 const {
+    startConnectorWatchdog
+} = require("./workers/connectorWatchdog");
+
+const {
     startSync
 } = require("./workers/SyncStartService");
 
@@ -256,6 +260,11 @@ const BatchManager = require("./sync-engine/BatchManager");
 console.log("BatchManager =", typeof BatchManager);
 
 registerEvents(io);
+
+startConnectorWatchdog({
+    supabase,
+    registry
+});
 
 app.set("trust proxy", 1);
 

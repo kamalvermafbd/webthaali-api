@@ -558,6 +558,10 @@ socket.on("register", (data) => {
 
         });
 
+        socket.on("protocol:heartbeat", () => {
+            socket.lastHeartbeat = Date.now();
+        });
+
         socket.on("disconnect", (reason) => {
 
             console.log("================================");
