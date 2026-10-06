@@ -143,10 +143,11 @@ async function runJob(job, serverUrl) {
         error?.message || String(error);
 
     if (
-        errorMessage.includes("Connector disconnected") ||
-        errorMessage.includes("transport close") ||
-        errorMessage.includes("Connector offline")
-    ) {
+    errorMessage.includes("Connector disconnected") ||
+    errorMessage.includes("transport close") ||
+    errorMessage.includes("Connector offline") ||
+    errorMessage.includes("ECONNREFUSED")
+) {
         await BatchStatusManager.markWaitingConnector({
             batch_id: job.batch_id
         });
