@@ -390,10 +390,67 @@ async function checkConnectorWatchdog({
                     continue;
                 }
 
-                // =================================================
+               // =================================================
                 // CASE C
                 // Normal PROCESSING + RUNNING batch
                 // =================================================
+
+                // -------------------------------------------------
+                // 1. Actual Tally request is running
+                // -------------------------------------------------
+
+                if (socket.tallyRequestActive) {
+
+                    const requestStartedAt =
+                        Number(socket.tallyRequestStartedAt || 0);
+
+                    const requestAge =
+                        requestStartedAt
+                            ? Date.now() - requestStartedAt
+                            : 0;
+
+                    const requestAgeSeconds =
+                        Math.floor(requestAge / 1000);
+
+                    // Tally request is still within safe timeout
+                    if (requestAge < HEARTBEAT_TIMEOUT_MS) {
+
+                        console.log(
+                            "🟢 CONNECTOR WATCHDOG: TALLY REQUEST ACTIVE",
+                            {
+                                batch_id: batch.batch_id,
+                                request_age_seconds:
+                                    requestAgeSeconds
+                            }
+                        );
+
+                        continue;
+                    }
+
+                    // Tally request stuck for 90+ seconds
+                    console.log(
+                        "🚨 CONNECTOR WATCHDOG: TALLY REQUEST STUCK",
+                        {
+                            batch_id: batch.batch_id,
+                            request_age_seconds:
+                                requestAgeSeconds
+                        }
+                    );
+
+                    await BatchStatusManager.markFailed({
+                        batch_id: batch.batch_id,
+                        error:
+                            "Tally request timeout"
+                    });
+
+                    continue;
+                }
+
+
+                // -------------------------------------------------
+                // 2. No active Tally request
+                //    Check normal connector heartbeat
+                // -------------------------------------------------
 
                 const lastHeartbeat =
                     Number(
@@ -422,9 +479,10 @@ async function checkConnectorWatchdog({
                         heartbeatAge / 1000
                     );
 
-                // ------------------------------------------------
+
+                // -------------------------------------------------
                 // Healthy connector
-                // ------------------------------------------------
+                // -------------------------------------------------
 
                 if (
                     heartbeatAge <
@@ -449,9 +507,10 @@ async function checkConnectorWatchdog({
                     continue;
                 }
 
-                // ------------------------------------------------
+
+                // -------------------------------------------------
                 // Heartbeat stale
-                // ------------------------------------------------
+                // -------------------------------------------------
 
                 console.log(
                     "🚨 CONNECTOR WATCHDOG: HEARTBEAT STALE",
@@ -465,10 +524,6 @@ async function checkConnectorWatchdog({
                             HEARTBEAT_TIMEOUT_MS / 1000
                     }
                 );
-
-                // ------------------------------------------------
-                // Mark RUNNING batch failed
-                // ------------------------------------------------
 
                 await BatchStatusManager.markFailed({
                     batch_id: batch.batch_id,

@@ -551,6 +551,9 @@ socket.on("register", (data) => {
             socket.lastHeartbeat =
                 Date.now();
 
+            socket.lastTallyActivity =
+                Date.now();
+
             console.log(
                 "💓 Heartbeat :",
                 data.batchId
@@ -561,6 +564,30 @@ socket.on("register", (data) => {
         socket.on("protocol:heartbeat", () => {
             socket.lastHeartbeat = Date.now();
         });
+
+        socket.on("tally:request:start", (data) => {
+    socket.tallyRequestActive = true;
+    socket.tallyRequestStartedAt = data.timestamp || Date.now();
+    socket.lastTallyActivity = Date.now();
+
+    console.log("🟢 TALLY REQUEST START:", data.batchId);
+});
+
+socket.on("tally:request:end", (data) => {
+    socket.tallyRequestActive = false;
+    socket.tallyRequestStartedAt = 0;
+    socket.lastTallyActivity = Date.now();
+
+    console.log("✅ TALLY REQUEST END:", data.batchId);
+});
+
+socket.on("tally:request:error", (data) => {
+    socket.tallyRequestActive = false;
+    socket.tallyRequestStartedAt = 0;
+    socket.lastTallyActivity = Date.now();
+
+    console.log("❌ TALLY REQUEST ERROR:", data.batchId);
+});
 
         socket.on("disconnect", (reason) => {
 
