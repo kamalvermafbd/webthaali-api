@@ -261,10 +261,7 @@ console.log("BatchManager =", typeof BatchManager);
 
 registerEvents(io);
 
-startConnectorWatchdog({
-    supabase,
-    registry
-});
+
 
 app.set("trust proxy", 1);
 
@@ -366,6 +363,10 @@ const supabase =
     process.env.SUPABASE_SERVICE_KEY
   );
 
+  startConnectorWatchdog({
+    supabase,
+    registry
+});
 
 const localCacheSyncService =
     new LocalCacheSyncService(supabase);
