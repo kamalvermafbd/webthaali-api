@@ -180,6 +180,12 @@ const ReconciliationManager =
 const CleanupManager =
 require("./sync-engine/CleanupManager");
 
+const {
+    LocalCacheSyncService,
+    TABLES: LOCAL_CACHE_TABLES,
+    TABLE_LIST: LOCAL_CACHE_TABLE_LIST
+} = require("./services/LocalCacheSyncService");
+
 
 /*
 const {
@@ -351,6 +357,9 @@ const supabase =
     process.env.SUPABASE_SERVICE_KEY
   );
 
+
+const localCacheSyncService =
+    new LocalCacheSyncService(supabase);
   // ==========================================
 // GOOGLE GMAIL OAUTH
 // ==========================================
@@ -45664,6 +45673,269 @@ app.get("/getFundFlowRecurringExpenseParties", async (req, res) => {
     return res.status(500).json({
       success: false,
       error: err.message
+    });
+  }
+});
+
+// ============================================================
+// LOCAL CACHE - STATUS
+// ============================================================
+
+app.get("/local-cache/status", async (req, res) => {
+
+    try {
+
+        const company_code =
+            String(
+                req.query.company_code || ""
+            ).trim();
+
+        const tally_owner =
+            String(
+                req.query.tally_owner || ""
+            )
+                .trim()
+                .toUpperCase();
+
+        if (!company_code) {
+
+            return res.status(400).json({
+                success: false,
+                error: "company_code missing"
+            });
+
+        }
+
+        if (
+            tally_owner !== "CA" &&
+            tally_owner !== "USER"
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                error: "Invalid tally_owner"
+            });
+
+        }
+
+        const status =
+            await localCacheSyncService
+                .getCacheStatus({
+                    company_code,
+                    tally_owner
+                });
+
+        return res.json({
+            success: true,
+            ...status
+        });
+
+    } catch (err) {
+
+        console.error(
+            "LOCAL CACHE STATUS ERROR:",
+            err
+        );
+
+        return res.status(500).json({
+            success: false,
+            error:
+                err.message ||
+                "Unable to get local cache status"
+        });
+
+    }
+
+});
+
+// =====================================================
+// LOCAL CACHE - DATA
+// =====================================================
+
+app.get("/local-cache/data", async (req, res) => {
+    try {
+
+        const company_code =
+            String(req.query.company_code || "").trim();
+
+        const tally_owner =
+            String(req.query.tally_owner || "")
+                .trim()
+                .toUpperCase();
+
+        const tableKey =
+            String(req.query.tableKey || "").trim();
+
+        const page =
+            Number(req.query.page || 0);
+
+        const chunkSize =
+            Number(req.query.chunkSize || 500);
+
+        if (!company_code) {
+            return res.status(400).json({
+                success: false,
+                error: "company_code is required"
+            });
+        }
+
+        if (!tally_owner) {
+            return res.status(400).json({
+                success: false,
+                error: "tally_owner is required"
+            });
+        }
+
+        if (!tableKey) {
+            return res.status(400).json({
+                success: false,
+                error: "tableKey is required"
+            });
+        }
+
+        const data =
+            await localCacheSyncService.getInitialCacheData({
+                company_code,
+                tally_owner,
+                tableKey,
+                page,
+                chunkSize
+            });
+
+        return res.json({
+            success: true,
+            data
+        });
+
+    } catch (err) {
+
+        console.error(
+            "LOCAL CACHE DATA API ERROR:",
+            err
+        );
+
+        return res.status(500).json({
+            success: false,
+            error: err.message
+        });
+    }
+});
+
+// =====================================================
+// LOCAL CACHE - VOUCHER CHILDREN
+// =====================================================
+
+app.get("/local-cache/voucher-children", async (req, res) => {
+    try {
+        const company_code =
+            String(req.query.company_code || "").trim();
+
+        const tally_owner =
+            String(req.query.tally_owner || "")
+                .trim()
+                .toUpperCase();
+
+        const tableKey =
+            String(req.query.tableKey || "").trim();
+
+        const voucher_guids =
+            String(req.query.voucher_guids || "")
+                .split(",")
+                .map((guid) => guid.trim())
+                .filter(Boolean);
+
+        if (!company_code) {
+            return res.status(400).json({
+                success: false,
+                error: "company_code is required"
+            });
+        }
+
+        if (!tally_owner) {
+            return res.status(400).json({
+                success: false,
+                error: "tally_owner is required"
+            });
+        }
+
+        if (!tableKey) {
+            return res.status(400).json({
+                success: false,
+                error: "tableKey is required"
+            });
+        }
+
+        if (voucher_guids.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: "voucher_guids is required"
+            });
+        }
+
+        const data =
+            await localCacheSyncService.getVoucherChildren({
+                company_code,
+                tally_owner,
+                tableKey,
+                voucher_guids
+            });
+
+        return res.json({
+            success: true,
+            table: tableKey,
+            voucher_count: voucher_guids.length,
+            row_count: data.length,
+            rows: data
+        });
+
+    } catch (err) {
+        console.error(
+            "LOCAL CACHE VOUCHER CHILDREN API ERROR:",
+            err
+        );
+
+        return res.status(500).json({
+            success: false,
+            error: err.message
+        });
+    }
+});
+
+
+app.get("/local-cache/count", async (req, res) => {
+  try {
+    const {
+      company_code,
+      tally_owner,
+      tableKey
+    } = req.query;
+
+    if (!company_code || !tally_owner || !tableKey) {
+      return res.status(400).json({
+        success: false,
+        error: "company_code, tally_owner and tableKey are required"
+      });
+    }
+
+    const count =
+      await localCacheSyncService.getTableCount({
+        company_code,
+        tally_owner,
+        tableKey
+      });
+
+    return res.json({
+      success: true,
+      table: tableKey,
+      count
+    });
+
+  } catch (error) {
+    console.error("LOCAL CACHE COUNT ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });

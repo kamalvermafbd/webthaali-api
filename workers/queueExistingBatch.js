@@ -162,6 +162,10 @@ async function dispatchPendingBatches() {
             .select("*")
             .eq("batch_status", "PENDING")
             .eq("worker_status", "PENDING")
+                .neq(
+                    "current_stage",
+                    "WAITING_CONNECTOR"
+                )
             .not("worker_type", "is", null)
             .not("job_type", "is", null)
             .order("priority", {

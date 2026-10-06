@@ -662,52 +662,47 @@ async hasCompletedSync({
 
     }
 
-    // ----------------------------------
-    // Mark Failed
-    // ----------------------------------
+  // ----------------------------------
+// Mark Failed
+// ----------------------------------
 
-    async markFailed({
+async markFailed({
+
+    batch_id,
+
+    error
+
+}) {
+
+    console.log("🔥 BATCH MARK FAILED:", {
+        batch_id,
+        error:
+            typeof error === "string"
+                ? error
+                : error?.message || "Unknown Error"
+    });
+
+    return this.updateFields({
 
         batch_id,
 
-        error
+        fields: {
 
-    }) {
+            batch_status:
+                BATCH_STATUS.FAILED,
 
-        console.log("🔥 BATCH MARK FAILED:", {
-    batch_id,
-    error:
-        typeof error === "string"
-            ? error
-            : error?.message || "Unknown Error"
-});
+            worker_status:
+                "FAILED",
 
-        return this.updateFields({
+            error_message:
+                typeof error === "string"
+                    ? error
+                    : error?.message || "Unknown Error"
+        }
 
-            batch_id,
+    });
 
-            fields: {
-
-                batch_status:
-
-                    BATCH_STATUS.FAILED,
-                
-                worker_status:
-                    "FAILED",
-
-                error_message:
-
-                    typeof error === "string"
-
-                        ? error
-
-                        : error?.message || "Unknown Error"
-            }
-
-        });
-
-    }
-
+}
     // ----------------------------------
 // Mark Waiting For Connector
 // ----------------------------------

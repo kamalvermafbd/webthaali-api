@@ -156,10 +156,14 @@ async function recoverStaleBatches(workerConfig) {
 
     /*
      * ---------------------------------------------------------
-     * 1. RECOVER GENUINELY STALE RUNNING BATCH
+     * 1. STALE RUNNING BATCH
      *
      * PROCESSING + RUNNING + stale heartbeat
-     * means worker execution was abandoned.
+     * = worker execution is considered failed.
+     *
+     * IMPORTANT:
+     * Do NOT put it back into PENDING.
+     * We are NOT using Resume Engine.
      * ---------------------------------------------------------
      */
 
@@ -169,12 +173,34 @@ async function recoverStaleBatches(workerConfig) {
     } = await supabase
         .from("sync_batches")
         .update({
-            batch_status: "PENDING",
-            worker_status: "PENDING",
-            worker_id: null,
-            locked_at: null,
-            started_at: null,
-            heartbeat_at: null
+
+            batch_status:
+                "FAILED",
+
+            worker_status:
+                "FAILED",
+
+            worker_id:
+                null,
+
+            locked_at:
+                null,
+
+            started_at:
+                null,
+
+            heartbeat_at:
+                null,
+
+            completed_at:
+                new Date().toISOString(),
+
+            current_stage:
+                "FAILED",
+
+            error_message:
+                "Batch heartbeat timeout"
+
         })
         .eq(
             "worker_id",
@@ -199,18 +225,104 @@ async function recoverStaleBatches(workerConfig) {
     if (staleRunningError) {
 
         throw new Error(
-            "Stale running batch recovery failed: " +
+            "Stale running batch failure update failed: " +
             staleRunningError.message
         );
+
     }
+
 
     /*
      * ---------------------------------------------------------
-     * 2. CLEAN TERMINAL BATCH STATE
+     * 2. WAITING CONNECTOR TIMEOUT
      *
-     * FAILED/COMPLETED batch must NEVER occupy worker slot.
-     * Preserve terminal batch status.
-     * Only release worker execution fields.
+     * Connector was offline and batch was moved to:
+     *
+     * PENDING + WAITING_CONNECTOR
+     *
+     * If it remains there beyond the timeout,
+     * mark it FAILED.
+     *
+     * This query intentionally does NOT depend on worker_id
+     * because WAITING_CONNECTOR has worker_id = NULL.
+     * ---------------------------------------------------------
+     */
+
+    const connectorWaitTimeoutSeconds = 180;
+
+    const connectorStaleBefore =
+        new Date(
+            Date.now() -
+            connectorWaitTimeoutSeconds * 1000
+        ).toISOString();
+
+    const {
+        data: staleConnectorBatches,
+        error: connectorError
+    } = await supabase
+        .from("sync_batches")
+        .update({
+
+            batch_status:
+                "FAILED",
+
+            worker_status:
+                "FAILED",
+
+            worker_id:
+                null,
+
+            locked_at:
+                null,
+
+            heartbeat_at:
+                null,
+
+            completed_at:
+                new Date().toISOString(),
+
+            current_stage:
+                "FAILED",
+
+            error_message:
+                "Connector did not reconnect within timeout"
+
+        })
+        .eq(
+            "batch_status",
+            "PENDING"
+        )
+        .eq(
+            "worker_status",
+            "PENDING"
+        )
+        .eq(
+            "current_stage",
+            "WAITING_CONNECTOR"
+        )
+        .lt(
+            "last_activity_at",
+            connectorStaleBefore
+        )
+        .select(
+            "id, batch_id"
+        );
+
+    if (connectorError) {
+
+        throw new Error(
+            "Waiting connector batch failure update failed: " +
+            connectorError.message
+        );
+
+    }
+
+
+    /*
+     * ---------------------------------------------------------
+     * 3. CLEAN TERMINAL BATCH STATE
+     *
+     * FAILED batch must never occupy a worker slot.
      * ---------------------------------------------------------
      */
 
@@ -220,10 +332,19 @@ async function recoverStaleBatches(workerConfig) {
     } = await supabase
         .from("sync_batches")
         .update({
-            worker_status: "FAILED",
-            worker_id: null,
-            locked_at: null,
-            heartbeat_at: null
+
+            worker_status:
+                "FAILED",
+
+            worker_id:
+                null,
+
+            locked_at:
+                null,
+
+            heartbeat_at:
+                null
+
         })
         .eq(
             "worker_id",
@@ -247,30 +368,51 @@ async function recoverStaleBatches(workerConfig) {
             "Terminal batch cleanup failed: " +
             terminalError.message
         );
+
     }
+
+
+    /*
+     * ---------------------------------------------------------
+     * LOG
+     * ---------------------------------------------------------
+     */
 
     if (
         staleRunning?.length ||
+        staleConnectorBatches?.length ||
         terminalBatches?.length
     ) {
 
         console.log(
-            "WORKER STALE STATE RECOVERED:",
+            "WORKER STALE STATE HANDLED:",
             JSON.stringify(
                 {
                     staleRunning,
+                    staleConnectorBatches,
                     terminalBatches
                 },
                 null,
                 2
             )
         );
+
     }
 
+
     return {
-        staleRunning: staleRunning || [],
-        terminalBatches: terminalBatches || []
+
+        staleRunning:
+            staleRunning || [],
+
+        staleConnectorBatches:
+            staleConnectorBatches || [],
+
+        terminalBatches:
+            terminalBatches || []
+
     };
+
 }
 
 
