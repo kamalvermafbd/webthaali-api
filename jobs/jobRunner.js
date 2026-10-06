@@ -137,14 +137,33 @@ async function runJob(job, serverUrl) {
                 }
                 catch (error) {
 
-                    lastError = error;
+    lastError = error;
 
-                    console.error(
-                        `TALLY_SYNC ATTEMPT ${attempt} FAILED:`,
-                        error?.message || error
-                    );
+    const errorMessage =
+        error?.message || String(error);
 
-                    if (
+    if (
+        errorMessage.includes("Connector disconnected") ||
+        errorMessage.includes("transport close") ||
+        errorMessage.includes("Connector offline")
+    ) {
+        await BatchStatusManager.markWaitingConnector({
+            batch_id: job.batch_id
+        });
+
+        console.log(
+            "🔌 CONNECTOR DISCONNECTED — BATCH WAITING:",
+            job.batch_id
+        );
+
+        return;
+    }
+
+    console.error(
+        `TALLY_SYNC ATTEMPT ${attempt} FAILED:`,
+        error?.message || error
+    );
+              if (
                         attempt < MAX_ATTEMPTS
                     ) {
 
