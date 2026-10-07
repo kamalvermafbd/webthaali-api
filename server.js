@@ -39162,88 +39162,6 @@ console.log(
   lastLedgerAlterId ?? "FULL SYNC"
 );
 
-
-    // =========================
-    // CONNECTOR
-    // =========================
-
-   // =========================
-// CONNECTOR
-// =========================
-
-
-/*
-    if (
-  String(socket.companyGuid || "").trim().toLowerCase() !==
-  String(companyGuid).trim().toLowerCase()
-) {
-
-  console.error(
-    "❌ TALLY COMPANY GUID MISMATCH",
-    {
-      company_code,
-      tally_owner,
-      expectedGuid: companyGuid,
-      actualGuid: socket.companyGuid
-    }
-  );
-
-  return res.status(409).json({
-    success: false,
-    error: "Tally company identity mismatch"
-  });
-
-}
-*/
-// =========================
-// SYNC BATCH ID
-// =========================
-/*020926
-const workerBatchId = req.query.worker_batch_id;
-
-if (workerBatchId) {
-
-    sync_batch_id = workerBatchId;
-    httpWorkerId = null;
-
-} else {
-
-const requestId = crypto.randomUUID();
-
-const httpBatchClaim =
-
-    await BatchStatusManager.claimOrCreateHttpBatch({
-
-        company_code,
-
-        tally_owner,
-
-        request_id: requestId
-
-    });
-
-if (httpBatchClaim.claimed !== true) {
-
-    return res.status(409).json({
-
-        success: false,
-
-        error: "Sync batch is already being processed",
-
-        reason: httpBatchClaim.reason,
-
-        batch_id: httpBatchClaim.batch_id
-
-    });
-
-}
-
-sync_batch_id = httpBatchClaim.batch_id;
-httpWorkerId = httpBatchClaim.worker_id;
-}
-*/
-//const workerBatchId = req.query.worker_batch_id;
-
 const workerBatchId =
     String(req.query.worker_batch_id || "").trim();
 
@@ -39297,35 +39215,6 @@ if (workerBatchId) {
         });
 
     }
-
-
-    /* 030926
-    if (
-        String(socket.companyGuid || "")
-            .trim()
-            .toLowerCase() !==
-        String(companyGuid)
-            .trim()
-            .toLowerCase()
-    ) {
-
-        console.error(
-            "❌ TALLY COMPANY GUID MISMATCH",
-            {
-                company_code,
-                tally_owner,
-                expectedGuid: companyGuid,
-                actualGuid: socket.companyGuid
-            }
-        );
-
-        return res.status(409).json({
-            success: false,
-            error: "Tally company identity mismatch"
-        });
-
-    }
-        */
 
     const connectorCompanyGuids =
     Array.isArray(socket.companyGuids)
@@ -39730,14 +39619,7 @@ if (
     )
 
 ) {
-/*
-  const hasPreviousCompletedSync =
-    await BatchStatusManager.hasCompletedSync({
-        company_code,
-        tally_owner,
-        exclude_batch_id: sync_batch_id
-    });
-*/
+
 
  const toDate =
     new Date()
@@ -39745,79 +39627,7 @@ if (
         .slice(0, 10)
         .replace(/-/g, "");
 
-/*
-if (!hasPreviousCompletedSync) {
 
-    // FIRST SYNC
-    fromDate =
-        result.summary?.booksBeginningFrom;
-
-} else {
-
-    // PERIODIC SYNC
-    switch (syncPeriod) {
-
-        case VOUCHER_SYNC_PERIOD.WEEKLY: {
-
-            const date =
-                new Date();
-
-            date.setDate(
-                date.getDate() - 7
-            );
-
-            fromDate =
-                date.toISOString()
-                    .slice(0, 10)
-                    .replace(/-/g, "");
-
-            break;
-        }
-
-        case VOUCHER_SYNC_PERIOD.THREE_MONTHS: {
-
-            const date =
-                new Date();
-
-            date.setMonth(
-                date.getMonth() - 3
-            );
-
-            fromDate =
-                date.toISOString()
-                    .slice(0, 10)
-                    .replace(/-/g, "");
-
-            break;
-        }
-
-        case VOUCHER_SYNC_PERIOD.SIX_MONTHS: {
-
-            const date =
-                new Date();
-
-            date.setMonth(
-                date.getMonth() - 6
-            );
-
-            fromDate =
-                date.toISOString()
-                    .slice(0, 10)
-                    .replace(/-/g, "");
-
-            break;
-        }
-
-        default:
-
-            fromDate =
-                result.summary?.booksBeginningFrom;
-
-    }
-
-}
-
-*/
 
 let fromDate;
 
@@ -40243,30 +40053,7 @@ JSON.stringify({
 }) + "\n"
 );
 
-// =========================
-// VALIDATE GROUPS
-// =========================
-/* remove 01.08.26 evening
-const groupValidation =
-    await validateMasters({
 
-        table: "tally_sync_groups",
-
-        company_code,
-
-        tally_owner,
-
-        rows: result.groups || []
-
-    });
-
-
-console.log(
-    "GROUP VALIDATION :",
-    groupValidation
-);
-
-*/
 
 if (
 
@@ -40278,17 +40065,6 @@ if (
 
 ) {
 
-  /*
-await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"GROUP",
-
-    action:"PROCESSING"
-
-});
-*/
 
 syncDebug({
 
@@ -40298,23 +40074,6 @@ syncDebug({
 
 });
 
-
-// =========================
-// SAVE GROUPS
-// =========================
-/*
-groupResult = await saveGroups({
-
-    company_code,
-
-    tally_owner,
-
-    sync_batch_id,
-
-    groups: result.groups || []
-
-});
-*/
 
 groupResult = await BatchManager.run({
 
@@ -40344,34 +40103,6 @@ console.log(
 );
 
 
-// =========================
-// GROUP RECONCILIATION
-// =========================
-/*
-groupReconciliation =
-    await ReconciliationManager.reconcile({
-
-        table: "tally_sync_groups",
-
-        module: "MASTER",
-
-        entity_type: "GROUP",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id
-
-    });
-
-
-console.log(
-    "GROUP RECONCILIATION :",
-    groupReconciliation
-);
-*/
-
 groupReconciliation =
     groupResult.reconciliation;
 
@@ -40380,44 +40111,7 @@ console.log(
     groupReconciliation
 );
 
-// =========================
-// GROUP ACTIONS
-// =========================
-/*
-  groupActionResult =
-  await applyMasterActions({
 
-    table:"tally_sync_groups",
-
-    company_code,
-
-    tally_owner,
-
-    sync_batch_id,
-
-    reconciliationResult:
-        groupReconciliation
-
-});
-
-
-console.log(
-    "GROUP ACTION RESULT :",
-    groupActionResult
-);
-
-
-await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"GROUP",
-
-    action:"COMPLETED"
-
-});
-
-*/
 
 syncDebug({
 
@@ -40439,42 +40133,14 @@ if (
 
 ) {
 
-  /*
-await updateMasterStatus({
 
-    sync_batch_id,
-
-    module:"STOCK_GROUP",
-
-    action:"PROCESSING"
-
-});
-
-*/
 
 masterFlowDebug({
     stage:"STOCK_GROUP_PROCESSING",
     sync_batch_id
 });
 
-// =========================
-// SAVE STOCK GROUPS
-// =========================
 
-/*
-stockGroupResult = await saveStockGroups({
-
-    company_code,
-
-    tally_owner,
-
-    sync_batch_id,
-
-    stockGroups:
-        result.stockGroups || []
-
-});
-*/
 
 stockGroupResult = await BatchManager.run({
 
@@ -40504,25 +40170,6 @@ console.log(
     stockGroupResult
 );
 
-// =========================
-// STOCK GROUP RECONCILIATION
-// =========================
-/*
-stockGroupReconciliation =
-    await reconcileMasters({
-
-        table: "tally_sync_stock_groups",
-
-        entity_type: "STOCK_GROUP",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id
-
-    });
-*/
 
 stockGroupReconciliation =
     stockGroupResult.reconciliation;
@@ -40533,42 +40180,6 @@ console.log(
     stockGroupReconciliation
 );
 
-
-// =========================
-// STOCK GROUP ACTIONS
-// =========================
-/*
-stockGroupActionResult =
-    await applyMasterActions({
-
-        table: "tally_sync_stock_groups",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id,
-
-        reconciliationResult:
-            stockGroupReconciliation
-
-    });
-
-console.log(
-    "STOCK GROUP ACTION RESULT :",
-    stockGroupActionResult
-);
-
-await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"STOCK_GROUP",
-
-    action:"COMPLETED"
-
-});
-*/
 
 masterFlowDebug({
     stage:"STOCK_GROUP_COMPLETED",
@@ -40587,34 +40198,11 @@ if (
 
 ) {
 
-  /* 05.08.26
-await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"LEDGER",
-
-    action:"PROCESSING"
-
-});
-*/
 
 masterFlowDebug({
     stage:"LEDGER_PROCESSING",
     sync_batch_id
 });
-
-// =========================
-// SAVE LEDGERS
-// =========================
-/*
-ledgerResult = await saveLedgers({
-  company_code,
-  tally_owner,
-   sync_batch_id,
-  ledgers: result.ledgers || []
-});
-*/
 
 
 console.log("================================");
@@ -40654,43 +40242,6 @@ console.log("================================");
 console.log("LEDGER SAVE :", ledgerResult);
 
 
-// =========================
-// LEDGER RECONCILIATION
-// =========================
-/*
-ledgerReconciliation =
-  await ReconciliationManager.reconcile({
-
-      table:"tally_sync_ledgers",
-
-      module:"MASTER",
-
-      entity_type:"LEDGER",
-
-      company_code,
-
-      tally_owner,
-
-      sync_batch_id
-
-  });
-
- 
- await reconcileMasters({
-
-        table: "tally_sync_ledgers",
-
-        entity_type: "LEDGER",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id
-
-    });
-    */
-
 ledgerReconciliation =
     ledgerResult.reconciliation;
 
@@ -40700,43 +40251,6 @@ console.log(
     ledgerReconciliation
 );
 
-
-// =========================
-// LEDGER ACTIONS
-// =========================
-/*
-ledgerActionResult =
-    await applyMasterActions({
-
-        table: "tally_sync_ledgers",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id,
-
-        reconciliationResult:
-            ledgerReconciliation
-
-    });
-
-console.log(
-    "LEDGER ACTION RESULT :",
-    ledgerActionResult
-);
-
-
-await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"LEDGER",
-
-    action:"COMPLETED"
-
-});
-*/
 
 masterFlowDebug({
     stage:"LEDGER_COMPLETED",
@@ -40802,37 +40316,7 @@ if(ledgerReconciliation?.missingGuids?.length){
 
       });
 
-/*
-    await reconcileMasters({
 
-        table:"tally_sync_ledgers",
-
-        entity_type:"LEDGER",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id
-
-    });
-*/
-/*
-await applyMasterActions({
-
-    table:"tally_sync_ledgers",
-
-    company_code,
-
-    tally_owner,
-
-    sync_batch_id,
-
-    reconciliationResult:
-        ledgerReconciliationAfterMissing
-
-});
-*/
 }
 }
 
@@ -40851,34 +40335,13 @@ if (
     )
 
 ) {
-/* 05.08.26
 
-  await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"GODOWN",
-
-    action:"PROCESSING"
-
-});
-*/
 
 masterFlowDebug({
     stage:"GODOWN_PROCESSING",
     sync_batch_id
 });
-// =========================
-// SAVE GODOWNS
-// =========================
-/*
-godownResult = await saveGodowns({
-  company_code,
-  tally_owner,
-   sync_batch_id,
-  godowns: result.godowns || []
-});
-*/
+
 
 godownResult = await BatchManager.run({
 
@@ -40907,44 +40370,6 @@ godownResult = await BatchManager.run({
 console.log("GODOWN SAVE :", godownResult);
 
 
-// =========================
-// GODOWN RECONCILIATION
-// =========================
-/*
-godownReconciliation =
-
-    await ReconciliationManager.reconcile({
-
-        table:"tally_sync_godowns",
-
-        module:"MASTER",
-
-        entity_type:"GODOWN",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id
-
-    });
-
-
-    await reconcileMasters({
-
-        table: "tally_sync_godowns",
-
-        entity_type: "GODOWN",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id
-
-    });
-
-    */
 
 godownReconciliation =
     godownResult.reconciliation;
@@ -40953,44 +40378,6 @@ console.log(
     "GODOWN RECONCILIATION :",
     godownReconciliation
 );
-
-
-// =========================
-// GODOWN ACTIONS
-// =========================
-/*
-godownActionResult =
-    await applyMasterActions({
-
-        table: "tally_sync_godowns",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id,
-
-        reconciliationResult:
-            godownReconciliation
-
-    });
-
-console.log(
-    "GODOWN ACTION RESULT :",
-    godownActionResult
-);
-
-await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"GODOWN",
-
-    action:"COMPLETED"
-
-});
-
-*/
 
 
 masterFlowDebug({
@@ -41011,34 +40398,11 @@ if (
 
 ) {
 
-/* 05.08.26
-  await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"UNIT",
-
-    action:"PROCESSING"
-
-});
-*/
 
 masterFlowDebug({
     stage:"UNIT_PROCESSING",
     sync_batch_id
 });
-
-// =========================
-// SAVE UNITS
-// =========================
-/*
-unitResult = await saveUnits({
-    company_code,
-    tally_owner,
-     sync_batch_id,
-    units: result.units || []
-});
-*/
 
 unitResult = await BatchManager.run({
 
@@ -41065,44 +40429,6 @@ unitResult = await BatchManager.run({
 console.log("UNIT SAVE :", unitResult);
 
 
-// =========================
-// UNIT RECONCILIATION
-// =========================
-/*
-unitReconciliation =
-
-      await ReconciliationManager.reconcile({
-
-        table:"tally_sync_units",
-
-        module:"MASTER",
-
-        entity_type:"UNIT",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id
-
-    });
-
-
-    await reconcileMasters({
-
-        table: "tally_sync_units",
-
-        entity_type: "UNIT",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id
-
-    });
-*/
-
 unitReconciliation =
     unitResult.reconciliation;
 
@@ -41114,41 +40440,6 @@ console.log(
 );
 
 
-// =========================
-// UNIT ACTIONS
-// =========================
-/*
-unitActionResult =
-    await applyMasterActions({
-
-        table: "tally_sync_units",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id,
-
-        reconciliationResult:
-            unitReconciliation
-
-    });
-
-console.log(
-    "UNIT ACTION RESULT :",
-    unitActionResult
-);
-
-await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"UNIT",
-
-    action:"COMPLETED"
-
-});
-*/
 
 masterFlowDebug({
     stage:"UNIT_COMPLETED",
@@ -41167,34 +40458,14 @@ if (
 
 ) {
 
-  /*
-await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"COST_CENTRE",
-
-    action:"PROCESSING"
-
-});
-*/
+  
 
 masterFlowDebug({
     stage:"COST_CENTRE_PROCESSING",
     sync_batch_id
 });
 
-// =========================
-// SAVE COST CENTRES
-// =========================
-/*
-costCentreResult = await saveCostCentres({
-  company_code,
-  tally_owner,
-   sync_batch_id,
-  costCentres: result.costCentres || []
-});
-*/
+
 
 costCentreResult = await BatchManager.run({
 
@@ -41220,42 +40491,6 @@ costCentreResult = await BatchManager.run({
 
 console.log("COST CENTRE SAVE :", costCentreResult);
 
-// =========================
-// COST CENTRE RECONCILIATION
-// =========================
-/*
-costCentreReconciliation =
-
-    await ReconciliationManager.reconcile({
-
-      table:"tally_sync_cost_centres",
-
-      module:"MASTER",
-
-      entity_type:"COST_CENTRE",
-
-      company_code,
-
-      tally_owner,
-
-      sync_batch_id
-
-  });
-
-    await reconcileMasters({
-
-        table: "tally_sync_cost_centres",
-
-        entity_type: "COST_CENTRE",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id
-
-    });
-*/
 costCentreReconciliation =
     costCentreResult.reconciliation;
 
@@ -41264,42 +40499,6 @@ console.log(
     costCentreReconciliation
 );
 
-
-// =========================
-// COST CENTRE ACTIONS
-// =========================
-/*
-costCentreActionResult =
-    await applyMasterActions({
-
-        table: "tally_sync_cost_centres",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id,
-
-        reconciliationResult:
-            costCentreReconciliation
-
-    });
-
-console.log(
-    "COST CENTRE ACTION RESULT :",
-    costCentreActionResult
-);
-
-await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"COST_CENTRE",
-
-    action:"COMPLETED"
-
-});
-*/
 
 masterFlowDebug({
     stage:"COST_CENTRE_COMPLETED",
@@ -41319,33 +40518,14 @@ if (
 
 ) {
 
-  /*
-await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"STOCK",
-
-    action:"PROCESSING"
-
-});
-*/
+ 
 
 masterFlowDebug({
     stage:"STOCK_PROCESSING",
     sync_batch_id
 });
-// =========================
-// SAVE STOCKS
-// =========================
-/*
-stockResult = await saveStocks({
-    company_code,
-    tally_owner,
-     sync_batch_id,
-    stocks: result.stocks || []
-});
-*/
+
+
 stockResult = await BatchManager.run({
 
     batch_id: sync_batch_id,
@@ -41371,41 +40551,6 @@ stockResult = await BatchManager.run({
 
 console.log("STOCK SAVE :", stockResult);
 
-/*
-stockReconciliation =
-
-  await ReconciliationManager.reconcile({
-
-      table:"tally_sync_stocks",
-
-      module:"MASTER",
-
-      entity_type:"STOCK",
-
-      company_code,
-
-      tally_owner,
-
-      sync_batch_id
-
-  });
-
-
-    await reconcileMasters({
-
-        table: "tally_sync_stocks",
-
-        entity_type: "STOCK",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id
-
-    });
-*/
-
 stockReconciliation =
     stockResult.reconciliation;
 
@@ -41414,40 +40559,6 @@ console.log(
     "STOCK RECONCILIATION :",
     stockReconciliation
 );
-
-/*
-stockActionResult =
-    await applyMasterActions({
-
-        table: "tally_sync_stocks",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id,
-
-        reconciliationResult:
-            stockReconciliation
-
-    });
-
-console.log(
-    "STOCK ACTION RESULT :",
-    stockActionResult
-);
-
-await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"STOCK",
-
-    action:"COMPLETED"
-
-});
-
-*/
 
 masterFlowDebug({
 
@@ -41506,22 +40617,6 @@ if(stockReconciliation?.missingGuids?.length){
 
     });
 
-/*
-await applyMasterActions({
-
-    table:"tally_sync_stocks",
-
-    company_code,
-
-    tally_owner,
-
-    sync_batch_id,
-
-    reconciliationResult:
-        stockReconciliationAfterMissing
-
-});
-*/
 
 }
 }
@@ -42233,47 +41328,6 @@ const inventoryCountMismatchVoucherGuids = [
         childMissingVoucherGuids.length
     );
 
-
-// =========================================
-// STOCK VOUCHER ROW COUNT RECONCILIATION
-// =========================================
-/*
-const {
-    data: stockVoucherRecoRows,
-    error: stockVoucherRecoError
-} = await supabase
-    .from("stock_voucher_rows_reco")
-    .select("guid")
-    .eq("company_code", company_code)
-    .eq("tally_owner", tally_owner);
-
-if (stockVoucherRecoError) {
-    throw new Error(
-        `Stock voucher reconciliation failed: ${
-            stockVoucherRecoError.message
-        }`
-    );
-}
-
-const stockVoucherRepairGuids = [
-    ...new Set(
-        (stockVoucherRecoRows || [])
-            .map(row => row.guid?.trim())
-            .filter(Boolean)
-    )
-];
-
-console.log(
-    "STOCK VOUCHER COUNT MISMATCH GUIDS:",
-    stockVoucherRepairGuids.length
-);
-
-console.log(
-    "STOCK VOUCHER REPAIR GUIDS:",
-    stockVoucherRepairGuids
-);
-*/
-
     // =========================================
     // FETCH MISSING VOUCHERS
     // =========================================
@@ -42296,97 +41350,6 @@ console.log(
         ([guid]) => Boolean(guid)
     )
 );
-
-/*
-for (
-    const [childTable, repairs]
-    of Object.entries(repairByTable)
-) {
-
-    if (!repairs?.length) {
-        continue;
-    }
-
-    const repairVoucherGuids = [
-        ...new Set(
-            repairs
-                .map(repair => repair.guid)
-                .filter(Boolean)
-        )
-    ];
-
-    const extraGuids =
-    repairs
-        .filter(repair => repair.action === "DELETE")
-        .map(repair => repair.guid)
-        .filter(Boolean);
-
-    const fetchedVouchers =
-        repairVoucherGuids
-            .map(guid =>
-                cachedVoucherMap.get(guid)
-            )
-            .filter(Boolean);
-
-    console.log(
-        "GENERIC CHILD REPAIR:",
-        childTable,
-        "| GUIDS:",
-        repairVoucherGuids.length,
-        "| VOUCHERS:",
-        fetchedVouchers.length
-    );
-
-    if (
-    !fetchedVouchers.length &&
-    extraGuids.length === 0
-) {
-    continue;
-}
-
-    const childRepairResult =
-        await saveVouchers({
-
-            company_code,
-            tally_owner,
-            sync_batch_id,
-            syncMode,
-
-            vouchers:
-                fetchedVouchers,
-
-            orphanGuids:
-                extraGuids,
-
-            repairVoucherGuids:
-                repairVoucherGuids,
-
-            allVoucherGuids:
-                voucherGuidResult?.items || [],
-
-            executionMode:
-                "CHILD_RECONCILIATION",
-
-            childRepairTables: [
-                childTable
-            ]
-
-        });
-
-    console.log(
-        "GENERIC CHILD REPAIR RESULT:",
-        {
-            childTable,
-            status:
-                childRepairResult?.status,
-            success:
-                childRepairResult?.success
-        }
-    );
-}
-*/
-
-
 
 if (
     childMissingVoucherGuids.length > 0 ||
@@ -42695,87 +41658,7 @@ for (
             amountMismatchByChildTable
         )
     ) {
-// 27.08.26 OLD AMOUNT MISMATCH TABLE-WISE REPAIR
-// Replaced by generic repairPlan flow.
-// Kept temporarily for rollback/reference.
-/*
-        if (!rows?.length) {
-            continue;
-        }
 
-        const repairVoucherGuids = [
-            ...new Set(
-                rows
-                    .map(row =>
-                        (
-                            row.voucher_guid ||
-                            row.guid
-                        )?.trim()
-                    )
-                    .filter(Boolean)
-            )
-        ];
-
-        const fetchedVouchers =
-            repairVoucherGuids
-                .map(guid =>
-                    childRepairVoucherCache.find(voucher => {
-
-                        const voucherGuid =
-                            (
-                                voucher?.header?.guid ||
-                                voucher?.guid
-                            )?.trim();
-
-                        return voucherGuid === guid;
-
-                    })
-                )
-                .filter(Boolean);
-
-        console.log(
-            "AMOUNT MISMATCH REPAIR:",
-            childTable,
-            "| GUIDS:",
-            repairVoucherGuids.length,
-            "| VOUCHERS:",
-            fetchedVouchers.length
-        );
-
-        if (!fetchedVouchers.length) {
-            continue;
-        }
-
-        const childRepairResult =
-            await saveVouchers({
-
-                company_code,
-                tally_owner,
-                sync_batch_id,
-                syncMode,
-
-                vouchers:
-                    fetchedVouchers,
-                
-                repairVoucherGuids:
-                   repairVoucherGuids,
-
-                allVoucherGuids:
-                    voucherGuidResult?.items || [],
-
-                executionMode:
-                    "CHILD_RECONCILIATION",
-
-                childRepairTables: [
-                    childTable
-                ]
-            });
-
-        console.log(
-            "AMOUNT MISMATCH REPAIR RESULT:",
-            childRepairResult
-        );
-*/
     }
 
     // =========================================
@@ -42788,142 +41671,13 @@ for (
         stockMismatchByChildTable
     )
 ) {
-/*
-// 27.08.26 OLD STOCK MISMATCH TABLE-WISE REPAIR
-// Replaced by generic repairPlan flow.
-// Kept temporarily for rollback/reference.
 
-    if (!rows?.length) {
-        continue;
-    }
-
-    const repairVoucherGuids = [
-        ...new Set(
-            rows
-                .map(row =>
-                    (
-                        row.voucher_guid ||
-                        row.guid
-                    )?.trim()
-                )
-                .filter(Boolean)
-        )
-    ];
-
-    const fetchedVouchers =
-        repairVoucherGuids
-            .map(guid =>
-                childRepairVoucherCache.find(
-                    voucher => {
-
-                        const voucherGuid =
-                            (
-                                voucher?.header?.guid ||
-                                voucher?.guid
-                            )?.trim();
-
-                        return voucherGuid === guid;
-
-                    }
-                )
-            )
-            .filter(Boolean);
-
-    console.log(
-        "STOCK ROW COUNT REPAIR:",
-        childTable,
-        "| GUIDS:",
-        repairVoucherGuids.length,
-        "| VOUCHERS:",
-        fetchedVouchers.length
-    );
-
-    if (!fetchedVouchers.length) {
-        continue;
-    }
-
-    const stockRepairResult =
-        await saveVouchers({
-
-            company_code,
-            tally_owner,
-            sync_batch_id,
-            syncMode,
-
-            vouchers:
-                fetchedVouchers,
-
-            repairVoucherGuids:
-                repairVoucherGuids,
-
-            allVoucherGuids:
-                voucherGuidResult?.items || [],
-
-            executionMode:
-                "CHILD_RECONCILIATION",
-
-            childRepairTables: [
-                childTable
-            ]
-
-        });
-
-    console.log(
-        "STOCK ROW COUNT REPAIR RESULT:",
-        {
-            childTable,
-            status:
-                stockRepairResult?.status,
-            success:
-                stockRepairResult?.success,
-            result:
-                stockRepairResult
-        }
-    );
-*/
 }
     
 
-    // =========================================
-    // RE-CHECK AFTER THIS REPAIR ROUND
-    // =========================================
-/*
-    childReconciliationResult =
-        await runChildVoucherReconciliation({
-
-            company_code,
-
-            tally_owner,
-
-            sync_batch_id
-
-        });
-
-
-    console.log(
-        "CHILD RECONCILIATION AFTER ROUND:",
-        childRepairRound,
-
-        childReconciliationResult
-    );
-*/
+   
 }
 
-
-// =========================================
-// FINAL RESULT
-// =========================================
-/*
-if (
-    !childReconciliationResult.completed
-) {
-
-    throw new Error(
-        `Child voucher reconciliation is still not clean after ${childRepairRound} repair rounds`
-    );
-
-}
-*/
 
 console.log(
     "CHILD VOUCHER RECONCILIATION COMPLETED IN ROUND:",
@@ -42950,7 +41704,13 @@ console.log(
     childVoucherStatusResult
 );
 
-
+await updateSyncProgress({
+    supabase,
+    batchId: sync_batch_id,
+    stage: "CHILD_RECONCILIATION",
+    progress: 100,
+    action: "CHILD_RECONCILIATION_COMPLETED"
+});
 
 
 }
@@ -43018,16 +41778,14 @@ const ledgerReconResponse =
 const ledgerReconResult =
     await ledgerReconResponse.json();
 
-/*
-const stockReconResponse =
-    await fetch(
-        `${req.protocol}://${req.get("host")}` +
-        `/getStockGodownBalance` +
-        `?company_code=${encodeURIComponent(company_code)}` +
-        `&tally_owner=${encodeURIComponent(tally_owner)}` +
-        `&sync_batch_id=${encodeURIComponent(sync_batch_id)}`
-    );
-*/
+await updateSyncProgress({
+    supabase,
+    batchId: sync_batch_id,
+    stage: "LEDGER_RECONCILIATION",
+    progress: 100,
+    action: "LEDGER_RECONCILIATION_COMPLETED"
+});
+
 
 const stockReconResponse = await fetch(
     `${req.protocol}://${req.get("host")}/getStockGodownBalance?company_code=${company_code}&tally_owner=${tally_owner}&sync_batch_id=${sync_batch_id}&booksBeginningFrom=${encodeURIComponent(result?.summary?.booksBeginningFrom || "")}`
@@ -43036,6 +41794,13 @@ const stockReconResponse = await fetch(
 const stockReconResult =
     await stockReconResponse.json();
 
+await updateSyncProgress({
+    supabase,
+    batchId: sync_batch_id,
+    stage: "STOCK_RECONCILIATION",
+    progress: 100,
+    action: "STOCK_RECONCILIATION_COMPLETED"
+});
 
 console.log(
     "POST-SYNC RECONCILIATION:",
@@ -43044,6 +41809,8 @@ console.log(
         stock: stockReconResult
     }
 );
+
+
 
 // ==================================================
 // CLOSE BATCH AFTER RECONCILIATION
@@ -43112,17 +41879,6 @@ if (
 }
 
 
-/* 280826
-batchCompletedSuccessfully = true;
-
-await BatchStatusManager.releaseHttpBatch({
-
-    batch_id: sync_batch_id,
-
-    worker_id: httpWorkerId
-
-});
-*/
 
 batchCompletedSuccessfully = true;
 

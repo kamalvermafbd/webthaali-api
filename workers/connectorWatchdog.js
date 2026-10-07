@@ -414,43 +414,7 @@ if (
                 }
             );
 
-            const requiredTallyGuid =
-    String(
-        company[tallyGuidField] || ""
-    ).trim();
-
-const tallyCompanies =
-    Array.isArray(socket.tallyCompanies)
-        ? socket.tallyCompanies
-        : [];
-
-const requiredCompanyReady =
-    requiredTallyGuid &&
-    tallyCompanies.some(
-        c =>
-            String(c.guid || "").trim() ===
-            requiredTallyGuid
-    );
-
-if (!requiredCompanyReady) {
-
-    console.log(
-        "⏳ CONNECTOR WATCHDOG: TALLY ONLINE BUT REQUIRED COMPANY NOT READY",
-        {
-            batch_id: batch.batch_id,
-            company_code: companyCode,
-            required_tally_guid:
-                requiredTallyGuid,
-            discovered_companies:
-                tallyCompanies.map(c => ({
-                    name: c.name,
-                    guid: c.guid
-                }))
-        }
-    );
-
-    continue;
-}
+            
             waitingConnectorSince.delete(
                 batch.batch_id
             );
