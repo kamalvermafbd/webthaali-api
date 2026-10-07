@@ -176,106 +176,131 @@ async function checkConnectorWatchdog({
                 // Connector is OFFLINE
                 // =================================================
 
-                if (!socket) {
+            if (!socket) {
 
-                    const now = Date.now();
+    const now = Date.now();
 
-                    if (
-                        batch.current_stage ===
-                        "WAITING_CONNECTOR"
-                    ) {
+    // =================================================
+    // RUNNING BATCH + CONNECTOR LOST
+    // Give connector 90 seconds to reconnect.
+    // =================================================
+    if (
+        batch.batch_status === "PROCESSING" &&
+        batch.worker_status === "RUNNING"
+    ) {
 
-                        if (
-                            !waitingConnectorSince.has(
-                                batch.batch_id
-                            )
-                        ) {
-                            waitingConnectorSince.set(
-                                batch.batch_id,
-                                now
-                            );
-                        }
+        console.log(
+            "⏳ CONNECTOR WATCHDOG: CONNECTOR LOST, WAITING FOR RECOVERY",
+            {
+                batch_id: batch.batch_id,
+                company_code: companyCode,
+                connector_id: connectorId
+            }
+        );
 
-                        const waitingSince =
-                            waitingConnectorSince.get(
-                                batch.batch_id
-                            );
+        await BatchStatusManager.markWaitingConnector({
+            batch_id: batch.batch_id
+        });
 
-                        const waitingAge =
-                            now - waitingSince;
+        waitingConnectorSince.set(
+            batch.batch_id,
+            now
+        );
 
-                        const waitingAgeSeconds =
-                            Math.floor(
-                                waitingAge / 1000
-                            );
+        continue;
+    }
 
-                        console.log(
-                            "⚠️ CONNECTOR WATCHDOG: CONNECTOR OFFLINE",
-                            {
-                                batch_id: batch.batch_id,
-                                company_code: companyCode,
-                                connector_id: connectorId,
-                                stage: batch.current_stage,
-                                waiting_age_seconds:
-                                    waitingAgeSeconds
-                            }
-                        );
+    // =================================================
+    // ALREADY WAITING FOR CONNECTOR
+    // =================================================
+    if (
+        batch.current_stage ===
+        "WAITING_CONNECTOR"
+    ) {
 
-                        if (
-                            waitingAge >=
-                            HEARTBEAT_TIMEOUT_MS
-                        ) {
+        if (
+            !waitingConnectorSince.has(
+                batch.batch_id
+            )
+        ) {
+            waitingConnectorSince.set(
+                batch.batch_id,
+                now
+            );
+        }
 
-                            console.log(
-                                "🚨 CONNECTOR WATCHDOG: FAILING WAITING BATCH",
-                                {
-                                    batch_id: batch.batch_id,
-                                    company_code: companyCode,
-                                    connector_id: connectorId,
-                                    reason:
-                                        "Connector offline for 90 seconds"
-                                }
-                            );
+        const waitingSince =
+            waitingConnectorSince.get(
+                batch.batch_id
+            );
 
-                            waitingConnectorSince.delete(
-                                batch.batch_id
-                            );
+        const waitingAge =
+            now - waitingSince;
 
-                            await BatchStatusManager.markFailed({
-                                batch_id: batch.batch_id,
-                                error:
-                                    "Connector offline / heartbeat timeout"
-                            });
-                        }
+        const waitingAgeSeconds =
+            Math.floor(
+                waitingAge / 1000
+            );
 
-                        continue;
-                    }
+        console.log(
+            "⚠️ CONNECTOR WATCHDOG: CONNECTOR OFFLINE",
+            {
+                batch_id: batch.batch_id,
+                company_code: companyCode,
+                connector_id: connectorId,
+                stage: batch.current_stage,
+                waiting_age_seconds:
+                    waitingAgeSeconds
+            }
+        );
 
-                    // Connector is offline, but this batch is not
-                    // WAITING_CONNECTOR. Do not force-fail it here.
-                    continue;
+        if (
+            waitingAge >=
+            HEARTBEAT_TIMEOUT_MS
+        ) {
+
+            console.log(
+                "🚨 CONNECTOR WATCHDOG: FAILING WAITING BATCH",
+                {
+                    batch_id: batch.batch_id,
+                    company_code: companyCode,
+                    connector_id: connectorId,
+                    reason:
+                        "Connector offline for 90 seconds"
                 }
+            );
+
+            waitingConnectorSince.delete(
+                batch.batch_id
+            );
+
+            await BatchStatusManager.markFailed({
+                batch_id: batch.batch_id,
+                error:
+                    "Connector offline / heartbeat timeout"
+            });
+        }
+
+        continue;
+    }
+
+    // Connector offline, but batch is not
+    // in a state that should be handled here.
+    continue;
+}
 
                 // =================================================
-                // CASE B
-                // Connector is ONLINE
+                // TALLY OFFLINE / CONNECTION RECOVERY
                 // =================================================
-
-                // ------------------------------------------------
-                // WAITING_CONNECTOR + connector back
-                // ------------------------------------------------
 
                 if (
-                    batch.current_stage ===
-                    "WAITING_CONNECTOR"
+                    batch.batch_status === "PROCESSING" &&
+                    batch.worker_status === "RUNNING" &&
+                    socket.tallyStatus === "OFFLINE"
                 ) {
 
-                    waitingConnectorSince.delete(
-                        batch.batch_id
-                    );
-
                     console.log(
-                        "🔄 CONNECTOR BACK: RESTARTING BATCH",
+                        "⏳ CONNECTOR WATCHDOG: TALLY OFFLINE, WAITING FOR RECOVERY",
                         {
                             batch_id: batch.batch_id,
                             company_code: companyCode,
@@ -283,169 +308,333 @@ async function checkConnectorWatchdog({
                         }
                     );
 
-                    // ------------------------------------------------
-                    // Reset only this waiting batch.
-                    //
-                    // Atomic condition prevents duplicate dispatch.
-                    // ------------------------------------------------
+                    await BatchStatusManager.markWaitingConnector({
+                        batch_id: batch.batch_id
+                    });
 
-                    const {
-                        data: resetBatch,
-                        error: resetError
-                    } = await supabase
-                        .from("sync_batches")
-                        .update({
-                            batch_status: "PENDING",
-                            worker_status: "PENDING",
-                            worker_id: null,
-                            locked_at: null,
-                            heartbeat_at: null,
-                            completed_at: null,
-                            error_message: null,
-
-                            current_stage: "PENDING",
-                            current_module: "MASTERS",
-                            current_action: "PENDING"
-                        })
-                        .eq(
-                            "id",
-                            batch.id
-                        )
-                        .eq(
-                            "batch_status",
-                            "PENDING"
-                        )
-                        .eq(
-                            "worker_status",
-                            "PENDING"
-                        )
-                        .eq(
-                            "current_stage",
-                            "WAITING_CONNECTOR"
-                        )
-                        .select()
-                        .maybeSingle();
-
-                    if (resetError) {
-
-                        console.error(
-                            "❌ CONNECTOR WATCHDOG RESET ERROR:",
-                            batch.batch_id,
-                            resetError.message
-                        );
-
-                        continue;
-                    }
-
-                    // Another watchdog cycle may already have
-                    // handled this batch.
-                    if (!resetBatch) {
-
-                        console.log(
-                            "⚠️ CONNECTOR WATCHDOG: BATCH ALREADY HANDLED",
-                            batch.batch_id
-                        );
-
-                        continue;
-                    }
-
-                    // ------------------------------------------------
-                    // Re-dispatch through existing queue system.
-                    //
-                    // This starts the batch from the beginning.
-                    // ------------------------------------------------
-
-                    try {
-
-                        await dispatchBatch(
-                            resetBatch
-                        );
-
-                        console.log(
-                            "✅ CONNECTOR WATCHDOG: BATCH RESTARTED",
-                            {
-                                batch_id:
-                                    batch.batch_id,
-                                company_code:
-                                    companyCode,
-                                connector_id:
-                                    connectorId
-                            }
-                        );
-
-                    } catch (dispatchError) {
-
-                        console.error(
-                            "❌ CONNECTOR WATCHDOG: RESTART DISPATCH FAILED",
-                            {
-                                batch_id:
-                                    batch.batch_id,
-                                error:
-                                    dispatchError.message
-                            }
-                        );
-
-                    }
+                    waitingConnectorSince.set(
+                        batch.batch_id,
+                        Date.now()
+                    );
 
                     continue;
                 }
+                // =================================================
+                // CASE B
+                // Connector is ONLINE
+                // =================================================
+
+               // ------------------------------------------------
+// WAITING_CONNECTOR + connector back
+// ------------------------------------------------
+
+if (
+    batch.current_stage ===
+    "WAITING_CONNECTOR"
+) {
+
+    // ------------------------------------------------
+    // Connector socket is back, but Tally must also
+    // be ONLINE before restarting the batch.
+    // ------------------------------------------------
+
+    if (
+        socket.tallyStatus !==
+        "ONLINE"
+    ) {
+
+        console.log(
+            "⏳ CONNECTOR WATCHDOG: CONNECTOR BACK BUT TALLY STILL OFFLINE",
+            {
+                batch_id:
+                    batch.batch_id,
+
+                company_code:
+                    companyCode,
+
+                connector_id:
+                    connectorId,
+
+                tally_status:
+                    socket.tallyStatus
+            }
+        );
+
+        // Make sure the 90-second timer exists.
+        if (
+            !waitingConnectorSince.has(
+                batch.batch_id
+            )
+        ) {
+
+            waitingConnectorSince.set(
+                batch.batch_id,
+                Date.now()
+            );
+        }
+
+        const waitingSince =
+            waitingConnectorSince.get(
+                batch.batch_id
+            );
+
+        const waitingAge =
+            Date.now() -
+            waitingSince;
+
+        // ------------------------------------------------
+        // Tally did not recover within 90 seconds.
+        // ------------------------------------------------
+
+        if (
+            waitingAge >=
+            HEARTBEAT_TIMEOUT_MS
+        ) {
+
+            console.log(
+                "🚨 CONNECTOR WATCHDOG: TALLY OFFLINE FOR 90 SECONDS",
+                {
+                    batch_id:
+                        batch.batch_id,
+
+                    company_code:
+                        companyCode,
+
+                    connector_id:
+                        connectorId,
+
+                    tally_status:
+                        socket.tallyStatus
+                }
+            );
+
+            waitingConnectorSince.delete(
+                batch.batch_id
+            );
+
+            await BatchStatusManager.markFailed({
+                batch_id:
+                    batch.batch_id,
+
+                error:
+                    "Tally offline / heartbeat timeout"
+            });
+        }
+
+        continue;
+    }
+
+    // ------------------------------------------------
+    // Connector is back AND Tally is ONLINE.
+    // Now restart the same batch from beginning.
+    // ------------------------------------------------
+
+    waitingConnectorSince.delete(
+        batch.batch_id
+    );
+
+    console.log(
+        "🔄 CONNECTOR + TALLY BACK: RESTARTING BATCH",
+        {
+            batch_id:
+                batch.batch_id,
+
+            company_code:
+                companyCode,
+
+            connector_id:
+                connectorId,
+
+            tally_status:
+                socket.tallyStatus
+        }
+    );
+
+    // ------------------------------------------------
+    // Reset only this waiting batch.
+    //
+    // Atomic condition prevents duplicate dispatch.
+    // ------------------------------------------------
+
+    const {
+        data: resetBatch,
+        error: resetError
+    } = await supabase
+        .from("sync_batches")
+        .update({
+            batch_status: "PENDING",
+            worker_status: "PENDING",
+            worker_id: null,
+            locked_at: null,
+            heartbeat_at: null,
+            completed_at: null,
+            error_message: null,
+
+            current_stage: "PENDING",
+            current_module: "MASTERS",
+            current_action: "PENDING"
+        })
+        .eq(
+            "id",
+            batch.id
+        )
+        .eq(
+            "batch_status",
+            "PENDING"
+        )
+        .eq(
+            "worker_status",
+            "PENDING"
+        )
+        .eq(
+            "current_stage",
+            "WAITING_CONNECTOR"
+        )
+        .select()
+        .maybeSingle();
+
+    if (resetError) {
+
+        console.error(
+            "❌ CONNECTOR WATCHDOG RESET ERROR:",
+            batch.batch_id,
+            resetError.message
+        );
+
+        continue;
+    }
+
+    // Another watchdog cycle may already have
+    // handled this batch.
+    if (!resetBatch) {
+
+        console.log(
+            "⚠️ CONNECTOR WATCHDOG: BATCH ALREADY HANDLED",
+            batch.batch_id
+        );
+
+        continue;
+    }
+
+    // ------------------------------------------------
+    // Re-dispatch through existing queue system.
+    //
+    // This starts the batch from the beginning.
+    // ------------------------------------------------
+
+    try {
+
+        await dispatchBatch(
+            resetBatch
+        );
+
+        console.log(
+            "✅ CONNECTOR WATCHDOG: BATCH RESTARTED",
+            {
+                batch_id:
+                    batch.batch_id,
+
+                company_code:
+                    companyCode,
+
+                connector_id:
+                    connectorId
+            }
+        );
+
+    } catch (dispatchError) {
+
+        console.error(
+            "❌ CONNECTOR WATCHDOG: RESTART DISPATCH FAILED",
+            {
+                batch_id:
+                    batch.batch_id,
+
+                error:
+                    dispatchError.message
+            }
+        );
+
+    }
+
+    continue;
+}
 
                // =================================================
                 // CASE C
                 // Normal PROCESSING + RUNNING batch
                 // =================================================
 
-                // -------------------------------------------------
-                // 1. Actual Tally request is running
-                // -------------------------------------------------
+              // -------------------------------------------------
+// 1. Actual Tally request is running
+// -------------------------------------------------
 
-                if (socket.tallyRequestActive) {
+if (socket.tallyRequestActive) {
 
-                    const requestStartedAt =
-                        Number(socket.tallyRequestStartedAt || 0);
+    const requestStartedAt =
+        Number(socket.tallyRequestStartedAt || 0);
 
-                    const requestAge =
-                        requestStartedAt
-                            ? Date.now() - requestStartedAt
-                            : 0;
+    const requestAge =
+        requestStartedAt
+            ? Date.now() - requestStartedAt
+            : 0;
 
-                    const requestAgeSeconds =
-                        Math.floor(requestAge / 1000);
+    const requestAgeSeconds =
+        Math.floor(requestAge / 1000);
 
-                    // Tally request is still within safe timeout
-                    if (requestAge < HEARTBEAT_TIMEOUT_MS) {
+    // Tally request is still within safe timeout
+    if (requestAge < HEARTBEAT_TIMEOUT_MS) {
 
-                        console.log(
-                            "🟢 CONNECTOR WATCHDOG: TALLY REQUEST ACTIVE",
-                            {
-                                batch_id: batch.batch_id,
-                                request_age_seconds:
-                                    requestAgeSeconds
-                            }
-                        );
+        console.log(
+            "🟢 CONNECTOR WATCHDOG: TALLY REQUEST ACTIVE",
+            {
+                batch_id: batch.batch_id,
+                request_age_seconds:
+                    requestAgeSeconds
+            }
+        );
 
-                        continue;
-                    }
+        continue;
+    }
 
-                    // Tally request stuck for 90+ seconds
-                    console.log(
-                        "🚨 CONNECTOR WATCHDOG: TALLY REQUEST STUCK",
-                        {
-                            batch_id: batch.batch_id,
-                            request_age_seconds:
-                                requestAgeSeconds
-                        }
-                    );
+    // -------------------------------------------------
+    // Tally request stuck for 90+ seconds.
+    //
+    // Do NOT fail immediately.
+    // Put batch into WAITING_CONNECTOR so that:
+    //
+    // Tally / Connector recovers within 90 sec
+    //       ↓
+    // Same batch restarts from beginning
+    //
+    // No recovery within 90 sec
+    //       ↓
+    // Batch FAILED
+    // -------------------------------------------------
 
-                    await BatchStatusManager.markFailed({
-                        batch_id: batch.batch_id,
-                        error:
-                            "Tally request timeout"
-                    });
+    console.log(
+        "⏳ CONNECTOR WATCHDOG: TALLY REQUEST STUCK, WAITING FOR RECOVERY",
+        {
+            batch_id:
+                batch.batch_id,
 
-                    continue;
-                }
+            request_age_seconds:
+                requestAgeSeconds
+        }
+    );
 
+    await BatchStatusManager.markWaitingConnector({
+        batch_id:
+            batch.batch_id
+    });
+
+    waitingConnectorSince.set(
+        batch.batch_id,
+        Date.now()
+    );
+
+    continue;
+}
 
                 // -------------------------------------------------
                 // 2. No active Tally request
@@ -512,25 +701,53 @@ async function checkConnectorWatchdog({
                 // Heartbeat stale
                 // -------------------------------------------------
 
-                console.log(
-                    "🚨 CONNECTOR WATCHDOG: HEARTBEAT STALE",
-                    {
-                        batch_id: batch.batch_id,
-                        company_code: companyCode,
-                        connector_id: connectorId,
-                        heartbeat_age_seconds:
-                            heartbeatAgeSeconds,
-                        timeout_seconds:
-                            HEARTBEAT_TIMEOUT_MS / 1000
-                    }
-                );
+              // -------------------------------------------------
+// Heartbeat stale
+// -------------------------------------------------
 
-                await BatchStatusManager.markFailed({
-                    batch_id: batch.batch_id,
-                    error:
-                        "Connector heartbeat timeout"
-                });
+console.log(
+    "⏳ CONNECTOR WATCHDOG: HEARTBEAT STALE, WAITING FOR RECOVERY",
+    {
+        batch_id:
+            batch.batch_id,
 
+        company_code:
+            companyCode,
+
+        connector_id:
+            connectorId,
+
+        heartbeat_age_seconds:
+            heartbeatAgeSeconds,
+
+        timeout_seconds:
+            HEARTBEAT_TIMEOUT_MS / 1000
+    }
+);
+
+// -------------------------------------------------
+// Do NOT fail immediately.
+//
+// Give connector/network 90 seconds to recover.
+// If connector comes back + Tally is ONLINE,
+// existing WAITING_CONNECTOR recovery logic
+// will restart the same batch from beginning.
+//
+// If recovery does not happen within 90 seconds,
+// WAITING_CONNECTOR logic will mark the batch FAILED.
+// ------------------------------------------------
+
+await BatchStatusManager.markWaitingConnector({
+    batch_id:
+        batch.batch_id
+});
+
+waitingConnectorSince.set(
+    batch.batch_id,
+    Date.now()
+);
+
+continue;
             } catch (batchError) {
 
                 console.error(
