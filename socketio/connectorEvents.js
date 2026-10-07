@@ -21,6 +21,11 @@ const supabase =
 const ServerProtocolReceiver =
     require("../utils/protocol/ServerProtocolReceiver");
 
+
+const {
+    updateSyncProgress
+} = require("../utils/syncProgress");
+
 // ============================================================
 // RECOVER WAITING BATCHES WHEN TALLY COMPANY COMES BACK
 // ============================================================
@@ -876,20 +881,47 @@ socket.on("register", (data) => {
 
         });
 
-        socket.on("getMastersProgress", (data) => {
+socket.on("getMastersProgress", async (data) => {
 
-            socket.lastHeartbeat =
-                Date.now();
+    socket.lastHeartbeat =
+        Date.now();
 
-            socket.lastTallyActivity =
-                Date.now();
+    socket.lastTallyActivity =
+        Date.now();
 
-            console.log(
-                "💓 Heartbeat :",
-                data.batchId
-            );
+    console.log(
+        "📊 TALLY PROGRESS :",
+        {
+            batchId: data.batchId,
+            stage: data.stage,
+            progress: data.progress
+        }
+    );
 
+    if (!data?.batchId) {
+        return;
+    }
+
+    try {
+
+        await updateSyncProgress({
+            supabase,
+            batchId: data.batchId,
+            stage: data.stage,
+            progress: data.progress,
+            action: `TALLY_${data.stage}`
         });
+
+    } catch (err) {
+
+        console.error(
+            "❌ SYNC PROGRESS UPDATE FAILED:",
+            err.message
+        );
+
+    }
+
+});
 
         socket.on("protocol:heartbeat", () => {
             socket.lastHeartbeat = Date.now();
