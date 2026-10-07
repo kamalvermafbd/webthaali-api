@@ -43078,16 +43078,22 @@ if (
     stockPassed
 ) {
 
-    await supabase
-        .from("sync_batches")
-        .update({
-            batch_status: "CLOSED",
-            batch_closed: true
-        })
-        .eq(
-            "batch_id",
-            sync_batch_id
-        );
+   await supabase
+    .from("sync_batches")
+    .update({
+        batch_status: "CLOSED",
+        batch_closed: true,
+        sync_progress: {
+            stage: "COMPLETED",
+            progress: 100,
+            updated_at: new Date().toISOString(),
+            phase_progress: null
+        }
+    })
+    .eq(
+        "batch_id",
+        sync_batch_id
+    );
 
     console.log(
         "BATCH CLOSED: RECONCILIATION PASS"
