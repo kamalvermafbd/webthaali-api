@@ -2,7 +2,7 @@ const registry = require("./connectorRegistry");
 
 const {
     dispatchBatch
-} = require("./queueExistingBatch");
+} = require("../workers/queueExistingBatch");
 
 // 060926 start
 const crypto = require("crypto");
