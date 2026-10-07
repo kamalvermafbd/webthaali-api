@@ -39921,6 +39921,8 @@ voucherGuidResult =
 
             sync_batch_id,
 
+            batchId: sync_batch_id,
+
             syncMode,
 
             syncPeriod,
