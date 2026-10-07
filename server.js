@@ -38128,34 +38128,81 @@ const latestBatchId =
       }
 
       // =========================
+// GET SYNC BATCH PROGRESS
+// =========================
+
+const {
+  data: syncBatch,
+  error: syncBatchError
+} = await supabase
+  .from("sync_batches")
+  .select(`
+    sync_progress,
+    current_stage,
+    current_action,
+    batch_status,
+    worker_status,
+    last_activity_at
+  `)
+  .eq("batch_id", latestBatchId)
+  .maybeSingle();
+
+if (syncBatchError) {
+  console.error(
+    "❌ GET SYNC BATCH PROGRESS ERROR:",
+    syncBatchError.message
+  );
+}
+      // =========================
       // BATCH INFO
       // =========================
 
-      const batch = {
+  const batch = {
 
-        batch_id:
-          rows[0].batch_id,
+  batch_id:
+    rows[0].batch_id,
 
-        batch_name:
-          rows[0].batch_name,
+  batch_name:
+    rows[0].batch_name,
 
-        batch_date:
-          rows[0].batch_date,
+  batch_date:
+    rows[0].batch_date,
 
-        company_code:
-          rows[0].company_code,
+  company_code:
+    rows[0].company_code,
 
-        tally_owner:
-          rows[0].tally_owner,
+  tally_owner:
+    rows[0].tally_owner,
 
-        inv_from:
-          rows[0].inv_from,
+  inv_from:
+    rows[0].inv_from,
 
-        inv_to:
-          rows[0].inv_to
+  inv_to:
+    rows[0].inv_to,
 
-      };
+  // =========================
+  // SYNC PROGRESS
+  // =========================
 
+  sync_progress:
+    syncBatch?.sync_progress ?? 0,
+
+  current_stage:
+    syncBatch?.current_stage ?? null,
+
+  current_action:
+    syncBatch?.current_action ?? null,
+
+  batch_status:
+    syncBatch?.batch_status ?? null,
+
+  worker_status:
+    syncBatch?.worker_status ?? null,
+
+  last_activity_at:
+    syncBatch?.last_activity_at ?? null
+
+};
       // =========================
       // STEP STATUS
       // =========================
