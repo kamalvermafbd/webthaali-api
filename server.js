@@ -43189,34 +43189,50 @@ db: {
 
     console.error(err);
 
+    const isTallyOffline =
+      err?.message === "TALLY_OFFLINE" ||
+      err?.message?.includes("TALLY_OFFLINE");
+
     if (
       sync_batch_id &&
-      httpWorkerId &&
       !batchCompletedSuccessfully
     ) {
 
       try {
 
-        await BatchStatusManager.markFailed({
+        if (isTallyOffline) {
 
-          batch_id: sync_batch_id,
+          await BatchStatusManager.markWaitingConnector({
+            batch_id: sync_batch_id
+          });
 
-          error: err
+          console.log(
+            "🔌 TALLY OFFLINE — BATCH WAITING:",
+            sync_batch_id
+          );
 
-        });
+        } else {
 
-        await BatchStatusManager.releaseHttpBatch({
+          await BatchStatusManager.markFailed({
+            batch_id: sync_batch_id,
+            error: err
+          });
 
-          batch_id: sync_batch_id,
+        }
 
-          worker_id: httpWorkerId
+        if (httpWorkerId) {
 
-        });
+          await BatchStatusManager.releaseHttpBatch({
+            batch_id: sync_batch_id,
+            worker_id: httpWorkerId
+          });
+
+        }
 
       } catch (failureUpdateError) {
 
         console.error(
-          "Failed to finalize failed HTTP sync batch:",
+          "Failed to finalize sync batch:",
           failureUpdateError
         );
 
@@ -43224,16 +43240,23 @@ db: {
 
     }
 
-    return res.status(500).json({
+    return res.status(
+      isTallyOffline ? 503 : 500
+    ).json({
 
       success: false,
 
       error:
-        err.response?.data || err.message
+        isTallyOffline
+          ? "TALLY_OFFLINE"
+          : (
+              err.response?.data ||
+              err.message
+            )
 
     });
 
-  }
+}
 
 });
 

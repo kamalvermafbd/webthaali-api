@@ -84,9 +84,11 @@ async function runJob(job, serverUrl) {
                             // Response is not JSON
                         }
 
-                        if (
+                       if (
                             errorData?.error === "Connector offline" ||
-                            text.includes("Connector offline")
+                            errorData?.error === "TALLY_OFFLINE" ||
+                            text.includes("Connector offline") ||
+                            text.includes("TALLY_OFFLINE")
                         ) {
 
                             await BatchStatusManager.markWaitingConnector({
@@ -146,6 +148,7 @@ async function runJob(job, serverUrl) {
     errorMessage.includes("Connector disconnected") ||
     errorMessage.includes("transport close") ||
     errorMessage.includes("Connector offline") ||
+     errorMessage.includes("TALLY_OFFLINE") ||
     errorMessage.includes("ECONNREFUSED")
 ) {
         await BatchStatusManager.markWaitingConnector({
