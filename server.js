@@ -39618,7 +39618,8 @@ const result = await sendChunkedToConnector(
         lastAlterId,
         lastStockAlterId,
         lastLedgerAlterId,
-        syncMode
+        syncMode,
+        batchId: sync_batch_id,
     }
 );
 
