@@ -1,5 +1,9 @@
 const registry = require("./connectorRegistry");
 
+const {
+    dispatchBatch
+} = require("./queueExistingBatch");
+
 // 060926 start
 const crypto = require("crypto");
 // 060926 end
@@ -16,6 +20,358 @@ const supabase =
 
 const ServerProtocolReceiver =
     require("../utils/protocol/ServerProtocolReceiver");
+
+// ============================================================
+// RECOVER WAITING BATCHES WHEN TALLY COMPANY COMES BACK
+// ============================================================
+
+async function recoverWaitingBatchesForCompanies({
+    companyGuids,
+    socket
+}) {
+
+    try {
+
+        if (
+            !Array.isArray(companyGuids) ||
+            companyGuids.length === 0
+        ) {
+            return;
+        }
+
+        const cleanGuids = [
+            ...new Set(
+                companyGuids
+                    .map(guid => String(guid).trim())
+                    .filter(Boolean)
+            )
+        ];
+
+        // ----------------------------------------------------
+        // Find companies linked to these Tally GUIDs
+        // ----------------------------------------------------
+
+        const [
+            clientResult,
+            caResult
+        ] = await Promise.all([
+
+            supabase
+                .from("company")
+                .select(`
+                    company_code,
+                    client_tally_company_guid,
+                    client_connector_id
+                `)
+                .in(
+                    "client_tally_company_guid",
+                    cleanGuids
+                ),
+
+            supabase
+                .from("company")
+                .select(`
+                    company_code,
+                    ca_tally_company_guid,
+                    ca_connector_id
+                `)
+                .in(
+                    "ca_tally_company_guid",
+                    cleanGuids
+                )
+
+        ]);
+
+        if (
+            clientResult.error ||
+            caResult.error
+        ) {
+
+            throw new Error(
+                clientResult.error?.message ||
+                caResult.error?.message
+            );
+
+        }
+
+        const companies = [
+
+            ...(clientResult.data || []).map(row => ({
+                company_code:
+                    row.company_code,
+
+                tally_owner:
+                    "USER",
+
+                tally_guid:
+                    row.client_tally_company_guid,
+
+                connector_id:
+                    row.client_connector_id
+            })),
+
+            ...(caResult.data || []).map(row => ({
+                company_code:
+                    row.company_code,
+
+                tally_owner:
+                    "CA",
+
+                tally_guid:
+                    row.ca_tally_company_guid,
+
+                connector_id:
+                    row.ca_connector_id
+            }))
+
+        ].filter(
+            row => row.connector_id
+        );
+
+        if (companies.length === 0) {
+            return;
+        }
+
+        // ----------------------------------------------------
+        // Check WAITING_CONNECTOR batches
+        // belonging to these companies
+        // ----------------------------------------------------
+
+        for (const company of companies) {
+
+            const {
+                data: batches,
+                error: batchError
+            } = await supabase
+                .from("sync_batches")
+                .select("*")
+                .eq(
+                    "company_code",
+                    company.company_code
+                )
+                .eq(
+                    "tally_owner",
+                    company.tally_owner
+                )
+                
+                .eq(
+                    "batch_status",
+                    "PENDING"
+                )
+                .eq(
+                    "worker_status",
+                    "PENDING"
+                )
+                .eq(
+                    "current_stage",
+                    "WAITING_CONNECTOR"
+                )
+                .order(
+                    "created_at",
+                    {
+                        ascending: true
+                    }
+                );
+
+            if (batchError) {
+
+                console.error(
+                    "❌ WAITING BATCH LOOKUP FAILED:",
+                    {
+                        company_code:
+                            company.company_code,
+
+                        tally_owner:
+                            company.tally_owner,
+
+                        error:
+                            batchError.message
+                    }
+                );
+
+                continue;
+            }
+
+            if (
+                !batches ||
+                batches.length === 0
+            ) {
+                continue;
+            }
+
+            // ------------------------------------------------
+            // Restart every waiting batch for this company
+            // ------------------------------------------------
+
+            for (const batch of batches) {
+
+                try {
+
+                    console.log(
+                        "🔄 TALLY COMPANY BACK: RECOVERING WAITING BATCH",
+                        {
+                            batch_id:
+                                batch.batch_id,
+
+                            company_code:
+                                company.company_code,
+
+                            tally_owner:
+                                company.tally_owner,
+
+                            tally_guid:
+                                company.tally_guid,
+
+                            connector_id:
+                                company.connector_id
+                        }
+                    );
+
+                    // ----------------------------------------
+                    // Atomic reset
+                    // ----------------------------------------
+
+                    const {
+                        data: resetBatch,
+                        error: resetError
+                    } = await supabase
+                        .from("sync_batches")
+                        .update({
+
+                            batch_status:
+                                "PENDING",
+
+                            worker_status:
+                                "PENDING",
+
+                            worker_id:
+                                null,
+
+                            locked_at:
+                                null,
+
+                            heartbeat_at:
+                                null,
+
+                            completed_at:
+                                null,
+
+                            error_message:
+                                null,
+
+                            current_stage:
+                                "PENDING",
+
+                            current_module:
+                                "MASTERS",
+
+                            current_action:
+                                "PENDING"
+
+                        })
+                        .eq(
+                            "id",
+                            batch.id
+                        )
+                        .eq(
+                            "batch_status",
+                            "PENDING"
+                        )
+                        .eq(
+                            "worker_status",
+                            "PENDING"
+                        )
+                        .eq(
+                            "current_stage",
+                            "WAITING_CONNECTOR"
+                        )
+                        .select()
+                        .maybeSingle();
+
+                    if (resetError) {
+
+                        console.error(
+                            "❌ WAITING BATCH RESET FAILED:",
+                            {
+                                batch_id:
+                                    batch.batch_id,
+
+                                error:
+                                    resetError.message
+                            }
+                        );
+
+                        continue;
+                    }
+
+                    // ----------------------------------------
+                    // Another process already handled it
+                    // ----------------------------------------
+
+                    if (!resetBatch) {
+
+                        console.log(
+                            "⚠️ WAITING BATCH ALREADY HANDLED:",
+                            batch.batch_id
+                        );
+
+                        continue;
+                    }
+
+                    // ----------------------------------------
+                    // Dispatch SAME batch
+                    // ----------------------------------------
+
+                    await dispatchBatch(
+                        resetBatch
+                    );
+
+                    console.log(
+                        "✅ WAITING BATCH RESTARTED:",
+                        {
+                            batch_id:
+                                batch.batch_id,
+
+                            company_code:
+                                company.company_code,
+
+                            connector_id:
+                                company.connector_id
+                        }
+                    );
+
+                } catch (batchRecoveryError) {
+
+                    console.error(
+                        "❌ WAITING BATCH RECOVERY ERROR:",
+                        {
+                            batch_id:
+                                batch.batch_id,
+
+                            company_code:
+                                company.company_code,
+
+                            error:
+                                batchRecoveryError.message
+                        }
+                    );
+
+                }
+
+            }
+
+        }
+
+    } catch (error) {
+
+        console.error(
+            "❌ COMPANY BATCH RECOVERY ERROR:",
+            error
+        );
+
+    }
+
+}
 
 function registerEvents(io) {
 
@@ -403,40 +759,14 @@ for (const connectorId of connectorIds) {
     }
 }
 
-/* 040926
-        const registered =
-            registry.register(
-                connector_id,
-                socket
-            );
+// ==========================================
+// RECOVER WAITING BATCHES
+// ==========================================
 
-
-        if (!registered) {
-
-            console.error(
-                "❌ CONNECTOR AUTO REGISTRATION REJECTED",
-                {
-                    socket_id: socket.id,
-                    connector_id
-                }
-            );
-
-            return;
-        }
-
-
-        console.log(
-            "✅ CONNECTOR AUTO REGISTERED",
-            {
-                socket_id: socket.id,
-                connector_id,
-                company_codes:
-                    socket.companyCodes,
-                matched_companies:
-                    matches
-            }
-        );
-*/
+await recoverWaitingBatchesForCompanies({
+    companyGuids: company_guids,
+    socket
+});
     } catch (err) {
 
         console.error(
