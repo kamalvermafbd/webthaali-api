@@ -237,23 +237,9 @@ const {
     startSync
 } = require("./workers/SyncStartService");
 
-//io.on("connection", (socket) => {
-
-  //console.log("================================");
-  //console.log("✅ Connector Connected");
-  //console.log("Socket ID :", socket.id);
-  //console.log("================================");
-
-  //socket.on("disconnect", () => {
-
-    //console.log("================================");
-    //console.log("❌ Connector Disconnected");
-    //console.log("Socket ID :", socket.id);
-    //console.log("================================");
-
-  //});
-
-//});
+const {
+    updateSyncProgress
+} = require("./utils/syncProgress");
 
 const { registerEvents } = require("./socketio/connectorEvents");
 const BatchManager = require("./sync-engine/BatchManager");
@@ -39610,6 +39596,14 @@ let unitGuidResult = null;
 let godownGuidResult = null;
 let costCentreGuidResult = null;
   
+await updateSyncProgress({
+    supabase,
+    batchId: sync_batch_id,
+    stage: "MASTERS",
+    progress: 0,
+    action: "FETCHING_MASTERS"
+});
+
 const result = await sendChunkedToConnector(
     socket,
     "getMasters",
