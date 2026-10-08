@@ -6,8 +6,7 @@ const path = require("path");
 // JSON TRACKER FILE
 // ============================================================
 
-const LOG_DIR =
-    "C:\\Users\\15FC0704AU\\Downloads\\webthaali-api\\logs";
+const LOG_DIR = path.join(__dirname, "..", "logs");
 
 const LOG_FILE =
     path.join(
