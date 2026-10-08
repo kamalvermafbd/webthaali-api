@@ -3772,10 +3772,7 @@ app.post("/pairConnector", async (req, res) => {
     ? "ca_connector_id"
     : "client_connector_id";
 
-    /* 060926 start
-const pending_connector_id =
-  String(req.body.pending_connector_id || "").trim();
-*/ 
+    
 
 const {
   data: companyData,
@@ -3850,30 +3847,7 @@ if (connector_id) {
     !!socket
   );
 
-  // Existing connector offline/not registered
-  // but a new pending connector is available
-  /*
-  if (!socket) {
-
-    socket =
-      registry.getPending();
-
-    console.log(
-      "PENDING CONNECTOR FALLBACK FOUND :",
-      !!socket
-    );
-
-    if (!socket) {
-
-      return res.json({
-        success: false,
-        error: "Linked connector offline"
-      });
-
-    }
-
-  }
-*/
+  
 if (!socket) {
 
   return res.json({
@@ -3976,60 +3950,6 @@ if (
 
 }
 
-    /* 020926
-let connector_id =
-  companyData?.[connectorField];
-
-console.log(
-  "EXISTING CONNECTOR ID :",
-  connector_id
-);
-
-if (!connector_id) {
-
-  connector_id =
-    `CON-${crypto.randomUUID()}`;
-
-  const {
-    error: connectorSaveError
-  } = await supabase
-
-    .from("company")
-
-    .update({
-      [connectorField]:
-        connector_id
-    })
-
-    .eq(
-      "company_code",
-      company_code
-    );
-
-  if (connectorSaveError) {
-
-    return res.json({
-      success: false,
-      error:
-        connectorSaveError.message
-    });
-
-  }
-
-  console.log(
-    "🆕 NEW CONNECTOR ID CREATED :",
-    connector_id
-  );
-
-} else {
-
-  console.log(
-    "♻️ EXISTING CONNECTOR ID USED :",
-    connector_id
-  );
-
-}
-  */
     console.log("PAIR TRACE:", {
   company_code,
   connector_id,

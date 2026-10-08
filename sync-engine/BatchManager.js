@@ -43,106 +43,11 @@ const {
 class BatchManager {
 
 
-// ----------------------------------
-// Execute Prebuilt Operations
-// ----------------------------------
-/*
-async execute({
-
-    operations = []
-
-}) {
-
-    if (!Array.isArray(operations)) {
-
-        throw new Error(
-            "operations must be an array"
-        );
-
-    }
-
-    BatchQueue.enqueueMany(
-
-    operations
-
-    );
-
-    const queuedOperations =
-
-        BatchQueue.getAll();
-
-    let successCount = 0;
-
-    let failedCount = 0;
-
-    const failedOperations = [];
-
-    for (const operation of queuedOperations) {
-
-        try {
-
-            await BatchExecutor.execute(
-                operation
-            );
-
-            successCount++;
-
-        }
-
-        catch (error) {
-
-            console.error(
-                "BATCH EXECUTION ERROR:",
-                error
-            );
-
-            failedCount++;
-
-            failedOperations.push({
-
-                operation,
-
-                error: error.message
-
-            });
-
-            break;
-
-        }
-
-    }
-
-    try {
-
-    return {
-
-        success:
-
-        failedCount === 0,
-
-        successCount,
-
-        failedCount,
-
-        failedOperations
-
-    };
-
-}
-
-finally {
-
-    BatchQueue.clear();
-
-}
-
-}
-
-*/
 
 async execute({
 
-    operations = []
+    operations = [],
+    progressPhase = "PRIMARY"
 
 }) {
 
@@ -172,13 +77,55 @@ console.dir(operation?.rows?.[0], { depth: null });
 
         try {
 
-            await BatchExecutor.execute(
-                operation
-            );
+    await BatchExecutor.execute(
+        operation
+    );
 
-            successCount++;
+    successCount++;
+
+    // =========================================
+    // TALLY → BILLEY VOUCHER PROGRESS
+    // =========================================
+
+    if (
+        progressPhase === "PRIMARY" &&
+        operation?.entity === ENTITY_TYPE.VOUCHER &&
+        operation?.sync_batch_id
+    ) {
+
+        const voucherProgressMap = {
+            [TABLES.VOUCHERS]: 40,
+            [TABLES.VOUCHER_LEDGERS]: 45,
+            [TABLES.VOUCHER_INVENTORY]: 50,
+            [TABLES.VOUCHER_INVENTORY_GODOWNS]: 55,
+            [TABLES.STOCK_VOUCHERS]: 60,
+            [TABLES.BILL_ALLOCATIONS]: 65,
+            [TABLES.COST_CENTRE_ALLOCATIONS]: 70
+        };
+
+        const progress =
+            voucherProgressMap[operation.table];
+
+        if (progress) {
+
+            await BatchStatusManager.updateProgress({
+                batch_id: operation.sync_batch_id,
+                progress
+            });
+
+            await BatchStatusManager.updateModule({
+                batch_id: operation.sync_batch_id,
+                module: MODULE_TYPE.VOUCHER,
+                entity: ENTITY_TYPE.VOUCHER,
+                action: "SQL_COMPLETED",
+                operation: operation.operation
+            });
 
         }
+
+    }
+
+}
 
         catch (error) {
 
@@ -263,39 +210,24 @@ if (snapshotRows.length > 0) {
 
     });
 
-    
-/*
-    fs.writeFileSync(
+}
 
-        `./logs/PRE_SAVE_${entity}.json`,
+if (
+    entity === ENTITY_TYPE.VOUCHER &&
+    sync_batch_id
+) {
 
-        JSON.stringify(
+    await BatchStatusManager.updateProgress({
+        batch_id,
+        progress: 75
+    });
 
-            {
-
-                entity,
-
-                rowsReceived:
-                    snapshotRows.length,
-
-                firstRow:
-                    snapshotRows[0] || null,
-
-                guids:
-                    snapshotRows.map(
-                        r => r.guid
-                    )
-
-            },
-
-            null,
-
-            2
-
-        )
-
-    );
-    */
+    await BatchStatusManager.updateModule({
+        batch_id,
+        module: MODULE_TYPE.VOUCHER,
+        entity: ENTITY_TYPE.VOUCHER,
+        action: "SNAPSHOT_COMPLETED"
+    });
 
 }
 
@@ -437,6 +369,25 @@ fs.writeFileSync(
         sync_batch_id
     }, null, 2)
 );
+
+if (
+    entity === ENTITY_TYPE.VOUCHER &&
+    sync_batch_id
+) {
+
+    await BatchStatusManager.updateProgress({
+        batch_id,
+        progress: 80
+    });
+
+    await BatchStatusManager.updateModule({
+        batch_id,
+        module: MODULE_TYPE.VOUCHER,
+        entity: ENTITY_TYPE.VOUCHER,
+        action: "RECONCILIATION"
+    });
+
+}
 
 const reconciliation =
 
@@ -672,16 +623,16 @@ if (entity === "VOUCHER") {
 const reconciliationExecution =
 
     reconciliationOperations.length === 0
-
         ? {
             success: true,
             failedCount: 0
         }
-
         : await this.execute({
 
             operations:
-                reconciliationOperations
+                reconciliationOperations,
+
+            progressPhase: "RECONCILIATION"
 
         });
 
@@ -732,6 +683,26 @@ if (!reconciliationRetryResult.success) {
     };
 
 }
+
+if (
+    entity === ENTITY_TYPE.VOUCHER &&
+    sync_batch_id
+) {
+
+    await BatchStatusManager.updateProgress({
+        batch_id,
+        progress: 90
+    });
+
+    await BatchStatusManager.updateModule({
+        batch_id,
+        module: MODULE_TYPE.VOUCHER,
+        entity: ENTITY_TYPE.VOUCHER,
+        action: "RECONCILIATION_COMPLETED"
+    });
+
+}
+
 
 // --------------------------------------------------
 // Deactivate TALLY Opening Balance Allocations
@@ -791,12 +762,44 @@ if (
 
 }
 
+if (
+    entity === ENTITY_TYPE.VOUCHER &&
+    sync_batch_id
+) {
+
+    await BatchStatusManager.updateProgress({
+        batch_id,
+        progress: 95
+    });
+
+    await BatchStatusManager.updateModule({
+        batch_id,
+        module: MODULE_TYPE.VOUCHER,
+        entity: ENTITY_TYPE.VOUCHER,
+        action: "CLEANUP_COMPLETED"
+    });
+
+}
 
 await BatchStatusManager.markReconciliationCompleted({
 
     batch_id
 
 });
+
+
+if (
+    entity === ENTITY_TYPE.VOUCHER &&
+    sync_batch_id
+) {
+
+    await BatchStatusManager.updateProgress({
+        batch_id,
+        progress: 100
+    });
+
+}
+
 
 await BatchStatusManager.updateModule({
 
