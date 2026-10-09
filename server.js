@@ -43119,7 +43119,7 @@ if (
 
 
 /* 🔴 NEW CODE START — COMPANY DATA VERSION INCREMENT */
-
+/* 091026 roll back due to sync error
 if (ledgerPassed && stockPassed) {
     try {
         await incrementCompanyDataVersion({
@@ -43142,7 +43142,7 @@ if (ledgerPassed && stockPassed) {
         "Cannot increment company data version: reconciliation incomplete"
     );
 }
-
+*/
 /* 🔴 NEW CODE END — COMPANY DATA VERSION INCREMENT */
 
 
