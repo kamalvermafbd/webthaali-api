@@ -66,11 +66,6 @@ const {
     getTrialBalance,
     getStockGodownBalance
 } = require("./services/syncService");
-
-const {
-  incrementCompanyDataVersion,
-} = require("./CompanyDataVersionService");
-
 const {
 
   sendToTally,
@@ -43118,33 +43113,17 @@ if (
 }
 
 
-/* 🔴 NEW CODE START — COMPANY DATA VERSION INCREMENT */
-/* 091026 roll back due to sync error
-if (ledgerPassed && stockPassed) {
-    try {
-        await incrementCompanyDataVersion({
-            supabase,
-            company_code,
-            tally_owner,
-        });
+/* 280826
+batchCompletedSuccessfully = true;
 
-        console.log("COMPANY DATA VERSION INCREMENTED");
-    } catch (versionError) {
-        console.error(
-            "COMPANY DATA VERSION INCREMENT FAILED:",
-            versionError.message
-        );
+await BatchStatusManager.releaseHttpBatch({
 
-        throw versionError;
-    }
-} else {
-    throw new Error(
-        "Cannot increment company data version: reconciliation incomplete"
-    );
-}
+    batch_id: sync_batch_id,
+
+    worker_id: httpWorkerId
+
+});
 */
-/* 🔴 NEW CODE END — COMPANY DATA VERSION INCREMENT */
-
 
 batchCompletedSuccessfully = true;
 
