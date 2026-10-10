@@ -57,6 +57,15 @@ function buildInventoryRows({
 
         }
 
+        
+        const distinctGodowns = getDistinctGodowns(item);
+
+        // Multiple distinct godowns: inventory table mein mat bhejo.
+        if (distinctGodowns.length > 1) {
+            continue;
+        }
+
+
         const gstRates = item.gstRates ?? [];
 
         const cgstRate =
@@ -269,6 +278,30 @@ function buildInventoryRows({
 
 }
 
+
+
+function getDistinctGodowns(item) {
+const batchGodowns = [
+...new Set(
+(item?.batches || [])
+.map(batch => safeTrim(batch?.godown))
+.filter(Boolean)
+)
+];
+
+// If batch allocations identify godowns, use those as the source of truth.
+// Do not mix the parent item's godown into batch-level routing.
+if (batchGodowns.length > 0) {
+    return batchGodowns;
+}
+
+const itemGodown = safeTrim(item?.godown);
+
+return itemGodown ? [itemGodown] : [];
+
+}
+
+
 function buildInventoryGodownRows({
     voucher,
     company_code,
@@ -308,7 +341,25 @@ console.log(
             continue;
         }
 
-        for (const batch of (item.batches || [])) {
+                
+        const distinctGodowns = getDistinctGodowns(item);
+
+        // Single ya zero known godown: godown table mein mat bhejo.
+        
+        if (distinctGodowns.length <= 1) {
+            continue;
+        }
+
+        const validBatches = (item.batches || []).filter(
+            batch => safeTrim(batch.godown)
+        );
+
+        if (validBatches.length === 0) {
+            continue;
+        }
+
+
+       for (const batch of validBatches) {
 
             rows.push({
 
