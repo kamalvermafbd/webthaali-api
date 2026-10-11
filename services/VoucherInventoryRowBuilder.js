@@ -45,6 +45,18 @@ function buildInventoryRows({
 
     for (const item of (voucher.inventory || [])) {
 
+                const distinctGodowns = [
+            ...new Set(
+                (item.batches || [])
+                    .map(batch => safeTrim(batch.godown))
+                    .filter(Boolean)
+            )
+        ];
+
+        // Multi-godown items are stored in the godown table.
+        // Keep the parent inventory row, but mark multi-godown items.
+const isChildVoucher = distinctGodowns.length > 1;
+
         if (
 
             item.inventoryNode !==
@@ -93,6 +105,8 @@ function buildInventoryRows({
 
             voucher_guid:
                 safeTrim(header.guid),
+
+            child_voucher: isChildVoucher,
 
             company_code,
 
@@ -289,6 +303,19 @@ if (skipStockConsumption) {
 }
 
     for (const item of (voucher.inventory || [])) {
+
+                const distinctGodowns = [
+            ...new Set(
+                (item.batches || [])
+                    .map(batch => safeTrim(batch.godown))
+                    .filter(Boolean)
+            )
+        ];
+
+        // Only multi-godown items belong in this table.
+        if (distinctGodowns.length <= 1) {
+            continue;
+        }
 
         if (
             item.inventoryNode !==
