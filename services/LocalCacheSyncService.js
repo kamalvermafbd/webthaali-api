@@ -104,14 +104,7 @@ class LocalCacheSyncService {
                 "tally_owner",
                 owner
             )
-            .eq(
-                "batch_status",
-                "CLOSED"
-            )
-            .eq(
-                "batch_closed",
-                true
-            )
+            .in("batch_status", ["CLOSED", "COMPLETED"])
             .order(
                 "completed_at",
                 {
