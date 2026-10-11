@@ -3169,35 +3169,28 @@ app.get("/getTallyStockReorderHealth", async (req, res) => {
 });
 
 
-// ==========================================================
-// GET TALLY STOCK HEALTH REPORT
-// ==========================================================
+
+ // ==========================================================
+ // GET TALLY STOCK HEALTH REPORT
+ // ==========================================================
 
 app.get("/getTallyStockHealthReport", async (req, res) => {
   try {
+    const company_code = String(req.query.company_code || "").trim();
 
-    const company_code =
-      String(req.query.company_code || "").trim();
+    const tally_owner = String(req.query.tally_owner || "")
+      .trim()
+      .toUpperCase();
 
-    const tally_owner =
-      String(req.query.tally_owner || "")
-        .trim()
-        .toUpperCase();
+    const from_date = String(req.query.from_date || "").trim();
+    const to_date = String(req.query.to_date || "").trim();
+    const as_of_date = String(req.query.as_of_date || "").trim();
 
-    const from_date =
-      String(req.query.from_date || "").trim();
-
-    const to_date =
-      String(req.query.to_date || "").trim();
-
-    const as_of_date =
-      String(req.query.as_of_date || "").trim();
-
-    const valuation_method =
-      String(req.query.valuation_method || "FIFO_PERPETUAL")
-        .trim()
-        .toUpperCase();
-
+    const valuation_method = String(
+      req.query.valuation_method || "FIFO_PERPETUAL"
+    )
+      .trim()
+      .toUpperCase();
 
     // -----------------------------
     // VALIDATION
@@ -3206,98 +3199,89 @@ app.get("/getTallyStockHealthReport", async (req, res) => {
     if (!company_code) {
       return res.json({
         success: false,
-        error: "company_code missing"
+        error: "company_code missing",
       });
     }
 
-    if (
-      tally_owner !== "CA" &&
-      tally_owner !== "USER"
-    ) {
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
       return res.json({
         success: false,
-        error: "Invalid tally_owner"
+        error: "Invalid tally_owner",
       });
     }
 
-    if (!from_date) {
+    if (!from_date || !to_date || !as_of_date) {
       return res.json({
         success: false,
-        error: "from_date missing"
+        error: "from_date, to_date and as_of_date are required",
       });
     }
 
-    if (!to_date) {
-      return res.json({
-        success: false,
-        error: "to_date missing"
-      });
-    }
-
-    if (!as_of_date) {
-      return res.json({
-        success: false,
-        error: "as_of_date missing"
-      });
-    }
-
-console.time("STOCK_HEALTH_REPORT_RPC");
     // -----------------------------
-    // RPC
+    // TEMPORARY TIMEOUT DIAGNOSTIC
     // -----------------------------
 
-    const { data, error } =
-      await supabase.rpc(
-        "get_stock_health_report_v2",
-        {
-          p_company_code: company_code,
-          p_tally_owner: tally_owner,
-          p_from_date: from_date,
-          p_to_date: to_date,
-          p_as_of_date: as_of_date,
-          p_valuation_method: valuation_method
-        }
-      );
+    const { data: timeoutData, error: timeoutError } =
+      await supabase.rpc("check_api_timeout");
 
-console.timeEnd("STOCK_HEALTH_REPORT_RPC");
+    console.log("API DB TIMEOUT CHECK:", {
+      data: timeoutData,
+      error: timeoutError
+        ? {
+            message: timeoutError.message,
+            code: timeoutError.code,
+          }
+        : null,
+    });
 
-   if (error) {
-  console.error(
-    "GET TALLY STOCK HEALTH REPORT ERROR:",
-    {
-      message: error.message,
-      code: error.code,
-      details: error.details,
-      hint: error.hint
+    // -----------------------------
+    // STOCK HEALTH REPORT RPC
+    // -----------------------------
+
+    console.time("STOCK_HEALTH_REPORT_RPC");
+
+    const { data, error } = await supabase.rpc(
+      "get_stock_health_report_v2",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_from_date: from_date,
+        p_to_date: to_date,
+        p_as_of_date: as_of_date,
+        p_valuation_method: valuation_method,
+      }
+    );
+
+    console.timeEnd("STOCK_HEALTH_REPORT_RPC");
+
+    if (error) {
+      console.error("GET TALLY STOCK HEALTH REPORT ERROR:", {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+
+      return res.status(500).json({
+        success: false,
+        error: error.message,
+      });
     }
-  );
-
-  return res.status(500).json({
-    success: false,
-    error: error.message
-  });
-}
-
 
     return res.json({
       success: true,
-      data: data || []
+      data: data || [],
     });
-
-
   } catch (err) {
-
-    console.error(
-      "GET TALLY STOCK HEALTH REPORT API ERROR:",
-      err
-    );
+    console.error("GET TALLY STOCK HEALTH REPORT API ERROR:", err);
 
     return res.status(500).json({
       success: false,
-      error: err.message
+      error: err.message,
     });
   }
 });
+
 
 
 // ==========================================================
