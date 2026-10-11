@@ -3241,7 +3241,7 @@ app.get("/getTallyStockHealthReport", async (req, res) => {
       });
     }
 
-
+console.time("STOCK_HEALTH_REPORT_RPC");
     // -----------------------------
     // RPC
     // -----------------------------
@@ -3259,18 +3259,24 @@ app.get("/getTallyStockHealthReport", async (req, res) => {
         }
       );
 
+console.timeEnd("STOCK_HEALTH_REPORT_RPC");
 
-    if (error) {
-      console.error(
-        "GET TALLY STOCK HEALTH REPORT ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        error: error.message
-      });
+   if (error) {
+  console.error(
+    "GET TALLY STOCK HEALTH REPORT ERROR:",
+    {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint
     }
+  );
+
+  return res.status(500).json({
+    success: false,
+    error: error.message
+  });
+}
 
 
     return res.json({
