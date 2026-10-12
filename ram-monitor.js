@@ -66,6 +66,7 @@ function log(message) {
   }
 }
 
+
 function readServerRss() {
   try {
     const procEntries = fs.readdirSync('/proc', {
@@ -83,24 +84,28 @@ function readServerRss() {
       const pid = Number(entry.name);
 
       try {
-        const cmdline = fs.readFileSync(
-  `/proc/${pid}/cmdline`,
-  'utf8'
-)
-  .split('\0')
-  .filter(Boolean)
-  .flatMap(arg => arg.split(/\s+/));
+        const rawCmdline = fs.readFileSync(
+          `/proc/${pid}/cmdline`,
+          'utf8'
+        );
 
+        const cmdline = rawCmdline
+          .split('\0')
+          .filter(Boolean);
+
+        // Match the actual server.js script path.
         const isServerProcess = cmdline.some(arg => {
-          if (path.basename(arg) !== CONFIG.SERVER_SCRIPT_NAME) {
-            return false;
-          }
+          const normalizedArg = arg.trim();
 
-          return path.resolve(arg) === CONFIG.SERVER_SCRIPT_PATH;
+          return (
+            normalizedArg === CONFIG.SERVER_SCRIPT_PATH ||
+            normalizedArg === '/root/webthaali-api/server.js' ||
+            normalizedArg.endsWith('/server.js')
+          );
         });
 
-        const isMonitorProcess = cmdline.some(
-          arg => path.basename(arg) === 'ram-monitor.js'
+        const isMonitorProcess = cmdline.some(arg =>
+          arg.includes('ram-monitor.js')
         );
 
         if (!isServerProcess || isMonitorProcess) {
@@ -127,12 +132,19 @@ function readServerRss() {
       }
     }
 
-    return { pid: matchedPid, rssBytes: highestRss };
+    return {
+      pid: matchedPid,
+      rssBytes: highestRss,
+    };
   } catch (error) {
     log(`Process inspection error: ${error.message}`);
-    return { pid: null, rssBytes: 0 };
+    return {
+      pid: null,
+      rssBytes: 0,
+    };
   }
 }
+
 
 function sendEmail(subject, message) {
   const apiKey = process.env.BREVO_API_KEY;
