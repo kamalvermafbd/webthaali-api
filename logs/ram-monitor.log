@@ -1,0 +1,4 @@
+[2026-10-12T14:07:59.026Z] RAM monitor started.
+[2026-10-12T14:07:59.081Z] Process inspection error: ENOENT: no such file or directory, scandir 'C:\proc'
+[2026-10-12T14:07:59.083Z] RAM: used=6.52 GiB, available=0.72 GiB, server.js PID=not found, RSS=0 MiB
+[2026-10-12T14:08:30.892Z] RAM monitor stopping.

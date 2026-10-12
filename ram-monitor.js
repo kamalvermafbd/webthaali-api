@@ -84,9 +84,12 @@ function readServerRss() {
 
       try {
         const cmdline = fs.readFileSync(
-          `/proc/${pid}/cmdline`,
-          'utf8'
-        ).split('\0').filter(Boolean);
+  `/proc/${pid}/cmdline`,
+  'utf8'
+)
+  .split('\0')
+  .filter(Boolean)
+  .flatMap(arg => arg.split(/\s+/));
 
         const isServerProcess = cmdline.some(arg => {
           if (path.basename(arg) !== CONFIG.SERVER_SCRIPT_NAME) {
