@@ -1,5 +1,6 @@
 
 'use strict';
+
 require('dotenv').config();
 
 const os = require('os');
@@ -16,19 +17,27 @@ const CONFIG = {
 
   // Minimum duration before alert
   WARNING_DURATION_MS: 5 * 60 * 1000,
+  
+
   CRITICAL_DURATION_MS: 2 * 60 * 1000,
 
   // Alert if server.js RSS exceeds this limit
-  SERVER_RSS_LIMIT_GIB: 1.2,
-  SERVER_RSS_DURATION_MS: 5 * 60 * 1000,
+  //SERVER_RSS_LIMIT_GIB: 1.2,
+  SERVER_RSS_LIMIT_GIB: 600 / 1024,
+
+//  SERVER_RSS_DURATION_MS: 5 * 60 * 1000,
+SERVER_RSS_DURATION_MS: 1 * 60 * 1000,
 
   // Same alert cooldown
   ALERT_COOLDOWN_MS: 60 * 60 * 1000,
 
-  // Identify the main API process by its script name
+  // Identify the main API process
   SERVER_ID: process.env.RAM_MONITOR_SERVER_ID || os.hostname(),
   SERVER_SCRIPT_NAME: 'server.js',
-  SERVER_SCRIPT_PATH: process.env.RAM_MONITOR_SERVER_PATH || '',
+  SERVER_SCRIPT_PATH: path.resolve(
+    __dirname,
+    process.env.RAM_MONITOR_SERVER_PATH || 'server.js'
+  ),
 
   LOG_FILE: path.join(__dirname, 'logs', 'ram-monitor.log'),
 };
@@ -58,7 +67,6 @@ function log(message) {
 }
 
 function readServerRss() {
-  // Linux process inspection through /proc
   try {
     const procEntries = fs.readdirSync('/proc', {
       withFileTypes: true,
@@ -80,19 +88,12 @@ function readServerRss() {
           'utf8'
         ).split('\0').filter(Boolean);
 
-        // Match the actual server.js script argument,
-        // not a path mentioned in another command's arguments.
-               const isServerProcess = cmdline.some(arg => {
+        const isServerProcess = cmdline.some(arg => {
           if (path.basename(arg) !== CONFIG.SERVER_SCRIPT_NAME) {
             return false;
           }
 
-          if (!CONFIG.SERVER_SCRIPT_PATH) {
-            return true;
-          }
-
-          return path.resolve(arg) ===
-            path.resolve(CONFIG.SERVER_SCRIPT_PATH);
+          return path.resolve(arg) === CONFIG.SERVER_SCRIPT_PATH;
         });
 
         const isMonitorProcess = cmdline.some(
@@ -131,33 +132,42 @@ function readServerRss() {
 }
 
 function sendEmail(subject, message) {
-  const apiKey = process.env.RESEND_API_KEY;
+  const apiKey = process.env.BREVO_API_KEY;
   const from = process.env.RAM_ALERT_FROM;
   const to = process.env.RAM_ALERT_TO;
 
   if (!apiKey || !from || !to) {
     log(
       `EMAIL NOT CONFIGURED: ${subject}. ` +
-      'Set RESEND_API_KEY, RAM_ALERT_FROM and RAM_ALERT_TO.'
+      'Set BREVO_API_KEY, RAM_ALERT_FROM and RAM_ALERT_TO.'
     );
     return Promise.resolve(false);
   }
 
+  const recipients = to
+    .split(',')
+    .map(email => email.trim())
+    .filter(Boolean)
+    .map(email => ({ email }));
+
   const body = JSON.stringify({
-    from,
-    to: to.split(',').map(email => email.trim()).filter(Boolean),
+    sender: {
+      name: 'Billey',
+      email: from,
+    },
+    to: recipients,
     subject,
-    text: message,
+    textContent: message,
   });
 
   return new Promise(resolve => {
     const request = https.request(
       {
-        hostname: 'api.resend.com',
-        path: '/emails',
+        hostname: 'api.brevo.com',
+        path: '/v3/smtp/email',
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          'api-key': apiKey,
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(body),
         },
@@ -175,11 +185,11 @@ function sendEmail(subject, message) {
             response.statusCode >= 200 &&
             response.statusCode < 300
           ) {
-            log(`EMAIL SENT: ${subject}`);
+            log(`EMAIL SENT VIA BREVO: ${subject}`);
             resolve(true);
           } else {
             log(
-              `EMAIL FAILED (${response.statusCode}): ` +
+              `BREVO EMAIL FAILED (${response.statusCode}): ` +
               responseBody.slice(0, 500)
             );
             resolve(false);
@@ -189,11 +199,11 @@ function sendEmail(subject, message) {
     );
 
     request.on('timeout', () => {
-      request.destroy(new Error('Email request timed out'));
+      request.destroy(new Error('Brevo email request timed out'));
     });
 
     request.on('error', error => {
-      log(`EMAIL ERROR: ${error.message}`);
+      log(`BREVO EMAIL ERROR: ${error.message}`);
       resolve(false);
     });
 
@@ -219,7 +229,6 @@ async function alertOnce(key, subject, message) {
 
 async function checkMemory() {
   const now = Date.now();
-
   const totalBytes = os.totalmem();
 
   let availableBytes = os.freemem();
@@ -258,7 +267,6 @@ async function checkMemory() {
     `server.js PID: ${server.pid ?? 'not found'}\n` +
     `server.js RSS: ${(server.rssBytes / MIB).toFixed(0)} MiB\n`;
 
-  // Warning: available RAM below 1.5 GiB for 5 minutes.
   if (availableGiB < CONFIG.WARNING_AVAILABLE_GIB) {
     state.warningSince ??= now;
 
@@ -273,7 +281,6 @@ async function checkMemory() {
     state.warningSince = null;
   }
 
-  // Critical: available RAM below 1 GiB for 2 minutes.
   if (availableGiB < CONFIG.CRITICAL_AVAILABLE_GIB) {
     state.criticalSince ??= now;
 
@@ -288,7 +295,6 @@ async function checkMemory() {
     state.criticalSince = null;
   }
 
-  // Main API process RSS threshold.
   if (
     server.pid &&
     server.rssBytes > CONFIG.SERVER_RSS_LIMIT_GIB * GIB
