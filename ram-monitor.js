@@ -9,31 +9,25 @@ const path = require('path');
 const https = require('https');
 
 const CONFIG = {
+  // Check RAM every minute
   CHECK_INTERVAL_MS: 60 * 1000,
 
-  // Available RAM thresholds (GiB)
+  // Whole-server available RAM thresholds
   WARNING_AVAILABLE_GIB: 1.5,
   CRITICAL_AVAILABLE_GIB: 1.0,
 
-  // Minimum duration before alert
+  // Required duration before sending an alert
   WARNING_DURATION_MS: 5 * 60 * 1000,
-  
-
   CRITICAL_DURATION_MS: 2 * 60 * 1000,
 
-  // Alert if server.js RSS exceeds this limit
-  //SERVER_RSS_LIMIT_GIB: 1.2,
+  // Separate server.js process memory alert
   SERVER_RSS_LIMIT_GIB: 600 / 1024,
+  SERVER_RSS_DURATION_MS: 5 * 60 * 1000,
 
-//  SERVER_RSS_DURATION_MS: 5 * 60 * 1000,
-SERVER_RSS_DURATION_MS: 1 * 60 * 1000,
-
-  // Same alert cooldown
+  // Repeat the same alert only after 1 hour
   ALERT_COOLDOWN_MS: 60 * 60 * 1000,
 
-  // Identify the main API process
   SERVER_ID: process.env.RAM_MONITOR_SERVER_ID || os.hostname(),
-  SERVER_SCRIPT_NAME: 'server.js',
   SERVER_SCRIPT_PATH: path.resolve(
     __dirname,
     process.env.RAM_MONITOR_SERVER_PATH || 'server.js'
@@ -66,7 +60,6 @@ function log(message) {
   }
 }
 
-
 function readServerRss() {
   try {
     const procEntries = fs.readdirSync('/proc', {
@@ -89,11 +82,8 @@ function readServerRss() {
           'utf8'
         );
 
-        const cmdline = rawCmdline
-          .split('\0')
-          .filter(Boolean);
+        const cmdline = rawCmdline.split('\0').filter(Boolean);
 
-        // Match the actual server.js script path.
         const isServerProcess = cmdline.some(arg => {
           const normalizedArg = arg.trim();
 
@@ -128,7 +118,7 @@ function readServerRss() {
           }
         }
       } catch {
-        // Process may exit while being inspected.
+        // The process may exit while being inspected.
       }
     }
 
@@ -145,7 +135,6 @@ function readServerRss() {
   }
 }
 
-
 function sendEmail(subject, message) {
   const apiKey = process.env.BREVO_API_KEY;
   const from = process.env.RAM_ALERT_FROM;
@@ -154,7 +143,7 @@ function sendEmail(subject, message) {
   if (!apiKey || !from || !to) {
     log(
       `EMAIL NOT CONFIGURED: ${subject}. ` +
-      'Set BREVO_API_KEY, RAM_ALERT_FROM and RAM_ALERT_TO.'
+      'Check BREVO_API_KEY, RAM_ALERT_FROM and RAM_ALERT_TO in .env.'
     );
     return Promise.resolve(false);
   }
@@ -164,6 +153,11 @@ function sendEmail(subject, message) {
     .map(email => email.trim())
     .filter(Boolean)
     .map(email => ({ email }));
+
+  if (recipients.length === 0) {
+    log(`EMAIL NOT SENT: No valid recipient configured for ${subject}`);
+    return Promise.resolve(false);
+  }
 
   const body = JSON.stringify({
     sender: {
@@ -176,6 +170,14 @@ function sendEmail(subject, message) {
   });
 
   return new Promise(resolve => {
+    let settled = false;
+
+    const finish = result => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
     const request = https.request(
       {
         hostname: 'api.brevo.com',
@@ -201,13 +203,13 @@ function sendEmail(subject, message) {
             response.statusCode < 300
           ) {
             log(`EMAIL SENT VIA BREVO: ${subject}`);
-            resolve(true);
+            finish(true);
           } else {
             log(
               `BREVO EMAIL FAILED (${response.statusCode}): ` +
               responseBody.slice(0, 500)
             );
-            resolve(false);
+            finish(false);
           }
         });
       }
@@ -219,7 +221,7 @@ function sendEmail(subject, message) {
 
     request.on('error', error => {
       log(`BREVO EMAIL ERROR: ${error.message}`);
-      resolve(false);
+      finish(false);
     });
 
     request.write(body);
@@ -277,11 +279,12 @@ async function checkMemory() {
     `Hostname: ${os.hostname()}\n` +
     `Time: ${new Date().toISOString()}\n` +
     `Total RAM: ${(totalBytes / GIB).toFixed(2)} GiB\n` +
-    `Used RAM (estimated): ${usedGiB.toFixed(2)} GiB\n` +
+    `Used RAM: ${usedGiB.toFixed(2)} GiB\n` +
     `Available RAM: ${availableGiB.toFixed(2)} GiB\n` +
     `server.js PID: ${server.pid ?? 'not found'}\n` +
     `server.js RSS: ${(server.rssBytes / MIB).toFixed(0)} MiB\n`;
 
+  // Whole-server RAM warning
   if (availableGiB < CONFIG.WARNING_AVAILABLE_GIB) {
     state.warningSince ??= now;
 
@@ -296,6 +299,7 @@ async function checkMemory() {
     state.warningSince = null;
   }
 
+  // Whole-server critical RAM alert
   if (availableGiB < CONFIG.CRITICAL_AVAILABLE_GIB) {
     state.criticalSince ??= now;
 
@@ -310,6 +314,7 @@ async function checkMemory() {
     state.criticalSince = null;
   }
 
+  // Separate server.js process RSS alert
   if (
     server.pid &&
     server.rssBytes > CONFIG.SERVER_RSS_LIMIT_GIB * GIB
