@@ -2134,6 +2134,8 @@ stockVoucherRows.push(
     })
 );
 
+/* commented 121026
+
 billAllocationRows.push(
     ...buildBillAllocationRows({
         voucher,
@@ -2156,7 +2158,25 @@ for (
         );
     }
 }
+*/
+ //optimization start 121026
+const currentBillAllocationRows =
+    buildBillAllocationRows({
+        voucher,
+        company_code,
+        tally_owner,
+        country,
+        ledgerMap
+    });
 
+billAllocationRows.push(...currentBillAllocationRows);
+
+if (currentBillAllocationRows.length > 0) {
+    billAllocationVoucherGuids.add(header.guid.trim());
+}
+// optimization end
+
+/* commented 121026
 costCentreRows.push(
     ...buildCostCentreRows({
         voucher,
@@ -2177,6 +2197,22 @@ for (
         );
     }
 }
+*/
+
+//optimization stat 121026
+const currentCostCentreRows =
+    buildCostCentreRows({
+        voucher,
+        company_code,
+        tally_owner
+    });
+
+costCentreRows.push(...currentCostCentreRows);
+
+if (currentCostCentreRows.length > 0) {
+    costCentreAllocationVoucherGuids.add(header.guid.trim());
+}
+// optimiation end
 
 const currentVoucherRow =
     voucherRows[voucherRows.length - 1];
