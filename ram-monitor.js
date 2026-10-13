@@ -13,7 +13,7 @@ const CONFIG = {
   CHECK_INTERVAL_MS: 60 * 1000,
 
   // Whole-server available RAM thresholds
-  WARNING_AVAILABLE_GIB: 2.9,
+  WARNING_AVAILABLE_GIB: 3.5,
   CRITICAL_AVAILABLE_GIB: 1.0,
 
   // Required duration before sending an alert
