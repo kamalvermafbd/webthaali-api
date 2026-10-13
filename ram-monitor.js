@@ -12,13 +12,13 @@ const CONFIG = {
   // Check RAM every minute
   CHECK_INTERVAL_MS: 60 * 1000,
 
-  // Whole-server available RAM thresholds
-  WARNING_AVAILABLE_GIB: 3.5,
-  CRITICAL_AVAILABLE_GIB: 1.0,
+ // Whole-server available RAM thresholds
+WARNING_AVAILABLE_GIB: 1.5,
+CRITICAL_AVAILABLE_GIB: 1.0,
 
-  // Required duration before sending an alert
-  WARNING_DURATION_MS: 0,
-  CRITICAL_DURATION_MS: 2 * 60 * 1000,
+// Required duration before sending an alert
+WARNING_DURATION_MS: 5 * 60 * 1000,
+CRITICAL_DURATION_MS: 2 * 60 * 1000,
 
   // Separate server.js process memory alert
   SERVER_RSS_LIMIT_GIB: 600 / 1024,

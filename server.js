@@ -1,6 +1,8 @@
 require("dotenv").config();
 
 const express = require("express");
+
+
 const { google } = require("googleapis");
 
 const http = require("http");
@@ -23,6 +25,27 @@ if (!fs.existsSync(LOG_DIR)) {
   });
 
 }
+
+
+function logServerMemory(label = 'MEMORY CHECK') {
+  const m = process.memoryUsage();
+
+  const toMiB = bytes => (bytes / 1024 / 1024).toFixed(1);
+
+  const line =
+    `[${new Date().toISOString()}] ${label} | ` +
+    `RSS=${toMiB(m.rss)} MiB | ` +
+    `HeapUsed=${toMiB(m.heapUsed)} MiB | ` +
+    `HeapTotal=${toMiB(m.heapTotal)} MiB | ` +
+    `External=${toMiB(m.external)} MiB`;
+
+  console.log(line);
+}
+
+setInterval(() => {
+  logServerMemory('PERIODIC MEMORY');
+}, 5 * 60 * 1000).unref();
+
 
 function masterFlowDebug(data){
 
