@@ -1,0 +1,45998 @@
+require("dotenv").config();
+
+const express = require("express");
+
+
+const { google } = require("googleapis");
+
+const http = require("http");
+
+
+const cors = require("cors");
+const crypto = require("crypto");
+const bcrypt = require("bcrypt");
+
+const fs = require("fs");
+const path = require("path");
+
+const LOG_DIR =
+  path.join(__dirname, "logs");
+
+if (!fs.existsSync(LOG_DIR)) {
+
+  fs.mkdirSync(LOG_DIR, {
+    recursive: true
+  });
+
+}
+
+
+function logServerMemory(label = 'MEMORY CHECK') {
+  const m = process.memoryUsage();
+
+  const toMiB = bytes => (bytes / 1024 / 1024).toFixed(1);
+
+  const line =
+    `[${new Date().toISOString()}] ${label} | ` +
+    `RSS=${toMiB(m.rss)} MiB | ` +
+    `HeapUsed=${toMiB(m.heapUsed)} MiB | ` +
+    `HeapTotal=${toMiB(m.heapTotal)} MiB | ` +
+    `External=${toMiB(m.external)} MiB`;
+
+  console.log(line);
+}
+
+setInterval(() => {
+  logServerMemory('PERIODIC MEMORY');
+}, 5 * 60 * 1000).unref();
+
+
+function masterFlowDebug(data){
+
+    fs.appendFileSync(
+        "./logs/master-flow-debug.jsonl",
+        JSON.stringify({
+
+            time:
+            new Date().toISOString(),
+
+            ...data
+
+        }) + "\n"
+    );
+
+}
+
+function syncDebug(data){
+
+    fs.appendFileSync(
+        "./logs/master-flow-debug.jsonl",
+        JSON.stringify({
+            time:new Date().toISOString(),
+            ...data
+        }) + "\n"
+    );
+
+}
+
+
+const nodemailer =
+  require("nodemailer");
+
+const rateLimit =
+  require("express-rate-limit");
+
+const { Resend } = require("resend");
+
+const {
+    getSyncMasterData,
+    getTrialBalance,
+    getStockGodownBalance
+} = require("./services/syncService");
+const {
+
+  sendToTally,
+  createUnit,
+  createStockItem,
+  createSalesLedger,
+  createLedger,
+  createTaxLedger,
+  createSale,
+
+  getTallyCompanies,
+
+  selectCompany,
+
+  getAllLedgers,
+
+  createDebtorLedger,
+
+  getStockItems,
+
+  getUnits,
+
+} = require("./services/tallyService");
+
+
+
+const resend = new Resend(
+  process.env.RESEND_API_KEY
+); 
+
+const {
+  createClient
+} = require("@supabase/supabase-js");
+
+const app = express();
+
+const { sendToConnector } =
+  require("./socketio/sendToConnector");
+
+const registry =
+  require("./socketio/connectorRegistry");
+
+const {
+    pairConnector,
+    pairConnectorForBatch
+} = require("./services/PairConnectorService");
+const {
+
+    ENTITY_METADATA,
+
+    SYNC_MODE,
+
+    ENTITY_TYPE,
+    
+    VOUCHER_SYNC_PERIOD
+
+} = require("./sync-engine/constants");
+
+const server = http.createServer(app);
+
+const SyncController =
+    require("./sync-controller/SyncController");
+
+const { initializeSocket } = require("./socketio/socketserver");
+
+const io = initializeSocket(server);
+
+const { saveGroups } = require("./services/saveGroups");
+const { saveLedgers } = require("./services/saveLedgers");
+const { saveUnits } = require("./services/saveUnits");
+const { saveGodowns } = require("./services/saveGodowns");
+const { saveCostCentres } = require("./services/saveCostCentres");
+const { saveStockGroups } = require("./services/saveStockGroups");
+const { saveStocks } = require("./services/saveStocks");
+const {
+    runChildVoucherReconciliation
+} = require("./sync-engine/ChildVoucherReconciliationService")
+
+
+
+/*
+const {
+    saveSyncSnapshotChunk
+} = require("./services/sync/SyncSnapshotService");
+*/
+
+const {
+    saveSyncSnapshotChunk,
+    removeMissingSnapshotGuids
+} = require("./services/sync/SyncSnapshotService");
+
+const {
+    addBatchToQueue
+} = require("./workers/secondAddBatchToQueue");
+
+const {
+    resolveWorkerForBatch
+} = require("./workers/secondResolveWorkerForBatch");
+
+const {
+    dispatchBatch
+} = require("./workers/secondQueueExistingBatch");
+/*
+const {
+  reconcileMasters
+} = require("./services/masters/MasterReconciliationService");
+*/
+
+const ReconciliationManager =
+    require("./sync-engine/ReconciliationManager");
+
+const CleanupManager =
+require("./sync-engine/CleanupManager");
+
+const {
+    LocalCacheSyncService,
+    TABLES: LOCAL_CACHE_TABLES,
+    TABLE_LIST: LOCAL_CACHE_TABLE_LIST
+} = require("./services/LocalCacheSyncService");
+
+
+/*
+const {
+  applyMasterActions
+} = require("./services/masters/MasterActionService");
+*/
+
+/*
+const {
+    getResumePoint
+} = require("./services/sync/SyncResumeService");
+
+const {
+    cleanupDeletedMasters
+} = require("./services/masters/MasterCleanupService");
+*/
+/*
+const {
+  validateMasters
+} = require("./services/masters/MasterValidationService");
+*/
+/*
+const {
+    updateMasterStatus
+} = require("./services/masters/MasterStatusService");
+*/
+
+const {
+    saveVouchers,
+    saveVoucherGuids
+} = require("./services/saveVouchers");
+
+const {
+    sendChunkedToConnector
+} = require("./utils/sendChunkedToConnector");
+
+const {
+  sendGmailEmail
+} = require("./utils/gmailSender");
+
+const BatchStatusManager =
+    require("./sync-engine/BatchStatusManager");
+
+const {
+    startConnectorWatchdog
+} = require("./workers/connectorWatchdog");
+
+const { startSync } = require("./workers/secondSyncStartService");
+
+const {
+    updateSyncProgress
+} = require("./utils/syncProgress");
+
+const { registerEvents } = require("./socketio/secondConnectorEvents");
+const BatchManager = require("./sync-engine/BatchManager");
+console.log("BatchManager =", typeof BatchManager);
+
+registerEvents(io);
+
+
+
+app.set("trust proxy", 1);
+
+app.use(cors());
+
+app.use(
+
+  express.json({
+
+    limit: "10mb"
+
+  })
+
+);
+
+const loginLimiter =
+  rateLimit({
+
+    windowMs:
+      15 * 60 * 1000,
+
+    max: 100,
+
+    standardHeaders: true,
+
+    legacyHeaders: false,
+
+    message: {
+
+      success: false,
+
+      error:
+        "Too many login attempts. Try again later."
+
+    }
+
+  });
+
+const forgotPasswordLimiter =
+  rateLimit({
+
+    windowMs:
+      15 * 60 * 1000,
+
+    max: 100,
+
+    standardHeaders: true,
+
+    legacyHeaders: false,
+
+    message: {
+
+      success: false,
+
+      error:
+        "Too many password reset attempts."
+
+    }
+
+  });
+
+app.use(
+
+  express.urlencoded({
+
+    extended: true,
+
+    limit: "10mb"
+
+  })
+
+);
+
+
+const SYSTEM_DOWN = false;
+
+app.use((req, res, next) => {
+
+  if (SYSTEM_DOWN) {
+
+    return res.status(503).json({
+
+      success: false,
+
+      error:
+        "System Under Maintenance"
+
+    });
+
+  }
+
+  next();
+
+});
+
+const supabase =
+  createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_KEY
+  );
+
+  startConnectorWatchdog({
+    supabase,
+    registry
+});
+
+const localCacheSyncService =
+    new LocalCacheSyncService(supabase);
+  // ==========================================
+// GOOGLE GMAIL OAUTH
+// ==========================================
+
+const googleOAuth2Client =
+  new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI
+  );
+
+const GMAIL_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.send",
+  "openid",
+  "email",
+  "profile"
+];
+
+const createGmailOAuthState = (company_code) => {
+
+  const payload = JSON.stringify({
+    company_code,
+    timestamp: Date.now()
+  });
+
+  const encodedPayload =
+    Buffer.from(payload).toString("base64url");
+
+  const signature =
+    crypto
+      .createHmac(
+        "sha256",
+        process.env.GOOGLE_CLIENT_SECRET
+      )
+      .update(encodedPayload)
+      .digest("base64url");
+
+  return `${encodedPayload}.${signature}`;
+};
+
+const verifyGmailOAuthState = (state) => {
+
+  try {
+
+    const [encodedPayload, signature] =
+      String(state || "").split(".");
+
+    if (!encodedPayload || !signature) {
+      return null;
+    }
+
+    const expectedSignature =
+      crypto
+        .createHmac(
+          "sha256",
+          process.env.GOOGLE_CLIENT_SECRET
+        )
+        .update(encodedPayload)
+        .digest("base64url");
+
+    if (
+      !crypto.timingSafeEqual(
+        Buffer.from(signature),
+        Buffer.from(expectedSignature)
+      )
+    ) {
+      return null;
+    }
+
+    const payload =
+      JSON.parse(
+        Buffer.from(
+          encodedPayload,
+          "base64url"
+        ).toString("utf8")
+      );
+
+    // State expires after 10 minutes
+    if (
+      !payload.timestamp ||
+      Date.now() - payload.timestamp > 10 * 60 * 1000
+    ) {
+      return null;
+    }
+
+    return payload;
+
+  } catch (err) {
+
+    console.error(
+      "GMAIL OAUTH STATE VERIFY ERROR:",
+      err
+    );
+
+    return null;
+  }
+};
+
+const transporter =
+  nodemailer.createTransport({
+
+    service: "gmail",
+
+    auth: {
+
+      user:
+        process.env.EMAIL_USER,
+
+      pass:
+        process.env.EMAIL_PASS
+
+    }
+
+});
+
+console.log(
+  "EMAIL USER:",
+  process.env.EMAIL_USER
+);
+
+// ============================================================
+// DEBTOR EMAIL SUMMARY API
+// ============================================================
+app.get("/getDebtorEmailSummary", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const opening_date =
+      String(req.query.opening_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!opening_date) {
+      return res.json({
+        success: false,
+        error: "opening_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_debtor_email_summary",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_opening_date: opening_date,
+        p_as_of_date: as_of_date
+      }
+    );
+
+    if (error) {
+      console.error(
+        "DEBTOR EMAIL SUMMARY RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    // -----------------------------
+// GET COMPANY NAME
+// -----------------------------
+
+const { data: company, error: companyError } =
+  await supabase
+    .from("company")
+    .select("businessname")
+    .eq("company_code", company_code)
+    .maybeSingle();
+
+if (companyError) {
+  console.error(
+    "COMPANY NAME FETCH ERROR:",
+    companyError
+  );
+}
+
+    // -----------------------------
+    // FIND REQUESTED LEDGER
+    // -----------------------------
+
+    const debtor = (data || []).find(
+      row => row.ledger_guid === ledger_guid
+    );
+
+   return res.json({
+  success: true,
+  data: debtor
+    ? {
+        ...debtor,
+        company_name:
+          company?.businessname ||
+          company_code
+      }
+    : null
+});
+
+  } catch (err) {
+
+    console.error(
+      "DEBTOR EMAIL SUMMARY API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+
+
+// =========================================================
+// FUND FLOW AUTO EMAIL SETTINGS - GET
+// =========================================================
+
+app.get("/getFundFlowAutoEmailSettings", async (req, res) => {
+  try {
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("fund_flow_auto_email_settings")
+      .select(`
+        id,
+        company_code,
+        tally_owner,
+        ledger_guid,
+        auto_email_enabled,
+        before_due_enabled,
+        before_due_days,
+        on_due_date_enabled,
+        email_time,
+        created_at,
+        updated_at
+      `)
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .eq("ledger_guid", ledger_guid)
+      .maybeSingle();
+
+    if (error) {
+      console.error(
+        "FUND FLOW AUTO EMAIL SETTINGS FETCH ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    if (!data) {
+  const { data: defaultData, error: defaultError } = await supabase
+    .from("fund_flow_auto_email_defaults")
+    .select(`
+      id,
+      company_code,
+      tally_owner,
+      auto_email_enabled,
+      before_due_enabled,
+      before_due_days,
+      on_due_date_enabled,
+      email_time,
+      created_at,
+      updated_at
+    `)
+    .eq("company_code", company_code)
+    .eq("tally_owner", tally_owner)
+    .maybeSingle();
+
+  if (defaultError) {
+    return res.status(500).json({
+      success: false,
+      error: defaultError.message
+    });
+  }
+
+  return res.json({
+    success: true,
+    data: defaultData
+      ? { ...defaultData, ledger_guid, is_default: true }
+      : null
+  });
+}
+
+    // No row = settings have never been configured.
+    // Frontend should show all switches OFF.
+    return res.json({
+  success: true,
+  data: {
+    ...data,
+    is_default: false
+  }
+});
+
+  } catch (err) {
+    console.error(
+      "FUND FLOW AUTO EMAIL SETTINGS GET API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// =========================================================
+// FUND FLOW AUTO EMAIL SETTINGS - SAVE
+// =========================================================
+
+app.post("/saveFundFlowAutoEmailSettings", async (req, res) => {
+  try {
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    const tally_owner =
+      String(req.body.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const ledger_guid =
+      String(req.body.ledger_guid || "").trim();
+
+    const auto_email_enabled =
+      Boolean(req.body.auto_email_enabled);
+
+    const before_due_enabled =
+      Boolean(req.body.before_due_enabled);
+
+    const on_due_date_enabled =
+      Boolean(req.body.on_due_date_enabled);
+
+    const before_due_days =
+      Number(req.body.before_due_days ?? 3);
+
+    const email_time =
+      String(req.body.email_time || "09:00:00").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    if (
+      !Number.isInteger(before_due_days) ||
+      before_due_days < 1 ||
+      before_due_days > 30
+    ) {
+      return res.json({
+        success: false,
+        error: "before_due_days must be between 1 and 30"
+      });
+    }
+
+    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(email_time)) {
+      return res.json({
+        success: false,
+        error: "Invalid email_time"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("fund_flow_auto_email_settings")
+      .upsert(
+        {
+          company_code,
+          tally_owner,
+          ledger_guid,
+
+          auto_email_enabled,
+          before_due_enabled,
+          before_due_days,
+          on_due_date_enabled,
+          email_time,
+
+          updated_at: new Date().toISOString()
+        },
+        {
+          onConflict:
+            "company_code,tally_owner,ledger_guid"
+        }
+      )
+      .select(`
+        id,
+        company_code,
+        tally_owner,
+        ledger_guid,
+        auto_email_enabled,
+        before_due_enabled,
+        before_due_days,
+        on_due_date_enabled,
+        email_time,
+        created_at,
+        updated_at
+      `)
+      .single();
+
+    if (error) {
+      console.error(
+        "FUND FLOW AUTO EMAIL SETTINGS SAVE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Auto email settings saved successfully",
+      data
+    });
+
+  } catch (err) {
+    console.error(
+      "FUND FLOW AUTO EMAIL SETTINGS SAVE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// =====================================================
+// GET RECENT FUND FLOW AUTO EMAIL LOG
+// =====================================================
+app.get("/getRecentFundFlowAutoEmailLog", async (req, res) => {
+  try {
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    if (!company_code || !tally_owner || !ledger_guid) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "company_code, tally_owner and ledger_guid are required"
+      });
+    }
+
+    const recentSince = new Date(
+      Date.now() - 48 * 60 * 60 * 1000
+    ).toISOString();
+
+    // DEBUG: exact values frontend is sending
+    console.log(
+      "RECENT AUTO EMAIL CHECK:",
+      {
+        company_code,
+        tally_owner,
+        ledger_guid,
+        recentSince
+      }
+    );
+
+    const { data, error } = await supabase
+      .from("fund_flow_auto_email_log")
+      .select(`
+        id,
+        company_code,
+        tally_owner,
+        ledger_guid,
+        bill_name,
+        due_date,
+        email_type,
+        recipient_email,
+        status,
+        sent_at
+      `)
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .eq("ledger_guid", ledger_guid)
+      .eq("status", "SENT")
+      .not("sent_at", "is", null)
+      .gte("sent_at", recentSince)
+      .order("sent_at", {
+        ascending: false
+      })
+      .limit(1);
+
+    // DEBUG: exact DB result
+    console.log(
+      "RECENT AUTO EMAIL DB RESULT:",
+      data
+    );
+
+    if (error) {
+      console.error(
+        "GET RECENT FUND FLOW AUTO EMAIL LOG ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    const recentEmail =
+      Array.isArray(data) && data.length > 0
+        ? data[0]
+        : null;
+
+    return res.json({
+      success: true,
+      has_recent_auto_email: Boolean(recentEmail),
+      data: recentEmail
+    });
+
+  } catch (err) {
+    console.error(
+      "GET RECENT FUND FLOW AUTO EMAIL LOG EXCEPTION:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error:
+        err?.message ||
+        "Internal server error"
+    });
+  }
+});
+// ==========================================================
+// GET FUND FLOW AUTO EMAIL DEFAULT SETTINGS
+// ==========================================================
+
+app.get("/getFundFlowAutoEmailDefaults", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim();
+
+    if (!company_code || !tally_owner) {
+      return res.status(400).json({
+        success: false,
+        error: "company_code and tally_owner are required"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("fund_flow_auto_email_defaults")
+      .select(`
+        id,
+        company_code,
+        tally_owner,
+        auto_email_enabled,
+        before_due_enabled,
+        before_due_days,
+        on_due_date_enabled,
+        email_time,
+        created_at,
+        updated_at
+      `)
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .maybeSingle();
+
+    if (error) {
+      console.error(
+        "GET FUND FLOW AUTO EMAIL DEFAULTS ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || null
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GET FUND FLOW AUTO EMAIL DEFAULTS EXCEPTION:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Internal server error"
+    });
+
+  }
+
+});
+
+// =========================================================
+// FUND FLOW AUTO EMAIL DEFAULT SETTINGS - SAVE
+// =========================================================
+
+app.post("/saveFundFlowAutoEmailDefaults", async (req, res) => {
+  try {
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    const tally_owner =
+      String(req.body.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const auto_email_enabled =
+      Boolean(req.body.auto_email_enabled);
+
+    const before_due_enabled =
+      Boolean(req.body.before_due_enabled);
+
+    const on_due_date_enabled =
+      Boolean(req.body.on_due_date_enabled);
+
+    const before_due_days =
+      Number(req.body.before_due_days ?? 3);
+
+    const email_time =
+      String(req.body.email_time || "09:00:00").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (
+      !Number.isInteger(before_due_days) ||
+      before_due_days < 1 ||
+      before_due_days > 30
+    ) {
+      return res.json({
+        success: false,
+        error: "before_due_days must be between 1 and 30"
+      });
+    }
+
+    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(email_time)) {
+      return res.json({
+        success: false,
+        error: "Invalid email_time"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("fund_flow_auto_email_defaults")
+      .upsert(
+        {
+          company_code,
+          tally_owner,
+
+          auto_email_enabled,
+          before_due_enabled,
+          before_due_days,
+          on_due_date_enabled,
+          email_time,
+
+          updated_at: new Date().toISOString()
+        },
+        {
+          onConflict: "company_code,tally_owner"
+        }
+      )
+      .select(`
+        id,
+        company_code,
+        tally_owner,
+        auto_email_enabled,
+        before_due_enabled,
+        before_due_days,
+        on_due_date_enabled,
+        email_time,
+        created_at,
+        updated_at
+      `)
+      .single();
+
+    if (error) {
+      console.error(
+        "FUND FLOW AUTO EMAIL DEFAULT SETTINGS SAVE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Auto email default settings saved successfully",
+      data
+    });
+
+  } catch (err) {
+    console.error(
+      "FUND FLOW AUTO EMAIL DEFAULT SETTINGS SAVE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ==========================================================
+// GET DEBTOR AGEING
+// ==========================================================
+
+app.get("/getDebtorAgeing", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const opening_date =
+      String(req.query.opening_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!opening_date) {
+      return res.json({
+        success: false,
+        error: "opening_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_debtor_ageing",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_opening_date: opening_date,
+          p_as_of_date: as_of_date
+        }
+      );
+
+    if (error) {
+      console.error(
+        "GET DEBTOR AGEING ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    const ageingRows =
+      (data || []).filter(
+        row =>
+          row.ledger_guid === ledger_guid
+      );
+
+    return res.json({
+      success: true,
+      data: ageingRows
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GET DEBTOR AGEING API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ==========================================================
+// GET DEBTOR HEALTH
+// ==========================================================
+
+app.get("/getDebtorHealth", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const opening_date =
+      String(req.query.opening_date || "").trim();
+
+    const from_date =
+      String(req.query.from_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!opening_date) {
+      return res.json({
+        success: false,
+        error: "opening_date missing"
+      });
+    }
+
+    if (!from_date) {
+      return res.json({
+        success: false,
+        error: "from_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_debtor_health",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_opening_date: opening_date,
+          p_from_date: from_date,
+          p_as_of_date: as_of_date
+        }
+      );
+
+    if (error) {
+      console.error(
+        "GET DEBTOR HEALTH ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    const healthRows =
+      ledger_guid
+        ? (data || []).filter(
+            row =>
+              row.ledger_guid === ledger_guid
+          )
+        : (data || []);
+
+    return res.json({
+      success: true,
+      data: healthRows
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GET DEBTOR HEALTH API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ==========================================================
+// GET DEBTOR CUSTOMER BEHAVIOR
+// ==========================================================
+
+app.get("/getDebtorCustomerBehavior", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const opening_date =
+      String(req.query.opening_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!opening_date) {
+      return res.json({
+        success: false,
+        error: "opening_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_debtor_customer_behavior",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_opening_date: opening_date,
+          p_as_of_date: as_of_date
+        }
+      );
+
+    if (error) {
+      console.error(
+        "GET DEBTOR CUSTOMER BEHAVIOR ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    const behaviorRows =
+      ledger_guid
+        ? (data || []).filter(
+            row =>
+              row.ledger_guid === ledger_guid
+          )
+        : (data || []);
+
+    return res.json({
+      success: true,
+      data: behaviorRows
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GET DEBTOR CUSTOMER BEHAVIOR API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ==========================================================
+// GET DEBTOR TRENDS
+// ==========================================================
+app.get("/getDebtorTrends", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const opening_date =
+      String(req.query.opening_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!opening_date) {
+      return res.json({
+        success: false,
+        error: "opening_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_debtor_trends",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_opening_date: opening_date,
+          p_as_of_date: as_of_date,
+          p_ledger_guid: ledger_guid
+        }
+      );
+
+    if (error) {
+      console.error(
+        "GET DEBTOR TRENDS ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GET DEBTOR TRENDS API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+// ==========================================================
+// GET DEBTOR RISK
+// ==========================================================
+
+app.get("/getDebtorRisk", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const opening_date =
+      String(req.query.opening_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!opening_date) {
+      return res.json({
+        success: false,
+        error: "opening_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_debtor_risk",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_opening_date: opening_date,
+          p_as_of_date: as_of_date
+        }
+      );
+
+    if (error) {
+      console.error(
+        "GET DEBTOR RISK ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    const riskRows =
+      ledger_guid
+        ? (data || []).filter(
+            row =>
+              row.ledger_guid === ledger_guid
+          )
+        : (data || []);
+
+    return res.json({
+      success: true,
+      data: riskRows
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GET DEBTOR RISK API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+
+// ==========================================================
+// GET PARTY POSITION
+// ==========================================================
+
+app.get("/getPartyPosition", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const from_date =
+      String(req.query.from_date || "").trim();
+
+    const to_date =
+      String(req.query.to_date || "").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!from_date) {
+      return res.json({
+        success: false,
+        error: "from_date missing"
+      });
+    }
+
+    if (!to_date) {
+      return res.json({
+        success: false,
+        error: "to_date missing"
+      });
+    }
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_party_position",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_from_date: from_date,
+          p_to_date: to_date
+        }
+      );
+
+    if (error) {
+      console.error(
+        "GET PARTY POSITION ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+    console.error(
+      "GET PARTY POSITION API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ============================================================
+// SEND DEBTOR EMAIL API
+// ============================================================
+app.post("/sendDebtorEmail", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    const to =
+      String(req.body.to || "").trim();
+
+    const subject =
+      String(req.body.subject || "").trim();
+
+    const message =
+      String(req.body.message || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (!to) {
+      return res.json({
+        success: false,
+        error: "to missing"
+      });
+    }
+
+    if (!subject) {
+      return res.json({
+        success: false,
+        error: "subject missing"
+      });
+    }
+
+    if (!message) {
+      return res.json({
+        success: false,
+        error: "message missing"
+      });
+    }
+
+    // -----------------------------
+    // GET COMPANY GMAIL DETAILS
+    // -----------------------------
+
+    const { data: company, error: companyError } =
+      await supabase
+        .from("company")
+        .select("gmail_email, gmail_refresh_token")
+        .eq("company_code", company_code)
+        .maybeSingle();
+
+    if (companyError) {
+      console.error(
+        "SEND DEBTOR EMAIL COMPANY ERROR:",
+        companyError
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: companyError.message
+      });
+    }
+
+    if (!company) {
+      return res.json({
+        success: false,
+        error: "Company not found"
+      });
+    }
+
+    if (!company.gmail_refresh_token) {
+      return res.json({
+        success: false,
+        error: "Gmail is not connected for this company"
+      });
+    }
+
+    const result = await sendGmailEmail({
+      gmail_email: company.gmail_email,
+      gmail_refresh_token: company.gmail_refresh_token,
+      to,
+      subject,
+      message
+    });
+
+    console.log(
+      "DEBTOR EMAIL SENT:",
+      company_code,
+      to,
+      result.message_id
+    );
+
+    return res.json({
+      success: true,
+      message: "Email sent successfully",
+      message_id: result.message_id || null
+    });
+
+  } catch (err) {
+
+    console.error(
+      "SEND DEBTOR EMAIL API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ==========================================
+// GMAIL CONNECT
+// ==========================================
+
+app.get("/gmail/connect", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(
+        req.query.company_code || ""
+      ).trim();
+
+    if (!company_code) {
+
+      return res.status(400).json({
+        success: false,
+        error: "company_code missing"
+      });
+
+    }
+
+    // Verify company exists
+    const { data: company, error } =
+      await supabase
+        .from("company")
+        .select("company_code")
+        .eq("company_code", company_code)
+        .maybeSingle();
+
+    if (error) {
+
+      console.error(
+        "GMAIL CONNECT COMPANY LOOKUP ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+
+    }
+
+    if (!company) {
+
+      return res.status(404).json({
+        success: false,
+        error: "Company not found"
+      });
+
+    }
+
+    const state =
+      createGmailOAuthState(
+        company_code
+      );
+
+    const authUrl =
+      googleOAuth2Client.generateAuthUrl({
+        access_type: "offline",
+        prompt: "consent",
+        scope: GMAIL_SCOPES,
+        state
+      });
+
+    return res.redirect(authUrl);
+
+  } catch (err) {
+
+    console.error(
+      "GMAIL CONNECT ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+
+  }
+
+});
+
+// ==========================================
+// GMAIL OAUTH CALLBACK
+// ==========================================
+app.get("/gmail/callback", async (req, res) => {
+
+  try {
+
+    const code =
+      String(
+        req.query.code || ""
+      ).trim();
+
+    const state =
+      String(
+        req.query.state || ""
+      ).trim();
+
+    const oauthError =
+      String(
+        req.query.error || ""
+      ).trim();
+
+    // ==========================================
+    // GOOGLE OAUTH CANCELLED / FAILED
+    // ==========================================
+
+    if (oauthError) {
+
+      console.log(
+        "GMAIL OAUTH CANCELLED:",
+        oauthError
+      );
+
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/fund-flow?gmail=cancelled`
+      );
+
+    }
+
+    // ==========================================
+    // VALIDATE GOOGLE RESPONSE
+    // ==========================================
+
+    if (!code || !state) {
+
+      return res.status(400).send(
+        "Gmail authorization failed."
+      );
+
+    }
+
+    // ==========================================
+    // VERIFY OAUTH STATE
+    // ==========================================
+
+    const stateData =
+      verifyGmailOAuthState(state);
+
+    if (!stateData) {
+
+      return res.status(400).send(
+        "Invalid or expired Gmail authorization state."
+      );
+
+    }
+
+    const company_code =
+      String(
+        stateData.company_code || ""
+      ).trim();
+
+    if (!company_code) {
+
+      return res.status(400).send(
+        "Company code missing."
+      );
+
+    }
+
+    // ==========================================
+    // EXCHANGE GOOGLE AUTHORIZATION CODE
+    // ==========================================
+
+    const {
+      tokens
+    } =
+      await googleOAuth2Client.getToken(code);
+
+    if (!tokens || !tokens.access_token) {
+
+      throw new Error(
+        "Google did not return an access token."
+      );
+
+    }
+
+    googleOAuth2Client.setCredentials(
+      tokens
+    );
+
+    // ==========================================
+    // GET CONNECTED GMAIL ADDRESS
+    // ==========================================
+
+    const oauth2 =
+      google.oauth2({
+        auth: googleOAuth2Client,
+        version: "v2"
+      });
+
+    const { data: userInfo } =
+      await oauth2.userinfo.get();
+
+    const gmail_email =
+      String(
+        userInfo.email || ""
+      ).trim();
+
+    if (!gmail_email) {
+
+      throw new Error(
+        "Unable to determine Gmail address."
+      );
+
+    }
+
+    // ==========================================
+    // SAVE GMAIL CONNECTION
+    // ==========================================
+
+    const updateData = {
+
+      gmail_email,
+
+      gmail_access_token:
+        tokens.access_token || null,
+
+      gmail_refresh_token:
+        tokens.refresh_token || null,
+
+      gmail_token_expiry:
+        tokens.expiry_date
+          ? new Date(
+              tokens.expiry_date
+            ).toISOString()
+          : null,
+
+      gmail_connected: true,
+
+      gmail_connected_at:
+        new Date().toISOString()
+
+    };
+
+    // ==========================================
+    // PRESERVE EXISTING REFRESH TOKEN
+    // ==========================================
+
+    if (!tokens.refresh_token) {
+
+      delete updateData.gmail_refresh_token;
+
+    }
+
+    // ==========================================
+    // UPDATE COMPANY
+    // ==========================================
+
+    const {
+      error: updateError
+    } = await supabase
+      .from("company")
+      .update(updateData)
+      .eq(
+        "company_code",
+        company_code
+      );
+
+    if (updateError) {
+
+      console.error(
+        "GMAIL COMPANY UPDATE ERROR:",
+        updateError
+      );
+
+      throw updateError;
+
+    }
+
+    // ==========================================
+    // SUCCESS LOG
+    // ==========================================
+
+    console.log(
+      "GMAIL CONNECTED:",
+      company_code,
+      gmail_email
+    );
+
+    // ==========================================
+    // REDIRECT BACK TO BILLEY
+    // ==========================================
+
+    return res.redirect(
+      `${process.env.FRONTEND_URL}/fund-flow?gmail=connected`
+    );
+
+  } catch (err) {
+
+    console.error(
+      "GMAIL OAUTH CALLBACK ERROR:",
+      err
+    );
+
+    return res.status(500).send(
+      "Unable to connect Gmail."
+    );
+
+  }
+
+});
+
+// ==========================================
+// GMAIL STATUS
+// ==========================================
+
+app.get("/gmail/status", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(
+        req.query.company_code || ""
+      ).trim();
+
+    if (!company_code) {
+
+      return res.status(400).json({
+        success: false,
+        error: "company_code missing"
+      });
+
+    }
+
+    const {
+      data: company,
+      error
+    } = await supabase
+      .from("company")
+      .select(
+        "gmail_email, gmail_connected"
+      )
+      .eq(
+        "company_code",
+        company_code
+      )
+      .maybeSingle();
+
+    if (error) {
+
+      console.error(
+        "GMAIL STATUS ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+
+    }
+
+    if (!company) {
+
+      return res.status(404).json({
+        success: false,
+        error: "Company not found"
+      });
+
+    }
+
+    return res.json({
+      success: true,
+      connected:
+        company.gmail_connected === true,
+      gmail_email:
+        company.gmail_email || null
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GMAIL STATUS EXCEPTION:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+
+  }
+
+});
+
+app.get("/", (req, res) => {
+
+  res.json({
+    success: true,
+    message: "billey API Running"
+  });
+
+});
+
+
+// ==========================================================
+// STOCK APIs
+// ==========================================================
+
+
+// ==========================================================
+// GET TALLY STOCK MOVEMENT
+// ==========================================================
+
+app.get("/getTallyStockMovement", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const from_date =
+      String(req.query.from_date || "").trim();
+
+    const to_date =
+      String(req.query.to_date || "").trim();
+
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!from_date) {
+      return res.json({
+        success: false,
+        error: "from_date missing"
+      });
+    }
+
+    if (!to_date) {
+      return res.json({
+        success: false,
+        error: "to_date missing"
+      });
+    }
+
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_stock_movement",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_from_date: from_date,
+          p_to_date: to_date
+        }
+      );
+
+
+    if (error) {
+      console.error(
+        "GET TALLY STOCK MOVEMENT ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+
+  } catch (err) {
+
+    console.error(
+      "GET TALLY STOCK MOVEMENT API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ==========================================================
+// GET TALLY STOCK AGEING LAYERS
+// ==========================================================
+
+app.get("/getTallyStockAgeingLayers", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const stock_guid =
+      String(req.query.stock_guid || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!stock_guid) {
+      return res.json({
+        success: false,
+        error: "stock_guid missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_stock_ageing_layers_v2",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_stock_guid: stock_guid,
+          p_as_of_date: as_of_date
+        }
+      );
+
+
+    if (error) {
+      console.error(
+        "GET TALLY STOCK AGEING LAYERS ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+
+  } catch (err) {
+
+    console.error(
+      "GET TALLY STOCK AGEING LAYERS API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ==========================================================
+// GET TALLY STOCK AGEING SUMMARY
+// ==========================================================
+
+app.get("/getTallyStockAgeingSummary", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const stock_guid =
+      String(req.query.stock_guid || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!stock_guid) {
+      return res.json({
+        success: false,
+        error: "stock_guid missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_stock_ageing_summary_v2",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_stock_guid: stock_guid,
+          p_as_of_date: as_of_date
+        }
+      );
+
+
+    if (error) {
+      console.error(
+        "GET TALLY STOCK AGEING SUMMARY ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+
+  } catch (err) {
+
+    console.error(
+      "GET TALLY STOCK AGEING SUMMARY API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ==========================================================
+// GET TALLY STOCK HEALTH
+// ==========================================================
+
+app.get("/getTallyStockHealth", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const from_date =
+      String(req.query.from_date || "").trim();
+
+    const to_date =
+      String(req.query.to_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const valuation_method =
+      String(req.query.valuation_method || "FIFO_PERPETUAL")
+        .trim()
+        .toUpperCase();
+
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!from_date) {
+      return res.json({
+        success: false,
+        error: "from_date missing"
+      });
+    }
+
+    if (!to_date) {
+      return res.json({
+        success: false,
+        error: "to_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_stock_health_v2",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_from_date: from_date,
+          p_to_date: to_date,
+          p_as_of_date: as_of_date,
+          p_valuation_method: valuation_method
+        }
+      );
+
+
+    if (error) {
+      console.error(
+        "GET TALLY STOCK HEALTH ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+
+  } catch (err) {
+
+    console.error(
+      "GET TALLY STOCK HEALTH API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ==========================================================
+// GET TALLY STOCK HEALTH ANALYTICS
+// ==========================================================
+
+app.get("/getTallyStockHealthAnalytics", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const from_date =
+      String(req.query.from_date || "").trim();
+
+    const to_date =
+      String(req.query.to_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const valuation_method =
+      String(req.query.valuation_method || "FIFO_PERPETUAL")
+        .trim()
+        .toUpperCase();
+
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!from_date) {
+      return res.json({
+        success: false,
+        error: "from_date missing"
+      });
+    }
+
+    if (!to_date) {
+      return res.json({
+        success: false,
+        error: "to_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_stock_health_analytics_v2",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_from_date: from_date,
+          p_to_date: to_date,
+          p_as_of_date: as_of_date,
+          p_valuation_method: valuation_method
+        }
+      );
+
+
+    if (error) {
+      console.error(
+        "GET TALLY STOCK HEALTH ANALYTICS ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+
+  } catch (err) {
+
+    console.error(
+      "GET TALLY STOCK HEALTH ANALYTICS API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ==========================================================
+// GET TALLY STOCK HEALTH CLASSIFICATION
+// ==========================================================
+
+app.get("/getTallyStockHealthClassification", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const from_date =
+      String(req.query.from_date || "").trim();
+
+    const to_date =
+      String(req.query.to_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const valuation_method =
+      String(req.query.valuation_method || "FIFO_PERPETUAL")
+        .trim()
+        .toUpperCase();
+
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!from_date) {
+      return res.json({
+        success: false,
+        error: "from_date missing"
+      });
+    }
+
+    if (!to_date) {
+      return res.json({
+        success: false,
+        error: "to_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_stock_health_classification_v2",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_from_date: from_date,
+          p_to_date: to_date,
+          p_as_of_date: as_of_date,
+          p_valuation_method: valuation_method
+        }
+      );
+
+
+    if (error) {
+      console.error(
+        "GET TALLY STOCK HEALTH CLASSIFICATION ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+
+  } catch (err) {
+
+    console.error(
+      "GET TALLY STOCK HEALTH CLASSIFICATION API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ==========================================================
+// GET TALLY STOCK REORDER HEALTH
+// ==========================================================
+
+app.get("/getTallyStockReorderHealth", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const from_date =
+      String(req.query.from_date || "").trim();
+
+    const to_date =
+      String(req.query.to_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const valuation_method =
+      String(req.query.valuation_method || "FIFO_PERPETUAL")
+        .trim()
+        .toUpperCase();
+
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!from_date) {
+      return res.json({
+        success: false,
+        error: "from_date missing"
+      });
+    }
+
+    if (!to_date) {
+      return res.json({
+        success: false,
+        error: "to_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } =
+      await supabase.rpc(
+        "get_stock_reorder_health_v2",
+        {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner,
+          p_from_date: from_date,
+          p_to_date: to_date,
+          p_as_of_date: as_of_date,
+          p_valuation_method: valuation_method
+        }
+      );
+
+
+    if (error) {
+      console.error(
+        "GET TALLY STOCK REORDER HEALTH ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+
+  } catch (err) {
+
+    console.error(
+      "GET TALLY STOCK REORDER HEALTH API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+
+ // ==========================================================
+ // GET TALLY STOCK HEALTH REPORT
+ // ==========================================================
+
+app.get("/getTallyStockHealthReport", async (req, res) => {
+  try {
+    const company_code = String(req.query.company_code || "").trim();
+
+    const tally_owner = String(req.query.tally_owner || "")
+      .trim()
+      .toUpperCase();
+
+    const from_date = String(req.query.from_date || "").trim();
+    const to_date = String(req.query.to_date || "").trim();
+    const as_of_date = String(req.query.as_of_date || "").trim();
+
+    const valuation_method = String(
+      req.query.valuation_method || "FIFO_PERPETUAL"
+    )
+      .trim()
+      .toUpperCase();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing",
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner",
+      });
+    }
+
+    if (!from_date || !to_date || !as_of_date) {
+      return res.json({
+        success: false,
+        error: "from_date, to_date and as_of_date are required",
+      });
+    }
+
+    // -----------------------------
+    // TEMPORARY TIMEOUT DIAGNOSTIC
+    // -----------------------------
+
+    const { data: timeoutData, error: timeoutError } =
+      await supabase.rpc("check_api_timeout");
+
+    console.log("API DB TIMEOUT CHECK:", {
+      data: timeoutData,
+      error: timeoutError
+        ? {
+            message: timeoutError.message,
+            code: timeoutError.code,
+          }
+        : null,
+    });
+
+    // -----------------------------
+    // STOCK HEALTH REPORT RPC
+    // -----------------------------
+
+    console.time("STOCK_HEALTH_REPORT_RPC");
+
+    const { data, error } = await supabase.rpc(
+      "get_stock_health_report_v2",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_from_date: from_date,
+        p_to_date: to_date,
+        p_as_of_date: as_of_date,
+        p_valuation_method: valuation_method,
+      }
+    );
+
+    console.timeEnd("STOCK_HEALTH_REPORT_RPC");
+
+    if (error) {
+      console.error("GET TALLY STOCK HEALTH REPORT ERROR:", {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+
+      return res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || [],
+    });
+  } catch (err) {
+    console.error("GET TALLY STOCK HEALTH REPORT API ERROR:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+
+
+// ==========================================================
+// GET TALLY STOCK HEALTH POLICY
+// ==========================================================
+
+app.get("/getTallyStockHealthPolicy", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+
+    // -----------------------------
+    // FETCH POLICY
+    // -----------------------------
+
+    const { data, error } = await supabase
+      .from("stock_health_policy")
+      .select(
+        "company_code, tally_owner, fast_moving_days, non_moving_days, slow_moving_days, dead_days"
+      )
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .maybeSingle();
+
+
+    if (error) {
+      console.error(
+        "GET TALLY STOCK HEALTH POLICY ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    // -----------------------------
+    // DEFAULT POLICY
+    // -----------------------------
+
+    const policy = data || {
+      company_code,
+      tally_owner,
+      fast_moving_days: 30,
+      non_moving_days: 30,
+      slow_moving_days: 90,
+      dead_days: 180
+    };
+
+
+    return res.json({
+      success: true,
+      data: policy
+    });
+
+
+  } catch (err) {
+
+    console.error(
+      "GET TALLY STOCK HEALTH POLICY API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ==========================================================
+// SAVE TALLY STOCK HEALTH POLICY
+// ==========================================================
+
+app.post("/saveTallyStockHealthPolicy", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    const tally_owner =
+      String(req.body.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const fast_moving_days =
+      Number(req.body.fast_moving_days);
+
+    const non_moving_days =
+      Number(req.body.non_moving_days);
+
+    const slow_moving_days =
+      Number(req.body.slow_moving_days);
+
+    const dead_days =
+      Number(req.body.dead_days);
+
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (
+      !Number.isFinite(fast_moving_days) ||
+      !Number.isFinite(non_moving_days) ||
+      !Number.isFinite(slow_moving_days) ||
+      !Number.isFinite(dead_days)
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid policy values"
+      });
+    }
+
+    if (
+      fast_moving_days <= 0 ||
+      non_moving_days <= 0 ||
+      slow_moving_days <= 0 ||
+      dead_days <= 0
+    ) {
+      return res.json({
+        success: false,
+        error: "Policy values must be greater than 0"
+      });
+    }
+
+    if (
+      fast_moving_days > non_moving_days ||
+      non_moving_days >= slow_moving_days ||
+      slow_moving_days >= dead_days
+    ) {
+      return res.json({
+        success: false,
+        error:
+          "Policy order must be Fast <= Non-Moving < Slow < Dead"
+      });
+    }
+
+
+    // -----------------------------
+    // UPSERT POLICY
+    // -----------------------------
+
+    const { data, error } = await supabase
+      .from("stock_health_policy")
+      .upsert(
+        {
+          company_code,
+          tally_owner,
+          fast_moving_days,
+          non_moving_days,
+          slow_moving_days,
+          dead_days,
+          updated_at: new Date().toISOString()
+        },
+        {
+          onConflict: "company_code,tally_owner"
+        }
+      )
+      .select(
+        "company_code, tally_owner, fast_moving_days, non_moving_days, slow_moving_days, dead_days"
+      )
+      .single();
+
+
+    if (error) {
+      console.error(
+        "SAVE TALLY STOCK HEALTH POLICY ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data
+    });
+
+
+  } catch (err) {
+
+    console.error(
+      "SAVE TALLY STOCK HEALTH POLICY API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+app.post("/sync/start", async (req, res) => {
+
+  console.log(
+    "SYNC START REQUEST HIT VPS:",
+    JSON.stringify(req.body, null, 2)
+);
+
+    try {
+
+        const sync_mode =
+            String(req.body.sync_mode || "")
+                .trim()
+                .toUpperCase();
+
+        const sync_period =
+            req.body.sync_period
+                ? String(req.body.sync_period)
+                    .trim()
+                    .toUpperCase()
+                : null;
+
+        // ==========================================
+        // SYNC MODE VALIDATION
+        // ==========================================
+
+        if (!["FULL", "PERIODIC"].includes(sync_mode)) {
+
+            return res.status(400).json({
+                success: false,
+                error:
+                    "Invalid sync_mode. Use FULL or PERIODIC"
+            });
+
+        }
+
+        // ==========================================
+        // PERIODIC SYNC REQUIRES PERIOD
+        // ==========================================
+
+        if (
+            sync_mode === "PERIODIC" &&
+            !sync_period
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                error:
+                    "sync_period is required for PERIODIC sync"
+            });
+
+        }
+
+        // ==========================================
+        // START SYNC
+        // ==========================================
+
+        const result = await startSync({
+
+            company_code:
+                req.body.company_code,
+
+            tally_owner:
+                req.body.tally_owner,
+
+            sync_mode:
+                sync_mode,
+
+            sync_period:
+                sync_mode === "PERIODIC"
+                    ? sync_period
+                    : null
+
+        });
+
+        // ==========================================
+        // ALREADY ACTIVE
+        // ==========================================
+
+        if (result.already_active) {
+
+            return res.status(409).json(result);
+
+        }
+
+        return res.status(200).json(result);
+
+    } catch (err) {
+
+        console.error(
+            "SYNC START ERROR:",
+            err
+        );
+
+        return res.status(500).json({
+
+            success: false,
+
+            error:
+                err.message
+
+        });
+
+    }
+
+});
+
+app.get("/sync/status", async (req, res) => {
+
+    try {
+
+        const batch_id =
+            String(req.query.batch_id || "").trim();
+
+        if (!batch_id) {
+
+            return res.status(400).json({
+                success: false,
+                error: "batch_id is required"
+            });
+
+        }
+
+        const {
+            data,
+            error
+        } = await supabase
+            .from("sync_batches")
+            .select(`
+                batch_id,
+                company_code,
+                tally_owner,
+                batch_status,
+                worker_status,
+                worker_id,
+                current_module,
+                current_entity,
+                current_action,
+                current_operation,
+                current_stage,
+                sync_progress,
+                last_activity_at,
+                started_at,
+                completed_at,
+                error_message,
+                reconciliation_completed,
+                ledger_reconciliation_completed,
+                stock_reconciliation_completed,
+                batch_closed
+            `)
+            .eq("batch_id", batch_id)
+            .maybeSingle();
+
+        if (error) {
+            throw error;
+        }
+
+        if (!data) {
+
+            return res.status(404).json({
+                success: false,
+                error: "Sync batch not found",
+                batch_id
+            });
+
+        }
+
+        return res.json({
+            success: true,
+            batch: data
+        });
+
+    } catch (error) {
+
+        console.error(
+            "SYNC STATUS ERROR:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+
+    }
+
+});
+
+app.get("/testTally", async (req, res) => {
+
+  try {
+
+    const response = await createLedger({
+      name: "Test Customer 2"
+    });
+
+    res.send(response);
+
+  } catch (err) {
+
+    console.error(err.response?.data || err.message);
+
+    res.status(500).send(
+      err.response?.data || err.message
+    );
+
+  }
+
+});
+
+// =========================
+// PAIR CONNECTOR
+// =========================
+app.post("/pairConnector", async (req, res) => {
+
+  try {
+
+   const company_code =
+    String(req.body.company_code || "").trim();
+
+  const tally_company =
+    String(req.body.tally_company || "").trim();
+
+  const tally_company_guid =
+    String(req.body.tally_company_guid || "").trim();
+
+  const is_ca =
+    Boolean(req.body.is_ca);
+
+  const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
+
+    
+
+const {
+  data: companyData,
+  error: companyError
+} = await supabase
+
+  .from("company")
+
+  .select(
+    `company_code, ${connectorField}`
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .single();
+
+if (companyError) {
+
+  return res.json({
+    success: false,
+    error: companyError.message
+  });
+
+}
+
+    if (!company_code || !tally_company_guid) {
+
+      return res.json({
+        success: false,
+        error: "company_code or tally_company_guid missing"
+      });
+
+    }
+
+    console.log(
+      "PAIR REQUEST COMPANY CODE :",
+      company_code
+    );
+
+    console.log(
+      "CONNECTED CONNECTORS :",
+      registry.list()
+    );
+
+let socket = null;
+
+let connector_id =
+  companyData?.[connectorField];
+
+console.log(
+  "EXISTING CONNECTOR ID :",
+  connector_id
+);
+
+// ==========================================
+// EXISTING CONNECTOR
+// ==========================================
+
+if (connector_id) {
+
+  socket =
+    registry.get(
+      connector_id,
+      company_code
+    );
+
+  console.log(
+    "EXISTING CONNECTOR SOCKET FOUND :",
+    !!socket
+  );
+
+  
+if (!socket) {
+
+  return res.json({
+    success: false,
+    error: "Linked connector offline"
+  });
+
+}
+
+if (
+  !socket.companyGuids ||
+  !socket.companyGuids.includes(
+    tally_company_guid
+  )
+) {
+
+  return res.json({
+    success: false,
+    error:
+      "Selected Tally company is not available on this connector"
+  });
+
+}
+
+}
+// ==========================================
+// FIRST TIME PAIRING
+// ==========================================
+else {
+
+  socket =
+    registry.getCurrentPendingConnector();
+
+  console.log(
+    "CURRENT PENDING CONNECTOR FOUND :",
+    !!socket
+  );
+
+  if (!socket) {
+
+    return res.json({
+      success: false,
+      error:
+        "Connector offline"
+    });
+
+  }
+
+// 060926 start
+if (
+  !socket.companyGuids ||
+  !socket.companyGuids.includes(
+    tally_company_guid
+  )
+) {
+
+  return res.json({
+    success: false,
+    error:
+      "Selected Tally company is not available on this connector"
+  });
+
+}
+// 060926 end
+
+
+  connector_id =
+    `CON-${crypto.randomUUID()}`;
+
+  const {
+    error: connectorSaveError
+  } = await supabase
+
+    .from("company")
+
+    .update({
+      [connectorField]:
+        connector_id
+    })
+
+    .eq(
+      "company_code",
+      company_code
+    );
+
+  if (connectorSaveError) {
+
+    return res.json({
+      success: false,
+      error:
+        connectorSaveError.message
+    });
+
+  }
+
+  console.log(
+    "🆕 NEW CONNECTOR ID CREATED :",
+    connector_id
+  );
+
+}
+
+    console.log("PAIR TRACE:", {
+  company_code,
+  connector_id,
+  socket_id: socket?.id,
+  socket_connector_id: socket?.connectorId,
+  socket_company_code: socket?.companyCode,
+  socket_computer: socket?.computerName
+});
+
+   const result =
+  await sendToConnector(
+    socket,
+    "pair",
+    {
+      company_code,
+      company_name: tally_company,
+      company_guid: tally_company_guid,
+      connector_id
+    }
+  );
+
+    console.log(
+      "PAIR RESULT :",
+      result
+    );
+
+    return res.json(result);
+
+  } catch (err) {
+
+    console.error(err);
+
+    return res.json({
+
+      success: false,
+
+      error:
+        err.stack || err.message
+
+    });
+
+  }
+
+});
+
+
+
+
+// =========================
+// PAIR CONNECTOR FOR BATCH 060926
+// =========================
+app.post("/pairConnectorforbatch", async (req, res) => {
+
+    try {
+
+        const result = await pairConnectorForBatch({
+            company_code:
+                String(req.query.company_code || "").trim(),
+
+            tally_owner:
+                String(req.query.tally_owner || "").trim()
+        });
+
+        return res.json(result);
+
+    } catch (err) {
+
+        console.error(err);
+
+        return res.json({
+            success: false,
+            error: err.stack || err.message
+        });
+    }
+});
+
+app.post("/getConnectorId", async (req, res) => {
+
+  try {
+
+    const {
+      company_code,
+      is_ca = false
+    } = req.body || {};
+
+    if (!company_code) {
+
+      return res.json({
+        success: false,
+        error: "company_code required"
+      });
+
+    }
+
+    const connectorField =
+      is_ca
+        ? "ca_connector_id"
+        : "client_connector_id";
+
+    const {
+      data,
+      error
+    } = await supabase
+
+      .from("company")
+
+      .select(
+        `company_code, ${connectorField}`
+      )
+
+      .eq(
+        "company_code",
+        company_code
+      )
+
+      .single();
+
+    if (error) {
+
+      return res.json({
+        success: false,
+        error: error.message
+      });
+
+    }
+
+    return res.json({
+
+      success: true,
+
+      connector_id:
+        data?.[connectorField] || null
+
+    });
+
+  } catch (err) {
+
+    return res.json({
+
+      success: false,
+
+      error: err.message
+
+    });
+
+  }
+
+});
+
+
+// 060926 start
+// =========================
+// GET PENDING CONNECTORS
+// =========================
+app.get("/getPendingConnectors", async (req, res) => {
+
+  try {
+
+    const pendingConnectors =
+      registry.getPendingConnectors();
+
+    console.log(
+      "PENDING CONNECTORS :",
+      pendingConnectors
+    );
+
+    return res.json({
+      success: true,
+      connectors: pendingConnectors
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    return res.json({
+      success: false,
+      error: err.message
+    });
+
+  }
+
+});
+// 060926 end
+
+app.get("/getTallyCompanies", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+      const is_ca =
+      String(req.query.is_ca).toLowerCase() === "true";
+
+
+      console.log("================================");
+      console.log("GET TALLY COMPANIES");
+      console.log("QUERY :", req.query);
+      console.log("COMPANY CODE :", company_code);
+      console.log("REGISTERED :", registry.list());
+
+    if (!company_code) {
+
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+
+    }
+/* commented 010926
+  const socket =
+  registry.getPending() || registry.getAny();
+
+    console.log("SOCKET FOUND :", !!socket);
+
+
+    if (socket) {
+      console.log("SOCKET ID :", socket.id);
+    }
+
+
+    if (!socket) {
+      
+      return res.json({
+        success: false,
+        error: "Connector offline"
+      });
+
+    }
+*/
+// added 010926
+const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
+
+const {
+  data: companyData,
+  error: companyError
+} = await supabase
+  .from("company")
+  .select(`
+    company_code,
+    ${connectorField},
+    ${is_ca ? "ca_tally_company_guid" : "client_tally_company_guid"}
+`)
+  .eq("company_code", company_code)
+  .single();
+
+if (companyError || !companyData) {
+
+  return res.json({
+    success: false,
+    error: "Company not found"
+  });
+
+}
+
+const connector_id =
+  companyData[connectorField];
+
+console.log(
+  "TALLY CONNECTOR ID :",
+  connector_id
+);
+
+//const socket =
+  //registry.get(connector_id);
+/*020926
+const socket =
+  await registry.waitForConnector(connector_id);
+*/
+
+
+let socket = null;
+
+// =====================================================
+// EXISTING PAIRED CONNECTOR
+// =====================================================
+
+if (connector_id) {
+
+    socket =
+        registry.get(
+            connector_id,
+            company_code
+        );
+
+    console.log(
+        "EXISTING CONNECTOR SOCKET FOUND :",
+        !!socket
+    );
+
+    // Existing connector DB mein hai,
+    // lekin online nahi hai.
+    // Kisi pending connector par fallback NAHI karna.
+    if (!socket) {
+
+        return res.json({
+            success: false,
+            error: "Connector offline"
+        });
+
+    }
+
+}
+
+// =====================================================
+// FIRST-TIME / UNREGISTERED CONNECTOR
+// =====================================================
+if (!connector_id) {
+
+    socket =
+        registry.getCurrentPendingConnector();
+
+    console.log(
+        "CURRENT PENDING CONNECTOR FOUND :",
+        !!socket
+    );
+
+    if (socket) {
+
+        console.log(
+            "CURRENT PENDING CONNECTOR :",
+            {
+                socket_id: socket.id,
+                pending_connector_id:
+                    socket.pendingConnectorId
+            }
+        );
+
+    }
+
+    if (!socket) {
+
+        return res.json({
+            success: false,
+            error: "Connector offline"
+        });
+
+    }
+
+}
+// 060926 end
+console.log(
+    "SOCKET FOUND :",
+    !!socket
+);
+
+if (socket) {
+
+    console.log(
+        "SOCKET ID :",
+        socket.id
+    );
+
+}
+
+if (!socket) {
+
+    return res.json({
+        success: false,
+        error: "Connector offline"
+    });
+
+}
+  console.log("ROUTING TRACE:", {
+  company_code,
+  connector_id,
+  socket_id: socket?.id,
+  socket_connector_id: socket?.connectorId,
+  socket_company_code: socket?.companyCode,
+  socket_computer: socket?.computerName
+});
+
+//
+    const result = await sendToConnector(
+      socket,
+      "getTallyCompanies",
+      {}
+    );
+
+    console.log("CONNECTOR RESULT:", result);
+
+    return res.json(result);
+
+  } catch (err) {
+
+    console.error(err);
+
+    return res.status(500).json({
+
+      success: false,
+
+      error: err.response?.data || err.message
+
+    });
+
+  }
+
+});
+
+
+function formatDateByCountry(
+  date,
+  country
+) {
+
+  const timezone =
+    String(country || "")
+      .trim()
+      .toUpperCase() === "INDIA"
+      ? "Asia/Kolkata"
+      : "UTC";
+
+  return new Intl.DateTimeFormat(
+    "sv-SE",
+    {
+      timeZone: timezone
+    }
+  ).format(date);
+
+}
+
+app.post(
+  "/saveInvoice",
+  async (req, res) => {
+
+    try {
+
+      const invoice =
+        req.body;
+
+      console.log(
+  "REQ BODY:",
+  req.body
+);
+
+
+  const isEdit =
+  invoice.isEdit === true;
+
+  // =========================
+  // GENERATE INVOICE ID
+  // =========================
+
+  const companyCode =
+
+    String(
+      invoice.company?.company_code || ""
+    ).trim();
+
+
+  const clientCode =
+
+    String(
+      invoice.customer?.client_code || ""
+    ).trim();
+
+  const documentNumber =
+
+  String(
+
+    invoice.doc_type === "quotation"
+
+      ? invoice.Quote_No || ""
+
+      : invoice.invoiceNumber || ""
+
+  ).trim();
+
+// INV/26-27/0018
+const parts =
+  documentNumber.split("/");
+
+  const fy =
+    parts[1]
+      ? parts[1].replace("-", "")
+      : "";
+
+  const sequence =
+    parts[2] || "";
+
+  const generatedInvoiceId =
+  invoice.doc_type === "quotation"
+    ? `QT-${companyCode}-${clientCode}-${fy}-${sequence}`
+    : `${companyCode}-${clientCode}-${fy}-${sequence}`;
+
+const invoiceId =
+
+  isEdit
+
+    ? invoice.invoiceId
+
+    : generatedInvoiceId;
+
+console.log(
+  "IS EDIT:",
+  isEdit
+);
+
+console.log(
+  "REQ BODY invoiceId:",
+  invoice.invoiceId
+);
+
+console.log(
+  "GENERATED invoiceId:",
+  invoiceId
+);
+
+const creditPeriod =
+  Number(invoice.creditPeriod || 0);
+
+
+// =========================
+// CALCULATE DUE DATE
+// =========================
+let dueDate =
+
+  invoice.doc_type === "quotation"
+
+    ? invoice.Quote_Dt || ""
+
+    : invoice.invoiceDate || "";
+
+if (creditPeriod > 0) {
+
+ const date = new Date(
+
+  invoice.doc_type === "quotation"
+
+    ? invoice.Quote_Dt
+
+    : invoice.invoiceDate
+
+);
+
+  date.setDate(
+    date.getDate() + creditPeriod
+  );
+
+ dueDate =
+  date
+    .toISOString()
+    .split("T")[0];
+
+}
+
+  // =========================
+  // SAVE MAIN INVOICE
+  // =========================
+
+ // =========================
+// UPDATE / SAVE MAIN INVOICE
+// =========================
+
+
+if (isEdit) {
+
+  let oldInvoice = null;
+
+const {
+  data: existingInvoice
+} = await supabase
+
+  .from("invoices")
+
+  .select(
+    "invoice_id,invoice_number,status"
+  )
+
+  .eq(
+    "invoice_id",
+    invoiceId
+  )
+
+  .single();
+
+oldInvoice =
+  existingInvoice;
+
+console.log(
+  "FINAL UPDATE OBJECT:",
+  {
+
+    quote_no:
+      invoice.Quote_No || "",
+
+    quote_dt:
+      invoice.Quote_Dt || ""
+
+  }
+);
+  await supabase
+
+    .from("invoices")
+
+    .update({
+
+    invoice_number:
+
+  invoice.doc_type === "quotation"
+
+    ? null
+
+    : invoice.invoiceNumber || "",
+
+invoice_date:
+
+  invoice.doc_type === "quotation"
+
+    ? null
+
+    : invoice.invoiceDate || "",
+
+customer_name:
+  invoice.customer?.name || "",
+
+customer_mobile:
+  invoice.customer?.mobile || "",
+
+customer_gst:
+  invoice.customer?.gstin || "",
+
+     billing_address:
+  invoice.customer?.billingAddress || "",
+
+    shipping_address:
+  invoice.customer?.shippingAddress || "",
+
+      state:
+        invoice.customer?.state || "",
+
+      state_code:
+  invoice.customer?.stateCode || "",
+
+      subtotal:
+  invoice.totals?.taxableAmount || 0,
+
+cgst:
+  invoice.totals?.cgstTotal || 0,
+
+sgst:
+  invoice.totals?.sgstTotal || 0,
+
+igst:
+  invoice.totals?.igstTotal || 0,
+
+  gst_percent:
+  invoice.totals?.gstPercent || 0,
+
+grand_total:
+  invoice.totals?.rounded || 0,
+
+ payment_mode:
+  invoice.paymentMode || "",
+  
+
+      notes:
+        invoice.notes || "",
+
+      terms:
+        invoice.terms || "",
+
+      company_code:
+        companyCode,
+
+      client_code:
+        clientCode,
+
+      billing_pincode:
+        invoice.customer?.billingPincode || "",
+
+      shipping_state:
+        invoice.customer?.shippingState || "",
+
+      shipping_state_code:
+  invoice.customer?.shippingStateCode || "",
+
+      shipping_pincode:
+        invoice.customer?.shippingPincode || "",
+
+      due_date:
+        dueDate,
+
+      credit_period:
+        creditPeriod,
+
+      status:
+        invoice.status || "",
+
+      doc_type:
+        invoice.doc_type || "invoice",
+
+   quote_no:
+
+  invoice.doc_type === "quotation"
+
+    ? invoice.Quote_No || ""
+
+    : "",
+
+quote_dt:
+
+  invoice.doc_type === "quotation"
+
+    ? invoice.Quote_Dt || null
+
+    : null,
+
+bill_to_ship_to:
+  invoice.bill_to_ship_to || false,
+
+  
+
+    })
+
+ .eq(
+  "invoice_id",
+  invoiceId
+);
+
+
+console.log(
+  "AUDIT INSERT",
+  {
+    invoiceId,
+    oldStatus:
+      oldInvoice?.status,
+    newStatus:
+      invoice.status
+  }
+);
+
+// =========================
+// AUDIT LOG
+// =========================
+
+if (
+  oldInvoice?.status === "Posted"
+) {
+
+  const {
+  error: auditError
+} = await supabase
+
+    .from(
+      "invoice_audit_log"
+    )
+
+    .insert([{
+
+      company_code:
+        companyCode,
+
+      invoice_id:
+        invoiceId,
+
+      invoice_number:
+        oldInvoice
+          .invoice_number ||
+
+        invoice.invoiceNumber ||
+
+        "",
+
+      action:
+        "POSTED_INVOICE_EDITED",
+
+      old_status:
+        "Posted",
+
+      new_status:
+        invoice.status || "",
+
+      changed_by_name:
+        invoice.company
+          ?.businessName ||
+
+        "Company User",
+
+      reason:
+  invoice.editReason || ""
+
+    }]);
+
+    if (auditError) {
+
+  console.error(
+    "AUDIT ERROR:",
+    auditError
+  );
+
+}
+
+}
+
+
+} else {
+
+
+  console.log(
+  "FINAL INSERT OBJECT:",
+  {
+
+    quote_no:
+      invoice.Quote_No || "",
+
+    quote_dt:
+      invoice.Quote_Dt || ""
+
+  }
+);
+
+console.log(
+  "FINAL INSERT DATA:",
+  {
+    invoice_id: invoiceId,
+    doc_type: invoice.doc_type,
+    quote_no: invoice.Quote_No,
+    quote_dt: invoice.Quote_Dt,
+    invoice_number: invoice.invoiceNumber
+  }
+);
+
+console.log(
+  "QQQ-1 DOC TYPE =>",
+  invoice.doc_type
+);
+
+console.log(
+  "QQQ-2 QUOTE NO =>",
+  invoice.Quote_No
+);
+
+console.log(
+  "QQQ-3 QUOTE DT =>",
+  invoice.Quote_Dt
+);
+
+console.log(
+  "QQQ-4 GENERATED ID =>",
+  invoiceId
+);
+
+console.log(
+  "QQQ-5 INSERT PAYLOAD =>",
+  {
+    invoice_number:
+      invoice.invoiceNumber,
+
+    invoice_date:
+      invoice.invoiceDate,
+
+    quote_no:
+      invoice.Quote_No,
+
+    quote_dt:
+      invoice.Quote_Dt
+  }
+);
+  const {
+  error: invoiceError
+} = await supabase
+
+    .from("invoices")
+
+    
+    .insert([{
+
+invoice_id:
+  invoiceId,
+
+share_token:
+  crypto.randomBytes(16).toString("hex"),
+
+invoice_number:
+
+  invoice.doc_type === "quotation"
+
+    ? null
+
+    : invoice.invoiceNumber || "",
+
+invoice_date:
+
+  invoice.doc_type === "quotation"
+
+    ? null
+
+    : invoice.invoiceDate || "",
+
+customer_name:
+  invoice.customer?.name || "",
+
+customer_mobile:
+  invoice.customer?.mobile || "",
+
+customer_gst:
+  invoice.customer?.gstin || "",
+
+     billing_address:
+  invoice.customer?.billingAddress || "",
+
+    shipping_address:
+  invoice.customer?.shippingAddress || "",
+
+      state:
+        invoice.customer?.state || "",
+
+      state_code:
+  invoice.customer?.stateCode || "",
+
+      subtotal:
+  invoice.totals?.taxableAmount || 0,
+
+cgst:
+  invoice.totals?.cgstTotal || 0,
+
+sgst:
+  invoice.totals?.sgstTotal || 0,
+
+igst:
+  invoice.totals?.igstTotal || 0,
+
+  gst_percent:
+  invoice.totals?.gstPercent || 0,
+
+grand_total:
+  invoice.totals?.rounded || 0,
+
+ payment_mode:
+  invoice.paymentMode || "",
+
+      notes:
+        invoice.notes || "",
+
+      terms:
+        invoice.terms || "",
+
+      company_code:
+        companyCode,
+
+      client_code:
+        clientCode,
+
+      billing_pincode:
+        invoice.customer?.billingPincode || "",
+
+      shipping_state:
+        invoice.customer?.shippingState || "",
+
+shipping_state_code:
+  invoice.customer?.shippingStateCode || "",
+
+      shipping_pincode:
+        invoice.customer?.shippingPincode || "",
+
+      due_date:
+        dueDate,
+
+      credit_period:
+        creditPeriod,
+
+      status:
+        invoice.status || "",
+
+      doc_type:
+        invoice.doc_type || "invoice",
+
+     quote_no:
+
+  invoice.doc_type === "quotation"
+
+    ? invoice.Quote_No || ""
+
+    : "",
+
+quote_dt:
+
+  invoice.doc_type === "quotation"
+
+    ? invoice.Quote_Dt || null
+
+    : null,
+
+bill_to_ship_to:
+  invoice.bill_to_ship_to || false,
+
+
+    }]);
+
+    console.log(
+  "INVOICE ERROR FULL:",
+  invoiceError
+);
+
+console.log(
+  "QQQ-6 SUPABASE ERROR =>",
+  invoiceError
+);
+
+if (invoiceError) {
+
+  return res.status(400).json({
+
+    success: false,
+
+    error: JSON.stringify(invoiceError)
+
+  });
+
+}
+}
+
+
+// =========================
+// DELETE OLD ITEMS ON EDIT
+// =========================
+
+if (isEdit) {
+
+  await supabase
+
+    .from("invoice_items")
+
+    .delete()
+
+  .eq(
+  "invoice_id",
+      invoiceId
+    );
+
+}
+
+  // =========================
+  // SAVE ITEMS
+  // =========================
+
+  const items = invoice.items || [];
+
+  for (const item of items) {
+
+    const qty =
+      Number(item.quantity || 0);
+
+    const rate =
+      Number(item.rate || 0);
+
+    const gstPct =
+      Number(item.gstPct || 0);
+
+    const discountPct =
+      Number(item.discountPct || 0);
+
+    const gross =
+      qty * rate;
+
+    const discountAmt =
+      gross * discountPct / 100;
+
+    const taxable =
+      gross - discountAmt;
+
+    const gstAmt =
+      taxable * gstPct / 100;
+
+    const isInterState =
+      invoice.isInterState || false;
+
+    const cgst =
+      isInterState
+        ? 0
+        : gstAmt / 2;
+
+    const sgst =
+      isInterState
+        ? 0
+        : gstAmt / 2;
+
+    const igst =
+      isInterState
+        ? gstAmt
+        : 0;
+
+    const total =
+      taxable + gstAmt;
+
+    await supabase
+
+  .from("invoice_items")
+
+  .insert([{
+
+   invoice_id:
+  invoiceId,
+
+    item_name:
+      item.name || "",
+
+    hsn:
+      String(item.hsn || ""),
+
+    qty:
+      qty,
+
+    unit:
+  item.unit || "",
+
+  packingqty:
+  Number(
+    item.packingQty || 0
+  ),
+
+packingunit:
+  item.packingUnit || "",
+
+    rate:
+      rate,
+
+    gst_percent:
+      gstPct,
+
+    taxable_amount:
+      taxable,
+
+    cgst:
+      cgst,
+
+    sgst:
+      sgst,
+
+    igst:
+      igst,
+
+    total:
+      total,
+
+    disc_percent:
+      discountPct,
+
+    disc_amt:
+      discountAmt,
+
+    source:
+      item.invoiceMode || "free"
+
+  }]);
+
+ }
+
+
+  res.json({
+
+  success: true,
+
+  message:
+    "Invoice saved successfully",
+
+  invoiceId
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.status(500).json({
+
+        success: false,
+
+        error: err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET INVOICE BY ID
+// =========================
+
+app.get(
+  "/getInvoiceById",
+  async (req, res) => {
+
+    try {
+
+      const invoiceId =
+
+        String(
+          req.query.invoiceId || ""
+        ).trim();
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+        
+      if (!invoiceId) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          error:
+            "invoiceId required"
+
+        });
+
+      }
+
+      
+
+      if (!company_code) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // GET MAIN INVOICE
+      // =========================
+
+      const {
+        data: invoice,
+        error: invoiceError
+      } = await supabase
+
+        .from("invoices")
+
+        .select("*")
+
+        .eq(
+          "invoice_id",
+          invoiceId
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .single();
+
+        console.log("RECEIVED invoiceId:", invoiceId);
+console.log("RECEIVED company_code:", company_code);
+console.log("FOUND INVOICE:", invoice);
+console.log("INVOICE ERROR:", invoiceError);
+      if (invoiceError || !invoice) {
+
+        return res.status(404).json({
+
+          success: false,
+
+          error:
+            "Invoice not found"
+
+        });
+
+      }
+ // =========================
+// GET COMPANY
+// =========================
+
+const {
+  data: company
+} = await supabase
+
+  .from("company")
+
+  .select("*")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .single();
+
+
+  console.log(
+  "COMPANY STATE CODE:",
+  company?.statecode
+);
+
+console.log(
+  "CUSTOMER STATE CODE:",
+  invoice.state_code
+);
+
+console.log(
+  "isInterState:",
+  String(
+    company?.statecode || ""
+  ).trim()
+
+  !==
+
+  String(
+    invoice.state_code || ""
+  ).trim()
+);
+
+      // =========================
+      // GET ITEMS
+      // =========================
+
+      const {
+        data: items,
+        error: itemsError
+      } = await supabase
+
+     
+        .from("invoice_items")
+
+        .select("*")
+
+        .eq(
+          "invoice_id",
+          invoiceId
+        );
+
+         console.log(
+  "RAW DB ITEMS:",
+  items
+);
+
+      if (itemsError) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          error:
+            itemsError.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESPONSE
+      // =========================
+console.log(
+  "FINAL RESPONSE ITEMS:",
+  (items || []).map((item) => ({
+
+    id:
+      item.id,
+
+    name:
+      item.item_name,
+
+    hsn:
+      item.hsn,
+
+    quantity:
+      item.qty,
+
+     unit:
+      item.unit,
+
+      packingQty:
+  item.packingqty,
+
+packingUnit:
+  item.packingunit,
+
+    rate:
+      item.rate,
+
+    gstPct:
+      item.gst_percent,
+
+    discountPct:
+      item.disc_percent,
+
+    discountAmt:
+      item.disc_amt,
+
+    taxable:
+      item.taxable_amount,
+
+    cgst:
+      item.cgst,
+
+    sgst:
+      item.sgst,
+
+    igst:
+      item.igst,
+
+    total:
+      item.total,
+
+    source:
+  item.source
+
+  }))
+);
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          invoiceId:
+            invoice.invoice_id,
+
+          invoiceNumber:
+            invoice.invoice_number,
+
+          share_token:
+  invoice.share_token,
+
+          invoiceDate:
+            invoice.invoice_date,
+
+          customerName:
+            invoice.customer_name,
+
+          customerMobile:
+            invoice.customer_mobile,
+
+          customerGST:
+            invoice.customer_gst,
+
+          billingAddress:
+            invoice.billing_address,
+
+          shippingAddress:
+            invoice.shipping_address,
+
+          state:
+            invoice.state,
+
+          stateCode:
+            invoice.state_code,
+          
+          isInterState:
+
+  String(
+    company?.statecode || ""
+  ).trim()
+
+  !==
+
+  String(
+    invoice.state_code || ""
+  ).trim(),  
+
+          subtotal:
+            invoice.subtotal,
+
+          cgst:
+            invoice.cgst,
+
+          sgst:
+            invoice.sgst,
+
+          igst:
+            invoice.igst,
+
+          gstPercent:
+            invoice.gst_percent,
+
+          grandTotal:
+            invoice.grand_total,
+
+          paymentMode:
+            invoice.payment_mode,
+
+          notes:
+            invoice.notes,
+
+          terms:
+            invoice.terms,
+
+          createdAt:
+            invoice.created_at,
+
+          company_code:
+            invoice.company_code,
+
+          client_code:
+            invoice.client_code,
+
+          billing_pincode:
+            invoice.billing_pincode,
+
+          shipping_state:
+            invoice.shipping_state,
+
+          shipping_stateCode:
+            invoice.shipping_state_code,
+
+          shipping_pincode:
+            invoice.shipping_pincode,
+
+          due_date:
+            invoice.due_date,
+
+          credit_period:
+            invoice.credit_period,
+
+          status:
+            invoice.status,
+
+          doc_type:
+            invoice.doc_type,
+
+          Quote_No:
+            invoice.quote_no,
+
+          Quote_Dt:
+            invoice.quote_dt,
+
+transporter_name:
+  invoice.transporter_name,
+
+vehicle_no:
+  invoice.vehicle_no,
+
+driver_mobile:
+  invoice.driver_mobile,
+
+gr_rr_no:
+  invoice.gr_rr_no,
+
+eway_bill_no:
+  invoice.eway_bill_no,
+
+  lr_date:
+  invoice.lr_date,
+
+eway_date:
+  invoice.eway_date,
+
+  bill_to_ship_to:
+  invoice.bill_to_ship_to,
+  
+            company: {
+
+name:
+  company?.businessname || "",
+
+ businessName:
+  company?.businessname || "",
+
+  mobile:
+    company?.mobile || "",
+
+  address:
+    company?.address || "",
+
+  gstin:
+    company?.gstin || "",
+
+  state:
+    company?.state || "",
+
+  statecode:
+    company?.statecode || "",
+
+  pincode:
+  company?.pincode || ""  ,
+
+  country:
+  company?.country || "",
+
+currency:
+  company?.currency || "",
+
+currency_symbol:
+  company?.currency_symbol || "",
+
+defaultNotes:
+  company?.defaultnotes || "",
+
+defaultTerms:
+  company?.defaultterms || "",
+
+},
+         items:
+
+  (items || []).map((item) => ({
+
+    id:
+      item.id,
+
+    name:
+      item.item_name,
+
+    hsn:
+      item.hsn,
+
+    quantity:
+      item.qty,
+
+    unit:
+      item.unit,
+
+     packingQty:
+      Number(
+        item.packingqty || 0
+      ),
+
+    packingUnit:
+      item.packingunit || "",
+
+    rate:
+      item.rate,
+
+    gstPct:
+      item.gst_percent,
+
+    discountPct:
+      item.disc_percent,
+
+    discountAmt:
+      item.disc_amt,
+
+    taxable:
+      item.taxable_amount,
+
+    cgst:
+      item.cgst,
+
+    sgst:
+      item.sgst,
+
+    igst:
+      item.igst,
+
+    total:
+      item.total,
+
+    invoiceMode:
+      item.source
+
+  }))
+
+        }
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.status(500).json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+app.get(
+  "/publicInvoice/:token",
+
+  async (req, res) => {
+
+    try {
+
+      const token =
+
+        String(
+          req.params.token || ""
+        ).trim();
+
+      if (!token) {
+
+        return res.json({
+
+          success: false,
+
+          error: "token missing"
+
+        });
+
+      }
+
+      const {
+        data: invoice,
+        error: invoiceError
+      } = await supabase
+
+        .from("invoices")
+
+        .select("*")
+
+        .eq(
+          "share_token",
+          token
+        )
+
+        .single();
+
+      if (invoiceError || !invoice) {
+
+        return res.json({
+
+          success: false,
+
+          error: "Invoice not found"
+
+        });
+
+      }
+
+      const {
+        data: company
+      } = await supabase
+
+        .from("company")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          invoice.company_code
+        )
+
+        .single();
+
+      const {
+        data: items
+      } = await supabase
+
+        .from("invoice_items")
+
+        .select("*")
+
+        .eq(
+          "invoice_id",
+          invoice.invoice_id
+        );
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          invoice,
+          company,
+          items
+
+        }
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error: err.message
+
+      });
+
+    }
+
+  }
+);
+
+app.get("/api/getNextInvoiceNumber", async (req, res) => {
+
+  console.log(
+    "GET NEXT INVOICE API HIT"
+  );
+
+  console.log(
+    "QUERY:",
+    req.query
+  );
+
+  try {
+
+    const company_code =
+      String(
+        req.query.company_code || ""
+      ).trim();
+
+    if (!company_code) {
+
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+
+    }
+
+    const invoiceDate =
+
+  String(
+    req.query.invoiceDate || ""
+  ).trim();
+
+    // =========================
+    // COMPANY
+    // =========================
+
+  // =========================
+// GET COMPANY
+// =========================
+
+const {
+  data: company,
+  error: companyError
+} = await supabase
+
+  .from("company")
+
+  .select("*")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .single();
+
+if (companyError || !company) {
+
+  return res.json({
+
+    success: false,
+
+    error: "Company not found"
+
+  });
+
+}
+
+
+const prefix =
+
+  company.invoiceprefix || "INV";
+
+const startNumber =
+
+  Number(
+    company.invoicestartnumber || 1
+  );
+    // =========================
+    // FY
+    // =========================
+
+    const now =
+
+  invoiceDate
+
+    ? new Date(invoiceDate)
+
+    : new Date();
+    
+    const fy =
+      now.getMonth() >= 3
+        ? now.getFullYear()
+        : now.getFullYear() - 1;
+
+    const fyStr =
+      `${String(fy).slice(-2)}-${String(fy + 1).slice(-2)}`;
+
+      console.log(
+  "FY:",
+  fyStr
+);
+    // =========================
+    // ERP START FY
+    // =========================
+
+    const companyStart =
+
+  new Date(
+    company.company_start
+  );
+
+const startFY =
+
+  companyStart.getMonth() >= 3
+
+    ? companyStart.getFullYear()
+
+    : companyStart.getFullYear() - 1;
+
+const startFYStr =
+
+  `${String(startFY).slice(-2)}-${String(startFY + 1).slice(-2)}`;
+
+
+    // =========================
+    // FETCH INVOICES
+    // =========================
+
+    const { data: invoices, error } =
+      await supabase
+        .from("invoices")
+        .select("invoice_number")
+        .eq("company_code", company_code);
+
+        console.log(
+  "INVOICES:",
+  invoices
+);
+
+    if (error) {
+
+      return res.json({
+        success: false,
+        error: error.message
+      });
+
+    }
+
+    let maxNumber = 0;
+
+    (invoices || []).forEach((row) => {
+
+      const invoiceNumber =
+  String(
+    row.invoice_number || ""
+  );
+
+      // Example:
+      // INV/26-27/0017
+
+      const parts =
+        invoiceNumber.split("/");
+
+      if (
+        parts.length === 3 &&
+        parts[1] === fyStr
+      ) {
+
+        const num =
+          parseInt(parts[2], 10);
+
+        if (!isNaN(num)) {
+
+          maxNumber =
+            Math.max(maxNumber, num);
+
+        }
+
+      }
+
+    });
+// =========================
+// FINAL NUMBER
+// =========================
+
+let nextNumber = 1;
+
+// =========================
+// COMPANY START FY
+// =========================
+
+if (fyStr === startFYStr) {
+
+  const effectiveMax =
+
+    Math.max(
+      maxNumber,
+      startNumber - 1
+    );
+
+  nextNumber =
+    effectiveMax + 1;
+
+}
+
+// =========================
+// OTHER FY
+// =========================
+
+else {
+
+  nextNumber =
+    maxNumber > 0
+
+      ? maxNumber + 1
+
+      : 1;
+
+}
+
+    console.log(
+  "FINAL NEXT NUMBER:",
+  `${prefix}/${fyStr}/${String(nextNumber).padStart(4, "0")}`
+);
+
+
+
+console.log(
+  "PREFIX:",
+  prefix
+);
+    return res.json({
+
+      success: true,
+
+      data: {
+
+        invoiceNumber:
+          `${prefix}/${fyStr}/${String(nextNumber).padStart(4, "0")}`
+
+      }
+
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GET NEXT INVOICE ERROR:",
+      err
+    );
+
+    return res.json({
+      success: false,
+      error: err.message
+    });
+
+  }
+
+});
+
+
+// =========================
+// GET LATEST INVOICE DATE
+// =========================
+
+app.get(
+  "/api/getLatestInvoiceDate",
+  async (req, res) => {
+
+    try {
+
+      console.log(
+        "GET LATEST INVOICE DATE API HIT"
+      );
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+// GET COMPANY
+// =========================
+
+const {
+  data: company,
+  error: companyError
+} = await supabase
+
+
+  .from("company")
+
+  .select("company_start")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .single();
+
+console.log(
+  "COMPANY RAW:",
+  company
+);
+
+console.log(
+  "BUSINESS NAME:",
+  company?.businessname
+);
+  
+if (companyError || !company) {
+
+  return res.json({
+
+    success: false,
+
+    error: "Company not found"
+
+  });
+
+}
+
+      // =========================
+      // FETCH LATEST DATE
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("invoices")
+
+        .select("invoice_date")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .not(
+          "invoice_date",
+          "is",
+          null
+        )
+
+        .order(
+          "invoice_date",
+          {
+            ascending: false
+          }
+        )
+
+        .limit(1);
+
+      if (error) {
+
+        console.log(
+          "GET LATEST INVOICE DATE ERROR:",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+
+      console.log(
+  "LATEST INVOICE DATE DATA:",
+  data
+);
+
+console.log(
+  "FINAL LATEST DATE:",
+  data &&
+  data.length > 0
+
+    ? data[0].invoice_date
+
+    : ""
+);
+
+      const latestInvoiceDate =
+
+  data &&
+  data.length > 0
+
+    ? data[0].invoice_date
+
+    : "";
+
+const companyStart =
+
+  company.company_start || "";
+
+const finalDate =
+
+  latestInvoiceDate >
+  companyStart
+
+    ? latestInvoiceDate
+
+    : companyStart;
+
+console.log(
+  "COMPANY START:",
+  companyStart
+);
+
+console.log(
+  "FINAL ALLOWED DATE:",
+  finalDate
+);
+
+return res.json({
+
+  success: true,
+
+  data: {
+
+    invoiceDate:
+      finalDate
+
+  }
+
+});
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "GET LATEST INVOICE DATE ERROR:",
+        err
+      );
+
+      
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+  // =========================
+  // GET INVOICES
+  // =========================
+
+  app.get(
+    "/getInvoices",
+    async (req, res) => {
+
+      try {
+
+        const company_code =
+
+          String(
+            req.query.company_code || ""
+          ).trim();
+
+        if (!company_code) {
+
+          return res.json({
+
+            success: false,
+
+            error: "company_code missing"
+
+          });
+
+        }
+
+        const page = Number(
+          req.query.page || 1
+        );
+
+        const limit = Number(
+          req.query.limit || 10
+        );
+
+        const period =
+  String(req.query.period || "all");
+
+const statusFilter =
+  String(req.query.statusFilter || "all");
+
+const docTypeFilter =
+  String(req.query.docTypeFilter || "invoice");
+
+  console.log({
+  period,
+  statusFilter,
+  docTypeFilter
+});
+
+        const from =
+          (page - 1) * limit;
+
+        const to =
+          from + limit - 1;
+
+          console.log(
+  "PAGE:",
+  page,
+  "LIMIT:",
+  limit,
+  "FROM:",
+  from,
+  "TO:",
+  to
+);
+        const {
+          data,
+          error
+        } = await supabase
+
+          .from("invoices")
+
+          .select("*")
+
+          .eq(
+            "company_code",
+            company_code
+          )
+
+      .order(
+  "created_at",
+  {
+    ascending: false
+  }
+);
+console.log(
+  "ROWS RETURNED:",
+  data?.length
+);
+
+        if (error) {
+
+          return res.json({
+
+            success: false,
+
+            error: error.message
+
+          });
+
+        }
+
+        const result =
+
+          (data || []).map((row) => ({
+
+            invoiceId:
+              row.invoice_id,
+
+            invoiceNumber:
+              row.invoice_number,
+
+            invoiceDate:
+              row.invoice_date,
+
+            customerName:
+              row.customer_name,
+
+            customerMobile:
+              row.customer_mobile,
+
+            customerGST:
+              row.customer_gst,
+
+            billingAddress:
+              row.billing_address,
+
+            shippingAddress:
+              row.shipping_address,
+
+            state:
+              row.state,
+
+            stateCode:
+              row.state_code,
+
+            subtotal:
+              row.subtotal,
+
+            cgst:
+              row.cgst,
+
+            sgst:
+              row.sgst,
+
+            igst:
+              row.igst,
+
+            gstPercent:
+              row.gst_percent,
+
+            grandTotal:
+              row.grand_total,
+
+            paymentMode:
+              row.payment_mode,
+
+            notes:
+              row.notes,
+
+            terms:
+              row.terms,
+
+            createdAt:
+              row.created_at,
+
+            company_code:
+              row.company_code,
+
+            client_code:
+              row.client_code,
+
+            billing_pincode:
+              row.billing_pincode,
+
+            shipping_state:
+              row.shipping_state,
+
+            shipping_stateCode:
+              row.shipping_state_code,
+
+            shipping_pincode:
+              row.shipping_pincode,
+
+            due_date:
+              row.due_date,
+
+            credit_period:
+              row.credit_period,
+
+            status:
+              row.status,
+
+            doc_type:
+
+              String(
+                row.doc_type || ""
+              )
+                .toLowerCase()
+                .trim() === "quotation"
+
+                ? "quotation"
+
+                : "invoice",
+
+            quote_no:
+              row.quote_no,
+
+          quote_dt:
+    row.quote_dt,
+
+  transporter_name:
+    row.transporter_name,
+
+  vehicle_no:
+    row.vehicle_no,
+
+  driver_mobile:
+    row.driver_mobile,
+
+  gr_rr_no:
+    row.gr_rr_no,
+
+  eway_bill_no:
+    row.eway_bill_no,
+
+    lr_date:
+  row.lr_date,
+
+eway_date:
+  row.eway_date,
+
+  bill_to_ship_to:
+  row.bill_to_ship_to,
+
+
+  share_token:
+    row.share_token
+
+          }));
+
+          let filteredResult = [...result];
+
+// Doc Type Filter
+if (docTypeFilter !== "all") {
+  filteredResult = filteredResult.filter(
+    (i) => i.doc_type === docTypeFilter
+  );
+}
+
+// Status Filter
+if (statusFilter === "posted") {
+  filteredResult = filteredResult.filter(
+    (i) =>
+      String(i.status || "")
+        .trim()
+        .toLowerCase() === "posted"
+  );
+}
+
+if (statusFilter === "not_posted") {
+  filteredResult = filteredResult.filter(
+    (i) =>
+      String(i.status || "")
+        .trim()
+        .toLowerCase() !== "posted"
+  );
+}
+
+  // Period Filter
+if (period !== "all") {
+
+  const now = new Date();
+  let f = new Date(0);
+  let t = new Date();
+
+  if (period === "today") {
+
+    f = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    );
+
+    t = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      23,
+      59,
+      59
+    );
+
+  }
+
+  else if (period === "week") {
+
+    const day = now.getDay();
+
+    f = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - day
+    );
+
+  }
+
+  else if (period === "month") {
+
+    f = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1
+    );
+
+  }
+
+  else if (period === "lastMonth") {
+
+    f = new Date(
+      now.getFullYear(),
+      now.getMonth() - 1,
+      1
+    );
+
+    t = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      0,
+      23,
+      59,
+      59
+    );
+
+  }
+
+  
+
+  filteredResult = filteredResult.filter((i) => {
+
+    const filterDate =
+      i.doc_type === "quotation"
+        ? i.quote_dt
+        : i.invoiceDate;
+
+    const d = new Date(filterDate);
+
+    return d >= f && d <= t;
+
+  });
+
+}
+
+
+// Pagination AFTER filter
+const paginatedData =
+  filteredResult.slice(
+    from,
+    to + 1
+  );
+
+     return res.json({
+
+  success: true,
+
+  data: paginatedData,
+
+  total: filteredResult.length
+
+});
+
+      }
+
+      catch (err) {
+
+        return res.json({
+
+          success: false,
+
+          error: err.message
+
+        });
+
+      }
+
+    }
+  );
+
+
+
+
+  // =========================
+  // GET INVOICES FOR CA
+  // =========================
+
+  app.get(
+    "/getInvoicesForCA",
+    async (req, res) => {
+
+      try {
+
+        const company_code =
+
+          String(
+            req.query.company_code || ""
+          ).trim();
+
+        if (!company_code) {
+
+          return res.json({
+
+            success: false,
+
+            error: "company_code missing"
+
+          });
+
+        }
+
+        const period =
+  String(req.query.period || "all");
+
+const statusFilter =
+  String(req.query.statusFilter || "all");
+
+const docTypeFilter =
+  String(req.query.docTypeFilter || "invoice");
+
+  console.log({
+  period,
+  statusFilter,
+  docTypeFilter
+});
+
+      
+        const {
+          data,
+          error
+        } = await supabase
+
+          .from("invoices")
+
+          .select("*")
+
+          .eq(
+            "company_code",
+            company_code
+          )
+
+      .order(
+  "created_at",
+  {
+    ascending: false
+  }
+);
+console.log(
+  "ROWS RETURNED:",
+  data?.length
+);
+
+        if (error) {
+
+          return res.json({
+
+            success: false,
+
+            error: error.message
+
+          });
+
+        }
+
+        const result =
+
+          (data || []).map((row) => ({
+
+            invoiceId:
+              row.invoice_id,
+
+            invoiceNumber:
+              row.invoice_number,
+
+            invoiceDate:
+              row.invoice_date,
+
+            customerName:
+              row.customer_name,
+
+            customerMobile:
+              row.customer_mobile,
+
+            customerGST:
+              row.customer_gst,
+
+            billingAddress:
+              row.billing_address,
+
+            shippingAddress:
+              row.shipping_address,
+
+            state:
+              row.state,
+
+            stateCode:
+              row.state_code,
+
+            subtotal:
+              row.subtotal,
+
+            cgst:
+              row.cgst,
+
+            sgst:
+              row.sgst,
+
+            igst:
+              row.igst,
+
+            gstPercent:
+              row.gst_percent,
+
+            grandTotal:
+              row.grand_total,
+
+            paymentMode:
+              row.payment_mode,
+
+            notes:
+              row.notes,
+
+            terms:
+              row.terms,
+
+            createdAt:
+              row.created_at,
+
+            company_code:
+              row.company_code,
+
+            client_code:
+              row.client_code,
+
+            billing_pincode:
+              row.billing_pincode,
+
+            shipping_state:
+              row.shipping_state,
+
+            shipping_stateCode:
+              row.shipping_state_code,
+
+            shipping_pincode:
+              row.shipping_pincode,
+
+            due_date:
+              row.due_date,
+
+            credit_period:
+              row.credit_period,
+
+            status:
+              row.status,
+
+            doc_type:
+
+              String(
+                row.doc_type || ""
+              )
+                .toLowerCase()
+                .trim() === "quotation"
+
+                ? "quotation"
+
+                : "invoice",
+
+            quote_no:
+              row.quote_no,
+
+          quote_dt:
+    row.quote_dt,
+
+  transporter_name:
+    row.transporter_name,
+
+  vehicle_no:
+    row.vehicle_no,
+
+  driver_mobile:
+    row.driver_mobile,
+
+  gr_rr_no:
+    row.gr_rr_no,
+
+  eway_bill_no:
+    row.eway_bill_no,
+
+  share_token:
+    row.share_token
+
+          }));
+
+          let filteredResult = [...result];
+
+// Doc Type Filter
+if (docTypeFilter !== "all") {
+  filteredResult = filteredResult.filter(
+    (i) => i.doc_type === docTypeFilter
+  );
+}
+
+// Status Filter
+if (statusFilter === "posted") {
+  filteredResult = filteredResult.filter(
+    (i) =>
+      String(i.status || "")
+        .trim()
+        .toLowerCase() === "posted"
+  );
+}
+
+if (statusFilter === "not_posted") {
+  filteredResult = filteredResult.filter(
+    (i) =>
+      String(i.status || "")
+        .trim()
+        .toLowerCase() !== "posted"
+  );
+}
+
+  // Period Filter
+if (period !== "all") {
+
+  const now = new Date();
+  let f = new Date(0);
+  let t = new Date();
+
+  if (period === "today") {
+
+    f = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    );
+
+    t = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      23,
+      59,
+      59
+    );
+
+  }
+
+  else if (period === "week") {
+
+    const day = now.getDay();
+
+    f = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - day
+    );
+
+  }
+
+  else if (period === "month") {
+
+    f = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1
+    );
+
+  }
+
+  else if (period === "lastMonth") {
+
+    f = new Date(
+      now.getFullYear(),
+      now.getMonth() - 1,
+      1
+    );
+
+    t = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      0,
+      23,
+      59,
+      59
+    );
+
+  }
+
+  
+
+  filteredResult = filteredResult.filter((i) => {
+
+    const filterDate =
+      i.doc_type === "quotation"
+        ? i.quote_dt
+        : i.invoiceDate;
+
+    const d = new Date(filterDate);
+
+    return d >= f && d <= t;
+
+  });
+
+}
+
+
+
+   return res.json({
+  success: true,
+  data: filteredResult,
+  total: filteredResult.length
+});
+
+      }
+
+      catch (err) {
+
+        return res.json({
+
+          success: false,
+
+          error: err.message
+
+        });
+
+      }
+
+    }
+  );
+ 
+// =========================
+// GET INVOICE ITEMS
+// =========================
+
+app.get(
+
+  "/getInvoiceItems",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // MM DATA
+      // =========================
+
+      const {
+        data: mmRows,
+        error: mmError
+      } = await supabase
+
+        .from("mm")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (mmError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            mmError.message
+
+        });
+
+      }
+
+      // =========================
+      // VARIANT DATA
+      // =========================
+
+      const {
+        data: variantRows,
+        error: variantError
+      } = await supabase
+
+        .from("variant")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (variantError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            variantError.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESULT
+      // =========================
+
+      const result = [];
+
+      // =========================
+      // SINGLE ITEMS
+      // =========================
+
+      mmRows.forEach((row) => {
+
+        const matType =
+
+          String(
+            row.mat_type || ""
+          )
+            .trim()
+            .toLowerCase();
+
+        if (
+
+          matType === "single"
+
+          &&
+
+          row.is_active === true
+
+          &&
+
+          !row.hold
+
+        ) {
+
+ // =========================
+  // DEBUG SINGLE ITEM
+  // =========================
+
+  console.log(
+    "FINAL SINGLE ITEM:",
+    {
+
+      material_id:
+        row.material_id,
+
+      item_name:
+        row.item_name,
+
+      mrp:
+        row.mrp,
+
+      disc_percent:
+        row.disc_percent,
+
+      disc_amt:
+        row.disc_amt,
+
+      sale_rate:
+        row.sale_rate,
+
+      base_unit:
+        row.base_unit,
+
+      finalResponse: {
+
+        rate:
+          Number(
+            row.mrp || 0
+          ),
+
+        discountPct:
+          Number(
+            row.disc_percent || 0
+          ),
+
+        discountAmt:
+          Number(
+            row.disc_amt || 0
+          ),
+
+        sale_rate:
+          Number(
+            row.sale_rate || 0
+          )
+
+      }
+
+    }
+  );
+
+          
+          result.push({
+
+  mode: "single",
+
+  material_id:
+    row.material_id,
+
+  item_code:
+    String(
+      row.item_code || ""
+    ),
+
+  item_name:
+    row.item_name || "",
+
+  display_name:
+    row.item_name || "",
+
+  hsn_code:
+    String(
+      row.hsn_code || ""
+    ),
+
+  gst_percent:
+    Number(
+      row.gst_percent || 0
+    ),
+
+  unit:
+    row.base_unit || "",
+
+  // =========================
+  // PRICING
+  // =========================
+
+  mrp:
+    Number(
+      row.mrp || 0
+    ),
+
+  discountPct:
+    Number(
+      row.disc_percent || 0
+    ),
+
+  discountAmt:
+    Number(
+      row.disc_amt || 0
+    ),
+
+  disc_percent:
+    Number(
+      row.disc_percent || 0
+    ),
+
+  disc_amt:
+    Number(
+      row.disc_amt || 0
+    ),
+
+  sale_rate:
+    Number(
+      row.sale_rate || 0
+    ),
+
+  // IMPORTANT
+  // frontend expects MRP here
+  rate:
+    Number(
+      row.mrp || 0
+    )
+
+});
+
+        }
+
+      });
+
+      // =========================
+      // MULTI ITEMS
+      // =========================
+
+      variantRows.forEach((row) => {
+
+        console.log(
+              "RAW VARIANT ROW:",
+              row
+            );
+
+       if (
+
+  row.is_active !== true
+
+  ||
+
+  row.hold
+
+) {
+
+  return;
+
+}
+
+        // =========================
+        // FIND MM ROW
+        // =========================
+
+        const mmRow =
+
+          mmRows.find(
+
+            (m) =>
+
+              Number(
+                m.material_id
+              ) ===
+
+              Number(
+                row.material_id
+              )
+
+          );
+
+        if (!mmRow) return;
+
+                if (
+
+          mmRow.is_active !== true
+
+          ||
+
+          mmRow.hold
+
+        ) {
+
+          return;
+
+        }
+
+        const matType =
+
+          String(
+            mmRow.mat_type || ""
+          )
+            .trim()
+            .toLowerCase();
+
+        if (
+          matType !== "multi"
+        ) {
+
+          return;
+
+        }
+
+        console.log(
+  "FINAL MULTI ITEM:",
+  {
+
+    description:
+      row.description,
+
+    variant:
+      row.variant,
+
+    selling_rate:
+      row.selling_rate,
+
+    sale_rate:
+      row.sale_rate,
+
+    mrp:
+      row.mrp,
+
+    disc_percent:
+      row.disc_percent,
+
+    disc_amt:
+      row.disc_amt,
+
+    final_multiplier:
+      row.final_multiplier
+
+  }
+);
+
+      // =========================
+// CALCULATE VALUES
+// =========================
+
+const mrp =
+  Number(row.mrp || 0);
+
+const discountPct =
+  Number(
+    row.disc_percent || 0
+  );
+
+const discountAmt =
+  Number(
+    row.disc_amt || 0
+  );
+
+const finalRate =
+
+  Number(
+    row.selling_rate ||
+    row.sale_rate ||
+    0
+  );
+
+// =========================
+// DEBUG
+// =========================
+
+console.log(
+  "RATE DEBUG:",
+  {
+
+    material_id:
+      row.material_id,
+
+    description:
+      row.description,
+
+    variant:
+      row.variant,
+
+    mrp,
+
+    discountPct,
+
+    discountAmt,
+
+    finalRate,
+
+    expectedFrontend: {
+
+      rate: mrp,
+
+      discountPct,
+
+      netRate:
+        finalRate
+
+    }
+
+  }
+);
+
+// =========================
+// PUSH FINAL RESULT
+// =========================
+
+result.push({
+
+  mode: "multi",
+
+  material_id:
+    row.material_id,
+
+  variant_code:
+    String(
+      row.variant_code || ""
+    ),
+
+  item_name:
+    row.item_name || "",
+
+  description:
+    row.description || "",
+
+  variant:
+    row.variant || "",
+
+  sub_variant:
+    row.sub_variant || "",
+
+  qty:
+    Number(
+      row.qty || 0
+    ),
+
+  final_multiplier:
+    Number(
+      row.final_multiplier || 0
+    ),
+
+  base_unit:
+    row.base_unit || "",
+
+  display_name:
+    row.description || "",
+
+  hsn_code:
+    String(
+      mmRow.hsn_code || ""
+    ),
+
+  gst_percent:
+    Number(
+      mmRow.gst_percent || 0
+    ),
+
+  unit:
+    row.variant || "",
+
+  // =========================
+  // PRICING
+  // =========================
+
+  mrp,
+
+  discountPct,
+
+  discountAmt,
+
+  disc_percent:
+    discountPct,
+
+  disc_amt:
+    discountAmt,
+
+  discount:
+    discountPct,
+
+  discount_amount:
+    discountAmt,
+
+  sale_rate:
+    finalRate,
+
+  // IMPORTANT
+  // frontend expects ORIGINAL MRP
+  // not discounted rate
+  rate:
+    mrp ||
+
+    finalRate ||
+
+    0
+
+});
+
+      });
+
+      console.log(
+  "FINAL RESULT COUNT:",
+  result.length
+);
+
+console.log(
+  "FIRST RESULT:",
+  result[0]
+);
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
+// UPDATE TRANSPORT
+// =========================
+
+app.post(
+  "/updateTransport",
+
+  async (req, res) => {
+
+    try {
+
+      console.log(
+        "UPDATE TRANSPORT BODY:",
+        req.body
+      );
+
+      const invoiceId =
+
+        String(
+          req.body.invoiceId || ""
+        ).trim();
+
+      const company_code =
+
+        String(
+          req.body.company_code || ""
+        ).trim();
+
+      if (!invoiceId) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "invoiceId missing"
+
+        });
+
+      }
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+        error
+      } = await supabase
+
+        .from("invoices")
+
+        .update({
+
+          transporter_name:
+            req.body.transporter_name || "",
+
+          vehicle_no:
+            req.body.vehicle_no || "",
+
+          driver_mobile:
+            req.body.driver_mobile || "",
+
+          gr_rr_no:
+            req.body.gr_rr_no || "",
+
+          eway_bill_no:
+            req.body.eway_bill_no || "",
+          
+           lr_date:
+              req.body.lr_date || null,
+
+            eway_date:
+              req.body.eway_date || null
+
+
+        })
+
+        .eq(
+          "invoice_id",
+          invoiceId
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Transport updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// POST INVOICE
+// =========================
+
+app.post(
+  "/postInvoice",
+  async (req, res) => {
+
+    try {
+
+      const invoiceId =
+
+        String(
+          req.body.invoiceId || ""
+        ).trim();
+
+      const company_code =
+
+        String(
+          req.body.company_code || ""
+        ).trim();
+
+      console.log(
+        "========================="
+      );
+
+      console.log(
+        "POST INVOICE HIT"
+      );
+
+      console.log(
+        "INVOICE ID:",
+        invoiceId
+      );
+
+      console.log(
+        "COMPANY CODE:",
+        company_code
+      );
+
+      if (!invoiceId) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "invoiceId missing"
+
+        });
+
+      }
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // GET CURRENT INVOICE
+      // =========================
+
+      const {
+        data: currentInvoice,
+        error: currentError
+      } = await supabase
+
+        .from("invoices")
+
+        .select("*")
+
+        .eq(
+          "invoice_id",
+          invoiceId
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .single();
+
+      if (currentError || !currentInvoice) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Invoice not found"
+
+        });
+
+      }
+
+      console.log(
+        "CURRENT INVOICE NUMBER:",
+        currentInvoice.invoice_number
+      );
+
+      console.log(
+        "CURRENT INVOICE DATE:",
+        currentInvoice.invoice_date
+      );
+
+      // =========================
+      // EXTRACT FY + SEQUENCE
+      // =========================
+
+      const currentParts =
+
+        String(
+          currentInvoice.invoice_number || ""
+        ).split("/");
+
+      const currentFY =
+        currentParts[1] || "";
+
+      const currentSequence =
+        currentParts[2] || "";
+
+      console.log(
+        "CURRENT FY:",
+        currentFY
+      );
+
+      console.log(
+        "CURRENT SEQUENCE:",
+        currentSequence
+      );
+
+      // =========================
+      // FIND DUPLICATE
+      // SAME COMPANY
+      // SAME FY
+      // SAME SEQUENCE
+      // POSTED ONLY
+      // =========================
+
+      const {
+        data: postedInvoices,
+        error: postedError
+      } = await supabase
+
+        .from("invoices")
+
+        .select(`
+          invoice_id,
+          invoice_number,
+          invoice_date,
+          status
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "status",
+          "Posted"
+        );
+
+      if (postedError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            postedError.message
+
+        });
+
+      }
+
+      let duplicateFound =
+        false;
+
+      let maxSequence = 0;
+
+      let latestPostedDate =
+
+        currentInvoice.invoice_date;
+
+      (postedInvoices || []).forEach((row) => {
+
+        const parts =
+
+          String(
+            row.invoice_number || ""
+          ).split("/");
+
+        const fy =
+          parts[1] || "";
+
+        const seq =
+          Number(parts[2] || 0);
+
+        // =========================
+        // SAME FY
+        // =========================
+
+        if (fy === currentFY) {
+
+          // latest sequence
+
+          maxSequence =
+            Math.max(
+              maxSequence,
+              seq
+            );
+
+          // latest invoice date
+
+          if (
+
+            row.invoice_date >
+
+            latestPostedDate
+
+          ) {
+
+            latestPostedDate =
+              row.invoice_date;
+
+          }
+
+          // duplicate sequence
+console.log(
+  "CHECKING SEQUENCE:",
+  seq,
+  currentSequence
+);
+          if (
+
+  Number(seq) ===
+  Number(currentSequence)
+
+)  {
+
+            duplicateFound =
+              true;
+
+          }
+
+        }
+
+      });
+
+      console.log(
+        "DUPLICATE FOUND:",
+        duplicateFound
+      );
+
+      console.log(
+        "MAX SEQUENCE:",
+        maxSequence
+      );
+
+      console.log(
+        "LATEST POSTED DATE:",
+        latestPostedDate
+      );
+
+      let finalInvoiceNumber =
+
+        currentInvoice.invoice_number;
+
+      let finalInvoiceDate =
+
+        currentInvoice.invoice_date;
+
+      // =========================
+      // DUPLICATE CASE
+      // =========================
+
+      if (duplicateFound) {
+
+        console.log(
+          "DUPLICATE CASE STARTED"
+        );
+
+        const {
+          data: company,
+          error: companyError
+        } = await supabase
+
+          .from("company")
+
+          .select("*")
+
+          .eq(
+            "company_code",
+            company_code
+          )
+
+          .single();
+
+        if (companyError || !company) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              "Company not found"
+
+          });
+
+        }
+
+        const prefix =
+
+          company.invoiceprefix || "INV";
+
+        const nextSequence =
+
+          maxSequence + 1;
+
+        finalInvoiceNumber =
+
+          `${prefix}/${currentFY}/${String(nextSequence).padStart(4, "0")}`;
+
+        finalInvoiceDate =
+          latestPostedDate;
+
+        console.log(
+          "NEW INVOICE NUMBER:",
+          finalInvoiceNumber
+        );
+
+        console.log(
+          "NEW INVOICE DATE:",
+          finalInvoiceDate
+        );
+
+        // =========================
+        // UPDATE INVOICE
+        // =========================
+
+        const {
+          error: updateError
+        } = await supabase
+
+          .from("invoices")
+
+          .update({
+
+            invoice_number:
+              finalInvoiceNumber,
+
+            invoice_date:
+              finalInvoiceDate
+
+          })
+
+          .eq(
+            "invoice_id",
+            invoiceId
+          )
+
+          .eq(
+            "company_code",
+            company_code
+          );
+
+        if (updateError) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              updateError.message
+
+          });
+
+        }
+
+      }
+
+      // =========================
+      // FINAL POST
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("invoices")
+
+        .update({
+
+          status:
+            "Posted"
+
+        })
+
+        .eq(
+          "invoice_id",
+          invoiceId
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .select();
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      console.log(
+        "FINAL POST SUCCESS"
+      );
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Invoice posted",
+
+        data: {
+
+          invoiceNumber:
+            finalInvoiceNumber,
+
+          invoiceDate:
+            finalInvoiceDate
+
+        }
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "POST ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+
+// =========================
+// GET CLIENTS
+// =========================
+
+app.get(
+  "/getClients",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      console.log(
+        "GET CLIENTS API HIT"
+      );
+
+      console.log(
+        "COMPANY CODE:",
+        company_code
+      );
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH CLIENTS
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("client")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "created_at",
+          {
+            ascending: false
+          }
+        );
+
+      console.log(
+        "RAW CLIENT DATA:",
+        data
+      );
+
+      if (error) {
+
+        console.log(
+          "GET CLIENTS ERROR:",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESPONSE
+      // =========================
+
+      const result =
+
+        (data || []).map((row) => ({
+
+          company_code:
+            String(
+              row.company_code || ""
+            ),
+
+          client_code:
+            String(
+              row.client_code || ""
+            ),
+
+          client_name:
+            row.client_name || "",
+
+          gstin:
+            row.gstin || "",
+
+          billing_address:
+            row.billing_address || "",
+
+          bill_state:
+            row.bill_state || "",
+
+          bill_stateCode:
+            String(
+              row.bill_statecode || ""
+            ),
+
+          bill_pincode:
+            String(
+              row.bill_pincode || ""
+            ),
+
+          mobile:
+            String(
+              row.mobile || ""
+            ),
+
+          email:
+            row.email || "",
+
+          same_address:
+            row.same_address || "",
+
+          shipping_address:
+            row.shipping_address || "",
+
+          shipping_state:
+            row.shipping_state || "",
+
+          shipping_stateCode:
+            String(
+              row.shipping_statecode || ""
+            ),
+
+          shipping_pincode:
+            String(
+              row.shipping_pincode || ""
+            ),
+
+          createdAt:
+            row.created_at || "",
+
+          updatedAt:
+            row.updated_at || "",
+
+          is_active:
+            row.is_active,
+
+          contact_person:
+            row.contact_person || "",
+
+          credit_limit:
+            row.credit_limit || 0,
+
+          opening_balance:
+            row.opening_balance || 0,
+
+          remarks:
+            row.remarks || "",
+
+          credit_period:
+            row.credit_period || 0,
+
+            gst_registered:
+
+  row.gst_registered !== false
+
+        }));
+
+      console.log(
+        "FINAL CLIENT RESPONSE:",
+        result
+      );
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "GET CLIENTS CATCH ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// SAVE CLIENT
+// =========================
+
+app.post(
+  "/saveClient",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      console.log(
+        "SAVE CLIENT API HIT"
+      );
+
+      console.log(
+        "REQ BODY:",
+        body
+      );
+
+      // =========================
+      // COMPANY CODE
+      // =========================
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH ALL CLIENTS
+      // =========================
+
+      const {
+        data: allClients,
+        error: fetchError
+      } = await supabase
+
+        .from("client")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        console.log(
+          "FETCH CLIENT ERROR:",
+          fetchError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      console.log(
+        "ALL CLIENTS:",
+        allClients
+      );
+
+      // =========================
+      // DUPLICATE GST CHECK
+      // =========================
+
+     const gstin =
+
+  String(
+    body.gstin || ""
+  )
+    .trim()
+    .toUpperCase();
+
+const duplicateGST =
+
+  body.gst_registered !== false
+
+  &&
+
+  gstin
+
+    ? (allClients || []).find((row) => {
+
+        return (
+
+          String(
+            row.gstin || ""
+          )
+            .trim()
+            .toUpperCase()
+
+          ===
+
+          gstin
+
+        );
+
+      })
+
+    : null;
+
+if (duplicateGST) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Client with same GSTIN already exists"
+
+  });
+
+}
+      // =========================
+      // GENERATE CLIENT CODE
+      // =========================
+
+      let maxNumber = 0;
+
+      (allClients || []).forEach((row) => {
+
+        const code =
+
+          String(
+            row.client_code || ""
+          );
+
+        const num =
+
+          parseInt(
+            code.replace("CL", "")
+          );
+
+        if (!isNaN(num)) {
+
+          maxNumber =
+
+            Math.max(
+              maxNumber,
+              num
+            );
+
+        }
+
+      });
+
+      const nextClientCode =
+
+        "CL" +
+
+        String(maxNumber + 1)
+          .padStart(4, "0");
+
+      console.log(
+        "NEXT CLIENT CODE:",
+        nextClientCode
+      );
+
+      // =========================
+      // FALLBACK DUPLICATE
+      // =========================
+
+      const duplicateClientCode =
+
+        (allClients || []).find((row) => {
+
+          return (
+
+            String(
+              row.client_code || ""
+            ).trim()
+
+            ===
+
+            nextClientCode
+
+          );
+
+        });
+
+      if (duplicateClientCode) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Client code already exists. Please save again."
+
+        });
+
+      }
+
+      // =========================
+      // INSERT CLIENT
+      // =========================
+
+      const insertObj = {
+
+        company_code:
+          company_code,
+
+        client_code:
+          nextClientCode,
+
+        client_name:
+          body.client_name || "",
+
+        gstin:
+          body.gstin || "",
+
+        billing_address:
+          body.billing_address || "",
+
+        bill_state:
+          body.bill_state || "",
+
+        bill_statecode:
+          body.bill_stateCode || "",
+
+        bill_pincode:
+          body.bill_pincode || "",
+
+        mobile:
+          body.mobile || "",
+
+        email:
+          body.email || "",
+
+        same_address:
+          body.same_address || "",
+
+        shipping_address:
+          body.shipping_address || "",
+
+        shipping_state:
+          body.shipping_state || "",
+
+        shipping_statecode:
+          body.shipping_stateCode || "",
+
+        shipping_pincode:
+          body.shipping_pincode || "",
+
+        created_at:
+          new Date(),
+
+        updated_at:
+          new Date(),
+
+        is_active:
+
+          body.is_active !== false,
+
+        contact_person:
+          body.contact_person || "",
+
+        credit_limit:
+          Number(
+            body.credit_limit || 0
+          ),
+
+        opening_balance:
+          Number(
+            body.opening_balance || 0
+          ),
+
+        remarks:
+          body.remarks || "",
+
+        credit_period:
+          Number(
+            body.credit_period || 0
+          ),
+
+          gst_registered:
+
+  body.gst_registered !== false
+
+      };
+
+      console.log(
+        "FINAL INSERT OBJECT:",
+        insertObj
+      );
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("client")
+
+        .insert([
+
+          insertObj
+
+        ]);
+
+      if (insertError) {
+
+        console.log(
+          "INSERT ERROR:",
+          insertError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      console.log(
+        "CLIENT SAVED SUCCESS"
+      );
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Client saved successfully",
+
+        client_code:
+          nextClientCode
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "SAVE CLIENT ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+app.post(
+  "/updateClient",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      console.log(
+        "UPDATE CLIENT API HIT"
+      );
+
+      console.log(
+        "REQ BODY:",
+        body
+      );
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const client_code =
+
+        String(
+          body.client_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!client_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "client_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH ALL CLIENTS
+      // =========================
+
+      const {
+        data: allClients,
+        error: fetchError
+      } = await supabase
+
+        .from("client")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        console.log(
+          "FETCH CLIENT ERROR:",
+          fetchError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE GST CHECK
+      // =========================
+const gstin =
+
+  String(
+    body.gstin || ""
+  )
+    .trim()
+    .toUpperCase();
+
+const duplicateGST =
+
+  body.gst_registered !== false
+
+  &&
+
+  gstin
+
+    ? (allClients || []).find((row) => {
+
+        return (
+
+          String(
+            row.gstin || ""
+          )
+            .trim()
+            .toUpperCase()
+
+          ===
+
+          gstin
+
+          &&
+
+          String(
+            row.client_code || ""
+          ).trim()
+
+          !==
+
+          client_code
+
+        );
+
+      })
+
+    : null;
+
+if (duplicateGST) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Client with same GSTIN already exists"
+
+  });
+
+}
+      // =========================
+      // CHECK CLIENT EXISTS
+      // =========================
+
+      const existingClient =
+
+        (allClients || []).find((row) => {
+
+          return (
+
+            String(
+              row.client_code || ""
+            ).trim()
+
+            ===
+
+            client_code
+
+          );
+
+        });
+
+      if (!existingClient) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Client not found"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE OBJECT
+      // =========================
+
+      const updateObj = {
+
+        client_name:
+          body.client_name || "",
+
+        gstin:
+          body.gstin || "",
+
+        billing_address:
+          body.billing_address || "",
+
+        bill_state:
+          body.bill_state || "",
+
+        bill_statecode:
+          body.bill_stateCode || "",
+
+        bill_pincode:
+          body.bill_pincode || "",
+
+        mobile:
+          body.mobile || "",
+
+        email:
+          body.email || "",
+
+        same_address:
+          body.same_address || "",
+
+        shipping_address:
+          body.shipping_address || "",
+
+        shipping_state:
+          body.shipping_state || "",
+
+        shipping_statecode:
+          body.shipping_stateCode || "",
+
+        shipping_pincode:
+          body.shipping_pincode || "",
+
+        updated_at:
+          new Date(),
+
+        is_active:
+
+          body.is_active !== false,
+
+        contact_person:
+          body.contact_person || "",
+
+        credit_limit:
+          Number(
+            body.credit_limit || 0
+          ),
+
+        opening_balance:
+          Number(
+            body.opening_balance || 0
+          ),
+
+        remarks:
+          body.remarks || "",
+
+        credit_period:
+          Number(
+            body.credit_period || 0
+          ),
+
+          gst_registered:
+
+  body.gst_registered !== false
+
+      };
+
+      console.log(
+        "FINAL UPDATE OBJECT:",
+        updateObj
+      );
+
+      // =========================
+      // UPDATE CLIENT
+      // =========================
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("client")
+
+        .update(updateObj)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "client_code",
+          client_code
+        );
+
+      if (updateError) {
+
+        console.log(
+          "UPDATE ERROR:",
+          updateError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      console.log(
+        "CLIENT UPDATED SUCCESS"
+      );
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Client updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "UPDATE CLIENT ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+console.log("SIGNUP ROUTE LOADED");
+
+// =========================
+// SIGNUP USER
+// =========================
+
+app.post(
+  "/signupUser",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      const name =
+        String(body.name || "").trim();
+
+      const mobile =
+        String(body.mobile || "").trim();
+
+      const email =
+        String(body.email || "")
+          .trim()
+          .toLowerCase();
+
+      const password =
+        String(body.password || "").trim();
+
+        if (
+  password.length < 6 ||
+  password.length > 128
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Password must be between 6 and 128 characters"
+
+  });
+
+}
+
+      if (
+        !name ||
+        !mobile ||
+        !email ||
+        !password
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "All fields required"
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const {
+        data: existingUsers,
+        error: duplicateError
+      } = await supabase
+
+        .from("usersheet")
+
+        .select("*")
+
+        .or(
+          `email.eq.${email},mobile.eq.${mobile}`
+        );
+
+      if (duplicateError) {
+
+        console.log(
+          "DUPLICATE CHECK ERROR:",
+          duplicateError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            duplicateError.message
+
+        });
+
+      }
+
+      if (
+        existingUsers &&
+        existingUsers.length > 0
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "User already exists"
+
+        });
+
+      }
+
+      // =========================
+      // GET LAST COMPANY
+      // =========================
+
+      const {
+        data: companies,
+        error: companyError
+      } = await supabase
+
+        .from("company")
+
+        .select("company_code")
+
+        .order(
+          "id",
+          {
+            ascending: false
+          }
+        )
+
+        .limit(1);
+
+      if (companyError) {
+
+        console.log(
+          "COMPANY FETCH ERROR:",
+          companyError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            companyError.message
+
+        });
+
+      }
+
+      let nextCompanyCode =
+        "C0001";
+
+      if (
+        companies &&
+        companies.length > 0
+      ) {
+
+        const lastCode =
+
+          String(
+            companies[0]
+              ?.company_code || ""
+          );
+
+        const lastNumber =
+
+          parseInt(
+            lastCode.replace("C", "")
+          ) || 0;
+
+        nextCompanyCode =
+
+          "C" +
+
+          String(
+            lastNumber + 1
+          ).padStart(4, "0");
+
+      }
+
+      console.log(
+        "NEXT COMPANY CODE:",
+        nextCompanyCode
+      );
+
+
+      const hashedPassword =
+  await bcrypt.hash(password, 10);
+      // =========================
+      // INSERT USER
+      // =========================
+
+      const {
+        error: userInsertError
+      } = await supabase
+
+        .from("usersheet")
+
+        .insert([{
+
+          user_id:
+            mobile,
+
+         password: hashedPassword,
+
+          email,
+
+          mobile,
+
+          company_code:
+            nextCompanyCode,
+
+          is_active:
+            true,
+
+          created_at:
+            new Date(),
+
+          name
+
+        }]);
+
+      if (userInsertError) {
+
+        console.log(
+          "USER INSERT ERROR:",
+          userInsertError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            userInsertError.message
+
+        });
+
+      }
+
+      // =========================
+      // INSERT COMPANY
+      // =========================
+
+      const {
+        error: companyInsertError
+      } = await supabase
+
+        .from("company")
+
+        .insert([{
+
+          businessname:
+            "",
+
+          gstin:
+            "",
+
+          mobile,
+
+          email,
+
+          address:
+            "",
+
+          state:
+            "",
+
+          statecode:
+            "",
+
+          pincode:
+            "",
+
+          country:
+            "",
+
+          currency:
+            "",
+
+          currency_symbol:
+            "",
+
+          invoiceprefix:
+            "INV",
+
+          invoicestartnumber:
+            1,
+
+          company_code:
+            nextCompanyCode,
+
+          is_active:
+            true,
+
+          company_start:
+            new Date(),
+
+         license_type:
+  "Royal",
+  
+
+        }]);
+
+      if (companyInsertError) {
+
+        console.log(
+          "COMPANY INSERT ERROR:",
+          companyInsertError
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            companyInsertError.message
+
+        });
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Signup successful",
+
+        data: {
+
+          company_code:
+            nextCompanyCode,
+
+          email,
+
+          mobile,
+
+          name
+
+        }
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "SIGNUP ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// GET STATES
+// =========================
+
+app.get(
+  "/getStates",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("state_master")
+
+        .select("*")
+
+        .order(
+          "state_name",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data: data || []
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// GET COMPANY
+// =========================
+
+app.get(
+  "/getCompany",
+
+  async (req, res) => {
+
+    try {
+
+      const companyCode =
+
+        String(
+          req.query.companyCode || ""
+        ).trim();
+
+      if (!companyCode) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("company")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          companyCode
+        )
+
+        .single();
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+   const formattedData = {
+
+        ...data,
+
+        business_name:
+          data.businessname,
+
+        businessName:
+          data.businessname,
+
+          client_tally_company:
+    data.client_tally_company,
+
+  ca_tally_company:
+    data.ca_tally_company,
+
+  client_tally_enabled:
+    data.client_tally_enabled,
+
+  client_tally_mapping_completed:
+    data.client_tally_mapping_completed,
+
+  // =====================
+  // COUNTRY
+  // =====================
+
+  country:
+    String(
+      data.country || ""
+    ).trim(),
+
+  // =====================
+  // CURRENCY
+  // =====================
+
+  currency:
+    String(
+      data.currency || ""
+    ).trim(),
+
+  currency_symbol:
+    String(
+      data.currency_symbol || ""
+    ).trim(),
+
+     // =====================
+  // DEFAULT NOTES
+  // =====================
+
+  defaultNotes:
+    data.defaultnotes || "",
+
+  defaultTerms:
+    data.defaultterms || "",
+
+
+      };
+
+      return res.json({
+
+        success: true,
+
+         data: formattedData
+
+      });
+
+    }
+
+    catch (err) {
+
+      
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/completeCompanySetup",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+        error
+      } = await supabase
+
+        .from("company")
+
+        .update(body)
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Company updated"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+app.post(
+  "/saveCompany",
+
+  async (req, res) => {
+
+    try {
+
+      const companyCode =
+
+        String(
+          req.query.companyCode || ""
+        ).trim();
+
+      const body =
+        req.body || {};
+
+      if (!companyCode) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const updateObj = {
+
+        businessname:
+          body.businessName || "",
+
+        gstin:
+          body.gstin || "",
+
+        address:
+          body.address || "",
+
+        state:
+          body.state || "",
+
+        statecode:
+          body.stateCode || "",
+
+        country:
+          body.country || "",
+
+        currency:
+          body.currency || "",
+
+        currency_symbol:
+          body.currency_symbol || "",
+
+        mobile:
+          body.mobile || "",
+
+        email:
+          body.email || "",
+
+        bankname:
+          body.bankName || "",
+
+        accountnumber:
+          body.accountNumber || "",
+
+        ifsc:
+          body.ifsc || "",
+
+        upiid:
+          body.upiId || "",
+
+        logo:
+          body.logo || "",
+
+        defaultnotes:
+          body.defaultNotes || "",
+
+        defaultterms:
+          body.defaultTerms || "",
+
+        invoiceprefix:
+          body.invoicePrefix || "INV",
+
+        invoicestartnumber:
+          Number(
+            body.invoiceStartNumber || 1
+          ),
+
+        pincode:
+          body.pincode || "",
+
+        company_start:
+          body.company_start || null,
+
+        ca:
+          body.CA || "",
+
+        license_type:
+          body.license_type || "",
+
+          allow_posted_invoice_edit:
+  body.allow_posted_invoice_edit ?? false,
+
+  allow_mrp_edit:
+  body.allow_mrp_edit ?? false,
+
+  require_category:
+  body.require_category ?? false,
+
+
+
+        updatedat:
+          new Date()
+
+      };
+
+      console.log(
+        "FINAL UPDATE OBJECT:",
+        updateObj
+      );
+
+      const {
+        error
+      } = await supabase
+
+        .from("company")
+
+        .update(updateObj)
+
+        .eq(
+          "company_code",
+          companyCode
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Company saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET CATEGORY MASTER
+// =========================
+
+app.get(
+  "/getCategoryMaster",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH CAT MASTER
+      // =========================
+
+      const {
+        data: catData,
+        error: catError
+      } = await supabase
+
+        .from("cat")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "active",
+          true
+        );
+
+      if (catError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            catError.message
+
+        });
+
+      }
+
+      // =========================
+      // FETCH CATEGORY MAPPING
+      // =========================
+
+      const {
+        data: categoryData,
+        error: categoryError
+      } = await supabase
+
+        .from("category")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "active",
+          true
+        );
+
+      if (categoryError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            categoryError.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESULT
+      // =========================
+
+      const result =
+
+        (catData || []).map((row) => {
+
+          const catName =
+
+            String(
+              row.cat || ""
+            )
+              .trim()
+              .toLowerCase();
+
+          const is_used =
+
+            (categoryData || []).some((mapRow) => {
+
+              return (
+
+                String(
+                  mapRow.cat || ""
+                )
+                  .trim()
+                  .toLowerCase()
+
+                ===
+
+                catName
+
+              );
+
+            });
+
+          return {
+
+            ...row,
+
+            is_used
+
+          };
+
+        });
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET SUB CATEGORY MASTER
+// =========================
+
+app.get(
+  "/getSubCategoryMaster",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      const cat_id =
+
+        String(
+          req.query.cat_id || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH SUB CATEGORY MASTER
+      // =========================
+
+      let query =
+
+        supabase
+
+          .from("sub_category_master")
+
+          .select("*")
+
+          .eq(
+            "company_code",
+            company_code
+          )
+
+          .eq(
+            "active",
+            true
+          );
+
+      // =========================
+      // OPTIONAL CAT FILTER
+      // =========================
+
+      if (cat_id) {
+
+        query =
+
+          query.eq(
+            "cat_id",
+            Number(cat_id)
+          );
+
+      }
+
+      const {
+        data,
+        error
+      } = await query;
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FETCH CATEGORY TABLE
+      // =========================
+
+      const {
+        data: categoryData,
+        error: categoryError
+      } = await supabase
+
+        .from("category")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "active",
+          true
+        );
+
+      if (categoryError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            categoryError.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESULT
+      // =========================
+
+      const result =
+
+        (data || []).map((row) => {
+
+          const subCatName =
+
+            String(
+              row.sub_cat || ""
+            )
+              .trim()
+              .toLowerCase();
+
+          const is_used =
+
+            (categoryData || []).some((catRow) => {
+
+              return (
+
+                String(
+                  catRow.sub_cat || ""
+                )
+                  .trim()
+                  .toLowerCase()
+
+                ===
+
+                subCatName
+
+              );
+
+            });
+
+          return {
+
+  ...row,
+
+  HSN:
+    row.hsn || "",
+
+  is_used
+
+};
+        });
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// SAVE CATEGORY
+// =========================
+
+app.post(
+  "/saveCategory",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const cat =
+
+        String(
+          body.cat || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || ""
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!cat) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Category required"
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const {
+        data: existingData,
+        error: fetchError
+      } = await supabase
+
+        .from("cat")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      const exists =
+
+        (existingData || []).some((row) => {
+
+          return (
+
+            String(
+              row.cat || ""
+            )
+              .trim()
+              .toLowerCase()
+
+            ===
+
+            cat.toLowerCase()
+
+          );
+
+        });
+
+      if (exists) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Category already exists"
+
+        });
+
+      }
+
+      // =========================
+      // GENERATE NEXT CAT ID
+      // =========================
+
+      let nextId = 1;
+
+      (existingData || []).forEach((row) => {
+
+        const currentId =
+
+          Number(
+            row.cat_id || 0
+          );
+
+        nextId =
+
+          Math.max(
+            nextId,
+            currentId + 1
+          );
+
+      });
+
+      // =========================
+      // INSERT CATEGORY
+      // =========================
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("cat")
+
+        .insert([{
+
+          company_code:
+            company_code,
+
+          cat_id:
+            nextId,
+
+          cat:
+            cat,
+
+          active:
+            active,
+
+          created_at:
+            new Date(),
+
+          updated_at:
+            null
+
+        }]);
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Category saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// UPDATE CATEGORY
+// =========================
+
+app.post(
+  "/updateCategory",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const cat_id =
+
+        Number(
+          body.cat_id || 0
+        );
+
+      const cat =
+
+        String(
+          body.cat || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || ""
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!cat_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "cat_id missing"
+
+        });
+
+      }
+
+      if (!cat) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Category required"
+
+        });
+
+      }
+
+      // =========================
+      // CHECK CATEGORY EXISTS
+      // =========================
+
+      const {
+        data: existingCategory,
+        error: fetchError
+      } = await supabase
+
+        .from("cat")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "cat_id",
+          cat_id
+        )
+
+        .single();
+
+      if (fetchError || !existingCategory) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Category not found"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE CATEGORY
+      // =========================
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("cat")
+
+        .update({
+
+          cat:
+            cat,
+
+          active:
+            active,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "cat_id",
+          cat_id
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Category updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET HSN
+// =========================
+
+app.get(
+  "/getHSN",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH HSN
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("hsn")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "active",
+          true
+        )
+
+        .order(
+          "hsn_code",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESULT
+      // =========================
+
+      const result =
+
+        (data || []).map((row) => ({
+
+          ...row,
+
+          HSN_code:
+            row.hsn_code || "",
+
+          GST:
+            row.gst || 0
+
+        }));
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// SAVE HSN
+// =========================
+
+app.post(
+  "/saveHSN",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const HSN_code =
+
+        String(
+          body.HSN_code || ""
+        ).trim();
+
+      const GST =
+
+        String(
+          body.GST || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || ""
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!HSN_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "HSN code required"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH EXISTING HSN
+      // =========================
+
+      const {
+        data: existingData,
+        error: fetchError
+      } = await supabase
+
+        .from("hsn")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const duplicateHSN =
+
+        (existingData || []).find((row) => {
+
+          return (
+
+            String(
+              row.hsn_code || ""
+            ).trim()
+
+            ===
+
+            HSN_code
+
+          );
+
+        });
+
+      if (duplicateHSN) {
+
+        const isActive =
+
+          duplicateHSN.active === true;
+
+        // already active
+
+        if (isActive) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              "HSN already exists"
+
+          });
+
+        }
+
+        // inactive found
+
+        return res.json({
+
+          success: false,
+
+          restore_available: true,
+
+          message:
+            "This HSN code already exists but is currently inactive. Would you like to restore it?"
+
+        });
+
+      }
+
+      // =========================
+      // INSERT HSN
+      // =========================
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("hsn")
+
+        .insert([{
+
+          company_code:
+            company_code,
+
+          hsn_code:
+            HSN_code,
+
+          active:
+            active,
+
+          gst:
+            Number(GST || 0),
+
+          created_at:
+            new Date(),
+
+          updated_at:
+            new Date()
+
+        }]);
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "HSN saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+
+// =========================
+// UPDATE HSN
+// =========================
+
+app.post(
+  "/updateHSN",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const old_HSN_code =
+
+        String(
+          body.old_HSN_code || ""
+        ).trim();
+
+      const HSN_code =
+
+        String(
+          body.HSN_code || ""
+        ).trim();
+
+      const GST =
+
+        String(
+          body.GST || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || ""
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!old_HSN_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "old_HSN_code missing"
+
+        });
+
+      }
+
+      if (!HSN_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "HSN code required"
+
+        });
+
+      }
+
+      // =========================
+      // CHECK HSN EXISTS
+      // =========================
+
+      const {
+        data: existingHSN,
+        error: fetchError
+      } = await supabase
+
+        .from("hsn")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "hsn_code",
+          old_HSN_code
+        )
+
+        .single();
+
+      if (fetchError || !existingHSN) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "HSN not found"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE HSN
+      // =========================
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("hsn")
+
+        .update({
+
+          hsn_code:
+            HSN_code,
+
+          active:
+            active,
+
+          gst:
+            Number(GST || 0),
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "hsn_code",
+          old_HSN_code
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "HSN updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// RESTORE HSN
+// =========================
+
+app.post(
+  "/restoreHSN",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const HSN_code =
+
+        String(
+          body.HSN_code || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!HSN_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "HSN_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // CHECK HSN EXISTS
+      // =========================
+
+      const {
+        data: existingHSN,
+        error: fetchError
+      } = await supabase
+
+        .from("hsn")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "hsn_code",
+          HSN_code
+        )
+
+        .single();
+
+      if (fetchError || !existingHSN) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "HSN not found"
+
+        });
+
+      }
+
+      // =========================
+      // RESTORE HSN
+      // =========================
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("hsn")
+
+        .update({
+
+          active:
+            true,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "hsn_code",
+          HSN_code
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "HSN restored successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+app.get(
+
+  "/getCategories",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+
+        data,
+        error
+
+      } = await supabase
+
+        .from("category")
+
+        .select(`
+  id,
+  company_code,
+  cat,
+  sub_cat,
+  hsn,
+  active
+`)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "active",
+          true
+        )
+
+        .order(
+          "cat",
+          { ascending: true }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const formatted =
+
+  (data || []).map(item => ({
+
+    cat_id:
+      item.id,
+
+    company_code:
+      item.company_code,
+
+    cat:
+      item.cat,
+
+    Cat:
+      item.cat,
+
+    sub_cat:
+      item.sub_cat,
+
+    hsn:
+      item.hsn,
+
+    HSN:
+      item.hsn,
+
+    active:
+      item.active
+
+  }));
+
+return res.json({
+
+  success: true,
+
+  data:
+    formatted
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// MAP SUB CATEGORY
+// =========================
+
+app.post(
+  "/mapSubCategory",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const id =
+
+        Number(
+          body.id || 0
+        );
+
+      const cat_id =
+
+        Number(
+          body.cat_id || 0
+        );
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "id missing"
+
+        });
+
+      }
+
+      if (!cat_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "cat_id missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH SUB CATEGORY
+      // =========================
+
+      const {
+        data: subCategory,
+        error: subCategoryError
+      } = await supabase
+
+        .from("sub_category_master")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "id",
+          id
+        )
+
+        .single();
+
+      if (
+        subCategoryError ||
+        !subCategory
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Sub category not found"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE SUB CATEGORY
+      // =========================
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("sub_category_master")
+
+        .update({
+
+          cat_id:
+            cat_id,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "id",
+          id
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      // =========================
+      // FETCH CATEGORY NAME
+      // =========================
+
+      const {
+        data: categoryData,
+        error: categoryError
+      } = await supabase
+
+        .from("cat")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "cat_id",
+          cat_id
+        )
+
+        .single();
+
+      if (
+        categoryError ||
+        !categoryData
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Category not found"
+
+        });
+
+      }
+
+      const categoryName =
+
+        String(
+          categoryData.cat || ""
+        ).trim();
+
+      const subCatName =
+
+        String(
+          subCategory.sub_cat || ""
+        ).trim();
+
+      const HSN =
+
+        String(
+          subCategory.hsn || ""
+        ).trim();
+
+      // =========================
+      // CHECK CATEGORY EXISTS
+      // =========================
+
+      const {
+        data: existingCategory,
+        error: existingError
+      } = await supabase
+
+        .from("category")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (existingError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            existingError.message
+
+        });
+
+      }
+
+      const alreadyExists =
+
+        (existingCategory || []).some((row) => {
+
+          return (
+
+            String(
+              row.cat || ""
+            )
+              .trim()
+              .toLowerCase()
+
+            ===
+
+            categoryName
+              .toLowerCase()
+
+            &&
+
+            String(
+              row.sub_cat || ""
+            )
+              .trim()
+              .toLowerCase()
+
+            ===
+
+            subCatName
+              .toLowerCase()
+
+          );
+
+        });
+
+      // =========================
+      // INSERT CATEGORY
+      // =========================
+
+      if (!alreadyExists) {
+
+        const {
+          error: insertError
+        } = await supabase
+
+          .from("category")
+
+          .insert([{
+
+            company_code:
+              company_code,
+
+            cat:
+              categoryName,
+
+            sub_cat:
+              subCatName,
+
+            hsn:
+              HSN,
+
+            active:
+              true
+
+          }]);
+
+        if (insertError) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              insertError.message
+
+          });
+
+        }
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Sub category mapped successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// REMOVE SUB CATEGORY MAPPING
+// =========================
+
+app.post(
+  "/removeSubCategoryMapping",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const id =
+
+        Number(
+          body.id || 0
+        );
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "id missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH SUB CATEGORY
+      // =========================
+
+      const {
+        data: subCategory,
+        error: subCategoryError
+      } = await supabase
+
+        .from("sub_category_master")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "id",
+          id
+        )
+
+        .single();
+
+      if (
+        subCategoryError ||
+        !subCategory
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Sub category not found"
+
+        });
+
+      }
+
+      const subCatName =
+
+        String(
+          subCategory.sub_cat || ""
+        )
+          .trim()
+          .toLowerCase();
+
+      // =========================
+      // REMOVE CAT ID
+      // =========================
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("sub_category_master")
+
+        .update({
+
+          cat_id:
+            null,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "id",
+          id
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      // =========================
+      // REMOVE CATEGORY MAPPING
+      // =========================
+
+      const {
+        error: deleteError
+      } = await supabase
+
+        .from("category")
+
+        .delete()
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .ilike(
+          "sub_cat",
+          subCatName
+        );
+
+      if (deleteError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            deleteError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Mapping removed successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// GET MAPPED SUB CATEGORIES
+// =========================
+
+app.get(
+  "/getMappedSubCategories",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH CATEGORIES
+      // =========================
+
+      const {
+        data: catData,
+        error: catError
+      } = await supabase
+
+        .from("cat")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (catError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            catError.message
+
+        });
+
+      }
+
+      // =========================
+      // FETCH SUB CATEGORIES
+      // =========================
+
+      const {
+        data: subData,
+        error: subError
+      } = await supabase
+
+        .from("sub_category_master")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "active",
+          true
+        )
+
+        .not(
+          "cat_id",
+          "is",
+          null
+        );
+
+      if (subError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            subError.message
+
+        });
+
+      }
+
+      // =========================
+      // CATEGORY MAP
+      // =========================
+
+      const catMap = {};
+
+      (catData || []).forEach((row) => {
+
+        catMap[row.cat_id] =
+
+          row.cat || "";
+
+      });
+
+      // =========================
+      // FINAL RESULT
+      // =========================
+
+      const result =
+
+        (subData || []).map((row) => ({
+
+          id:
+            row.id,
+
+          cat_id:
+            row.cat_id,
+
+          Cat:
+            catMap[row.cat_id] || "",
+
+          sub_cat:
+            row.sub_cat || ""
+
+        }));
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// GET MAPPING CATEGORIES
+// =========================
+
+app.get(
+  "/getMappingCategories",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH CATEGORIES
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("cat")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "active",
+          true
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESULT
+      // =========================
+
+      const result =
+
+        (data || []).map((row) => ({
+
+          cat_id:
+            row.cat_id,
+
+          cat:
+            row.cat || ""
+
+        }));
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET UNMAPPED SUB CATEGORIES
+// =========================
+
+app.get(
+  "/getUnmappedSubCategories",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH SUB CATEGORIES
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("sub_category_master")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "active",
+          true
+        )
+
+        .is(
+          "cat_id",
+          null
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESULT
+      // =========================
+
+      const result =
+
+        (data || []).map((row) => ({
+
+          id:
+            row.id,
+
+          sub_cat:
+            row.sub_cat || ""
+
+        }));
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// UPDATE SUB CATEGORY
+// =========================
+
+app.post(
+  "/updateSubCategory",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const sub_cat_id =
+
+        String(
+          body.sub_cat_id || ""
+        ).trim();
+
+      const sub_cat =
+
+        String(
+          body.sub_cat || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || ""
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      const HSN =
+
+        String(
+          body.HSN || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!sub_cat_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "sub_cat_id missing"
+
+        });
+
+      }
+
+      if (!sub_cat) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "sub_cat required"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH SUB CATEGORY
+      // =========================
+
+      const {
+        data: subCategory,
+        error: subError
+      } = await supabase
+
+        .from("sub_category_master")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "id",
+          sub_cat_id
+        )
+
+        .single();
+
+      if (
+        subError ||
+        !subCategory
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Sub category not found"
+
+        });
+
+      }
+
+      const oldSubCatName =
+
+        String(
+          subCategory.sub_cat || ""
+        )
+          .trim()
+          .toLowerCase();
+
+      const newSubCatName =
+
+        sub_cat
+          .trim()
+          .toLowerCase();
+
+      // =========================
+      // CHECK SUB CATEGORY USAGE
+      // =========================
+
+      const {
+        data: categoryData,
+        error: categoryError
+      } = await supabase
+
+        .from("category")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "active",
+          true
+        );
+
+      if (categoryError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            categoryError.message
+
+        });
+
+      }
+
+      const isUsed =
+
+        (categoryData || []).some((row) => {
+
+          return (
+
+            String(
+              row.sub_cat || ""
+            )
+              .trim()
+              .toLowerCase()
+
+            ===
+
+            oldSubCatName
+
+          );
+
+        });
+
+      if (
+
+        isUsed
+
+        &&
+
+        oldSubCatName !==
+          newSubCatName
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Mapped sub category name cannot be changed"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE SUB CATEGORY
+      // =========================
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("sub_category_master")
+
+        .update({
+
+          sub_cat:
+            sub_cat,
+
+          active:
+            active,
+
+          hsn:
+            HSN,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "id",
+          sub_cat_id
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE CATEGORY HSN
+      // =========================
+
+      const {
+        error: categoryUpdateError
+      } = await supabase
+
+        .from("category")
+
+        .update({
+
+          hsn:
+            HSN
+
+        })
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .ilike(
+          "sub_cat",
+          oldSubCatName
+        );
+
+      if (categoryUpdateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            categoryUpdateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Sub category updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// SAVE SUB CATEGORY
+// =========================
+
+app.post(
+  "/saveSubCategory",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const sub_cat =
+
+        String(
+          body.sub_cat || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || ""
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      const HSN =
+
+        String(
+          body.HSN || ""
+        ).trim();
+
+      const cat_id =
+
+        body.cat_id || null;
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!sub_cat) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Sub category required"
+
+        });
+
+      }
+
+      // =========================
+      // CHECK DUPLICATE
+      // =========================
+
+      const {
+        data: existingData,
+        error: fetchError
+      } = await supabase
+
+        .from("sub_category_master")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      const exists =
+
+        (existingData || []).some((row) => {
+
+          return (
+
+            String(
+              row.sub_cat || ""
+            )
+              .trim()
+              .toLowerCase()
+
+            ===
+
+            sub_cat
+              .toLowerCase()
+
+          );
+
+        });
+
+      if (exists) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Sub category already exists"
+
+        });
+
+      }
+
+      
+      // =========================
+      // INSERT SUB CATEGORY
+      // =========================
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("sub_category_master")
+
+        .insert([{
+
+         
+
+          company_code:
+            company_code,
+
+          cat_id:
+            cat_id,
+
+          sub_cat:
+            sub_cat,
+
+          active:
+            active,
+
+          created_at:
+            new Date(),
+
+          updated_at:
+            null,
+
+          hsn:
+            HSN
+
+        }]);
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Sub category saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GENERATE VARIANT ROWS
+// =========================
+
+async function generateVariantRows(
+  materialId,
+  variantCode,
+  body,
+  packaging
+) {
+
+  const rows = [];
+
+  // =========================
+  // GET LAST ROW ID
+  // =========================
+
+  const {
+    data: lastVariant
+  } = await supabase
+
+    .from("variant")
+
+    .select("row_id")
+
+    .order(
+      "row_id",
+      {
+        ascending: false
+      }
+    )
+
+    .limit(1)
+
+    .single();
+
+  let rowId =
+
+    lastVariant?.row_id
+
+      ? Number(
+          lastVariant.row_id
+        ) + 1
+
+      : 1;
+
+  // =========================
+  // LOOP PACKAGING
+  // =========================
+
+  packaging.forEach((p) => {
+
+    // =========================
+    // FINAL MULTIPLIER
+    // =========================
+
+    let finalMultiplier = 1;
+
+    const currentIndex =
+
+      packaging.findIndex(
+        row =>
+          row.variant === p.variant
+      );
+
+    for (
+      let i = currentIndex;
+      i < packaging.length;
+      i++
+    ) {
+
+      finalMultiplier =
+
+        finalMultiplier *
+
+        Number(
+          packaging[i].qty || 1
+        );
+
+    }
+
+    // =========================
+    // DESCRIPTION
+    // =========================
+
+    const cleanPackaging =
+
+  String(
+
+    p.item_packaging
+
+    || body.variant_label
+
+    || ""
+
+  ).trim();
+
+    const parentItemName =
+
+      String(
+        body.item_name || ""
+      ).trim();
+
+    const description =
+
+      String(
+        body.measurement || ""
+      )
+        .toLowerCase() === "weight"
+
+        ? cleanPackaging
+            .toLowerCase()
+            .startsWith(
+              parentItemName
+                .trim()
+                .toLowerCase()
+            )
+
+            ? cleanPackaging
+
+            : `${parentItemName}-${cleanPackaging}`
+
+        : body.item_name || "";
+
+    const isStockItem =
+
+  String(p.variant || "")
+    .trim()
+    .toLowerCase()
+
+  ===
+
+  String(body.base_unit || "")
+    .trim()
+    .toLowerCase()
+
+  &&
+
+  String(p.sub_variant || "")
+    .trim()
+    .toLowerCase()
+
+  ===
+
+  String(body.base_unit || "")
+    .trim()
+    .toLowerCase();
+
+    // =========================
+    // PUSH ROW
+    // =========================
+
+    rows.push({
+
+      row_id:
+        rowId++,
+
+      material_id:
+        materialId,
+
+      variant_code:
+        variantCode,
+
+      item_name:
+        parentItemName,
+
+      measurement:
+        body.measurement || "",
+
+      item_packaging:
+  cleanPackaging,
+
+      description:
+        description,
+
+      variant:
+        p.variant || "",
+
+      sub_variant:
+        p.sub_variant || "",
+
+      qty:
+        Number(p.qty || 1),
+
+      final_multiplier:
+        finalMultiplier,
+
+      base_unit:
+        body.base_unit || "",
+
+      purchase_rate:
+        Number(body.purchase_rate || 0),
+
+      mrp:
+        Number(p.mrp || 0),
+
+      disc_percent:
+  Number(
+    p.Disc_Percent
+    ?? p.disc_percent
+    ?? 0
+  ),
+
+disc_amt:
+  Number(
+    p.Disc_Amt
+    ?? p.disc_amt
+    ?? 0
+  ),
+
+      selling_rate:
+        Number(p.selling_rate || 0),
+
+     opening_stock:
+  isStockItem
+    ? Number(body.opening_stock || 0)
+    : 0,
+
+      purchase: 0,
+
+      sale: 0,
+
+      retrun: 0,
+
+    closing: Number(body.closing || 0),
+
+      min_stock:
+        Number(body.min_stock || 0),
+
+      barcode: "",
+
+      sku: "",
+
+      item_type:
+        body.item_type || "Goods",
+
+      batch_required:
+        false,
+
+      expiry_required:
+        false,
+
+      serial_required:
+        false,
+
+      is_active:
+        true,
+
+      remarks: "",
+
+      created_at:
+        new Date(),
+
+      updated_at:
+        new Date(),
+
+      company_code:
+        body.company_code || "",
+
+      branch_id:
+        body.branch_id || ""
+
+    });
+
+  });
+
+  return rows;
+
+}
+
+
+
+// =========================
+// SAVE MATERIAL
+// =========================
+
+app.post(
+  "/saveMaterial",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!body.company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const {
+        data: existingItems,
+        error: fetchError
+      } = await supabase
+
+        .from("mm")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          body.company_code
+        )
+
+        .eq(
+          "branch_id",
+          body.branch_id || ""
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      const duplicateItem =
+
+        (existingItems || []).find((row) => {
+
+          return (
+
+            String(
+              row.item_name || ""
+            )
+              .trim()
+              .toUpperCase()
+
+            ===
+
+            String(
+              body.item_name || ""
+            )
+              .trim()
+              .toUpperCase()
+
+          );
+
+        });
+
+      if (duplicateItem) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Item already exists for this branch"
+
+        });
+
+      }
+
+      // =========================
+      // NEXT MATERIAL ID
+      // =========================
+
+      const {
+        data: lastMaterial
+      } = await supabase
+
+        .from("mm")
+
+        .select("material_id")
+
+        .order(
+          "material_id",
+          {
+            ascending: false
+          }
+        )
+
+        .limit(1)
+
+        .single();
+
+      const materialId =
+
+        lastMaterial?.material_id
+
+          ? Number(
+              lastMaterial.material_id
+            ) + 1
+
+          : 1;
+
+      // =========================
+      // ITEM NUMBER
+      // =========================
+
+      let itemNumber = 1;
+
+      const companyRows =
+
+        (existingItems || []).filter(
+          row =>
+
+            String(
+              row.company_code || ""
+            ).trim()
+
+            ===
+
+            String(
+              body.company_code || ""
+            ).trim()
+        );
+
+      if (companyRows.length > 0) {
+
+        let maxItem = 0;
+
+        companyRows.forEach((row) => {
+
+          const code =
+
+            String(
+              row.item_code || ""
+            );
+
+          const num =
+
+            parseInt(
+              code.replace("ITM", "")
+            );
+
+          if (!isNaN(num)) {
+
+            maxItem =
+
+              Math.max(
+                maxItem,
+                num
+              );
+
+          }
+
+        });
+
+        itemNumber = maxItem + 1;
+
+      }
+
+      // =========================
+      // AUTO ITEM CODE
+      // =========================
+
+      const itemCode =
+
+        "ITM" +
+
+        String(itemNumber)
+          .padStart(3, "0");
+
+      // =========================
+      // BLOCK VARIANT MODE
+      // =========================
+
+      if (
+        body.mode ===
+        "add_variant"
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Variant mode cannot create material"
+
+        });
+
+      }
+
+      // =========================
+      // SAVE MM
+      // =========================
+
+      const insertObj = {
+
+        material_id:
+          materialId,
+
+        item_code:
+          itemCode,
+
+        mat_type:
+          body.mat_type || "",
+
+        item_name:
+          body.item_name || "",
+
+        short_name:
+          body.short_name || "",
+
+        measurement:
+          body.measurement || "",
+
+        category:
+          body.category || "",
+
+        sub_category:
+          body.sub_category || "",
+
+        brand:
+          body.brand || "",
+
+        hsn_code:
+          String(
+            body.hsn_code || ""
+          ),
+
+        gst_percent:
+          Number(
+            body.gst_percent || 0
+          ),
+
+        cess_percent:
+          Number(
+            body.cess_percent || 0
+          ),
+
+        base_unit:
+          body.base_unit || "",
+
+        purchase_rate:
+          Number(
+            body.purchase_rate || 0
+          ),
+
+        mrp:
+          Number(
+            body.mrp || 0
+          ),
+
+        disc_percent:
+  Number(
+    body.Disc_Percent
+    ?? body.disc_percent
+    ?? body.discount_percent
+    ?? 0
+  ),
+
+disc_amt:
+  Number(
+    body.Disc_Amt
+    ?? body.disc_amt
+    ?? body.discount_amount
+    ?? 0
+  ),
+
+        sale_rate:
+          Number(
+            body.sale_rate || 0
+          ),
+
+        opening_stock:
+          Number(
+            body.opening_stock || 0
+          ),
+
+        purchase: 0,
+
+        sale: 0,
+
+        retrun: 0,
+
+        closing:
+          Number(
+            body.opening_stock || 0
+          ),
+
+        min_stock:
+          Number(
+            body.min_stock || 0
+          ),
+
+        barcode:
+          body.barcode || "",
+
+        sku:
+          body.sku || "",
+
+        item_type:
+          body.item_type || "Goods",
+
+        batch_required:
+          body.batch_required || false,
+
+        expiry_required:
+          body.expiry_required || false,
+
+        serial_required:
+          body.serial_required || false,
+
+        is_active:
+          true,
+
+        remarks:
+          body.remarks || "",
+
+        created_at:
+          new Date(),
+
+        updated_at:
+          new Date(),
+
+        company_code:
+          body.company_code || "",
+
+        branch_id:
+          body.branch_id || "",
+
+        image_url:
+          body.image_url || ""
+
+      };
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("mm")
+
+        .insert([
+
+          insertObj
+
+        ]);
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      // =========================
+      // GENERATE VARIANTS
+      // =========================
+
+      const packaging =
+        body.packaging || [];
+
+      const variantRows =
+
+        await generateVariantRows(
+
+          materialId,
+
+          `${materialId}A`,
+
+          body,
+
+          packaging
+
+        );
+
+      // =========================
+      // SAVE VARIANTS
+      // =========================
+
+      if (variantRows.length > 0) {
+
+        const {
+          error: variantError
+        } = await supabase
+
+          .from("variant")
+
+          .insert(
+            variantRows
+          );
+
+        if (variantError) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              variantError.message
+
+          });
+
+        }
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        material_id:
+          materialId,
+
+        item_code:
+          itemCode,
+
+        message:
+          "Material saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// UPDATE SINGLE MATERIAL
+// =========================
+
+app.post(
+  "/updateSingleMaterial",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!body.material_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      if (!body.company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FIND MATERIAL
+      // =========================
+
+      const {
+        data: material,
+        error: materialError
+      } = await supabase
+
+        .from("mm")
+
+        .select("*")
+
+        .eq(
+          "material_id",
+          Number(body.material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        )
+
+        .single();
+
+      if (materialError || !material) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Material not found"
+
+        });
+
+      }
+
+      // =========================
+      // CHECK VARIANTS
+      // =========================
+
+      const {
+        data: variants,
+        error: variantError
+      } = await supabase
+
+        .from("variant")
+
+        .select("row_id")
+
+        .eq(
+          "material_id",
+          Number(body.material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        );
+
+      if (variantError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            variantError.message
+
+        });
+
+      }
+
+      const hasVariants =
+
+        (variants || []).length > 0;
+
+      // =========================
+      // PREVENT TYPE CHANGE
+      // =========================
+
+      if (hasVariants) {
+
+        const currentType =
+
+          String(
+            material.mat_type || ""
+          ).trim();
+
+        if (
+
+          currentType !==
+
+          String(
+            body.mat_type || ""
+          ).trim()
+
+        ) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              "Material type cannot change because variants exist"
+
+          });
+
+        }
+
+      }
+
+      // =========================
+      // UPDATE MM
+      // =========================
+
+      const updateObj = {
+
+        mat_type:
+          body.mat_type || "",
+
+        item_name:
+          body.item_name || "",
+
+        measurement:
+          body.measurement || "",
+
+        category:
+          body.category || "",
+
+        sub_category:
+          body.sub_category || "",
+
+        brand:
+          body.brand || "",
+
+        hsn_code:
+          String(
+            body.hsn_code || ""
+          ),
+
+        gst_percent:
+          Number(
+            body.gst_percent || 0
+          ),
+
+        base_unit:
+          body.base_unit || "",
+
+           opening_stock:
+    Number(
+      body.opening_stock || 0
+    ),
+
+        mrp:
+          Number(
+            body.mrp || 0
+          ),
+
+        disc_percent:
+          Number(
+
+            body.Disc_Percent
+
+            ?? body.disc_percent
+
+            ?? body.discount_percent
+
+            ?? 0
+
+          ),
+
+        disc_amt:
+          Number(
+
+            body.Disc_Amt
+
+            ?? body.disc_amt
+
+            ?? body.discount_amount
+
+            ?? 0
+
+          ),
+
+        sale_rate:
+          Number(
+            body.sale_rate || 0
+          ),
+
+        updated_at:
+          new Date(),
+
+      };
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("mm")
+
+        .update(updateObj)
+
+        .eq(
+          "material_id",
+          Number(body.material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Material updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// ADD MATERIAL VARIANT
+// =========================
+
+app.post(
+  "/addMaterialVariant",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!body.material_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      if (!body.company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FIND MATERIAL
+      // =========================
+
+      const {
+        data: material,
+        error: materialError
+      } = await supabase
+
+        .from("mm")
+
+        .select("*")
+
+        .eq(
+          "material_id",
+          Number(body.material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        )
+
+        .single();
+
+      if (materialError || !material) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Material not found"
+
+        });
+
+      }
+
+      // =========================
+      // EXISTING ITEM CODE
+      // =========================
+
+      const materialId =
+        Number(body.material_id);
+
+      const itemCode =
+        String(
+          material.item_code || ""
+        );
+
+      const parentItemName =
+        String(
+          material.item_name || ""
+        ).trim();
+
+      // =========================
+      // DUPLICATE VARIANT CHECK
+      // =========================
+
+      const newDescription =
+
+        `${parentItemName}-${body.variant_label}`
+          .trim()
+          .toUpperCase();
+
+      const {
+        data: existingVariants,
+        error: variantError
+      } = await supabase
+
+        .from("variant")
+
+        .select("*")
+
+        .eq(
+          "material_id",
+          materialId
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        );
+
+      if (variantError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            variantError.message
+
+        });
+
+      }
+
+      const duplicateVariant =
+
+        (existingVariants || []).find(
+          (row) =>
+
+            String(
+              row.description || ""
+            )
+              .trim()
+              .toUpperCase()
+
+            ===
+
+            newDescription
+        );
+
+      if (duplicateVariant) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Variant already exists"
+
+        });
+
+      }
+
+      // =========================
+      // PREPARE PACKAGING
+      // =========================
+
+      const packaging =
+        body.packaging || [];
+
+      body.item_name =
+        parentItemName;
+
+      body.packaging =
+
+        packaging.map((row) => ({
+
+          ...row,
+
+          item_packaging:
+            body.variant_label || ""
+
+        }));
+
+      // =========================
+      // GENERATE VARIANT CODE
+      // =========================
+
+      const existingVariantCodes =
+
+        (existingVariants || []).map(
+          (row) =>
+
+            String(
+              row.variant_code || ""
+            )
+        );
+
+      let nextLetter = "A";
+
+      while (
+
+        existingVariantCodes.includes(
+          `${materialId}${nextLetter}`
+        )
+
+      ) {
+
+        nextLetter =
+
+          String.fromCharCode(
+
+            nextLetter.charCodeAt(0) + 1
+
+          );
+
+      }
+
+      const variantCode =
+
+        `${materialId}${nextLetter}`;
+
+      // =========================
+      // GENERATE VARIANT ROWS
+      // =========================
+
+      const variantRows =
+
+        await generateVariantRows(
+
+          materialId,
+
+          variantCode,
+
+          body,
+
+          body.packaging
+
+        );
+
+      // =========================
+      // INSERT VARIANTS
+      // =========================
+
+      if (variantRows.length > 0) {
+
+        const {
+          error: insertError
+        } = await supabase
+
+          .from("variant")
+
+          .insert(variantRows);
+
+        if (insertError) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              insertError.message
+
+          });
+
+        }
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        material_id:
+          materialId,
+
+        item_code:
+          itemCode,
+
+        message:
+          "Variant added successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// UPDATE MATERIAL HIERARCHY
+// =========================
+
+app.post(
+  "/updateMaterialHierarchy",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!body.company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!body.material_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      // =========================
+      // FIND MATERIAL
+      // =========================
+
+      const {
+        data: material,
+        error: materialError
+      } = await supabase
+
+        .from("mm")
+
+        .select("*")
+
+        .eq(
+          "material_id",
+          Number(body.material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        )
+
+        .single();
+
+      if (materialError || !material) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Material not found"
+
+        });
+
+      }
+
+      // =========================
+      // GET ITEM CODE
+      // =========================
+
+      const materialId =
+        Number(body.material_id);
+
+      const itemCode =
+        String(
+          material.item_code || ""
+        );
+
+      const variantCode =
+
+        String(
+          body.variant_code || ""
+        ).trim();
+
+      // =========================
+      // UPDATE MM
+      // =========================
+
+      const updateObj = {
+
+        mat_type:
+          body.mat_type || "",
+
+        base_unit:
+          body.base_unit || "",
+
+        opening_stock:
+          Number(
+            body.opening_stock || 0
+          ),
+
+        mrp:
+          Number(
+            body.mrp || 0
+          ),
+
+        disc_percent:
+          Number(
+
+            body.Disc_Percent
+
+            ?? body.disc_percent
+
+            ?? body.discount_percent
+
+            ?? 0
+
+          ),
+
+        disc_amt:
+          Number(
+
+            body.Disc_Amt
+
+            ?? body.disc_amt
+
+            ?? body.discount_amount
+
+            ?? 0
+
+          ),
+
+        sale_rate:
+          Number(
+            body.sale_rate || 0
+          ),
+
+        updated_at:
+          new Date(),
+
+      };
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("mm")
+
+        .update(updateObj)
+
+        .eq(
+          "material_id",
+          materialId
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      // =========================
+      // DELETE OLD VARIANTS
+      // =========================
+
+      const {
+        error: deleteError
+      } = await supabase
+
+        .from("variant")
+
+        .delete()
+
+        .eq(
+          "variant_code",
+          variantCode
+        )
+
+        .eq(
+          "company_code",
+          String(
+            body.company_code || ""
+          ).trim()
+        )
+
+        .eq(
+          "material_id",
+          materialId
+        );
+
+      if (deleteError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            deleteError.message
+
+        });
+
+      }
+
+      // =========================
+      // GENERATE NEW VARIANTS
+      // =========================
+
+      const packaging =
+        body.packaging || [];
+
+      const variantRows =
+
+        await generateVariantRows(
+
+          materialId,
+
+          variantCode,
+
+          body,
+
+          packaging
+
+        );
+
+      // =========================
+      // INSERT NEW VARIANTS
+      // =========================
+
+      if (variantRows.length > 0) {
+
+        const {
+          error: insertError
+        } = await supabase
+
+          .from("variant")
+
+          .insert(variantRows);
+
+        if (insertError) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              insertError.message
+
+          });
+
+        }
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        material_id:
+          materialId,
+
+        item_code:
+          itemCode,
+
+        message:
+          "Hierarchy updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// GET MATERIALS
+// =========================
+
+app.get(
+  "/getMaterials",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH MATERIALS
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("mm")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "material_id",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FORMAT RESULT
+      // =========================
+
+      const result =
+
+        (data || []).map((row) => {
+
+          return {
+
+            ...row,
+
+                // =========================
+      // DISCOUNT FIELDS
+      // =========================
+
+      Disc_Percent:
+        Number(
+          row.disc_percent || 0
+        ),
+
+      Disc_Amt:
+        Number(
+          row.disc_amt || 0
+        ),
+
+    
+            item_code:
+              String(
+                row.item_code || ""
+              ),
+
+            hsn_code:
+              String(
+                row.hsn_code || ""
+              ),
+
+            barcode:
+              String(
+                row.barcode || ""
+              ),
+
+            sku:
+              String(
+                row.sku || ""
+              ),
+
+            company_code:
+              String(
+                row.company_code || ""
+              ),
+
+            branch_id:
+              String(
+                row.branch_id || ""
+              ),
+
+
+
+          };
+
+        });
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// GET MATERIAL VARIANTS
+// =========================
+
+app.get(
+  "/getMaterialVariants",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      const material_id =
+
+        String(
+          req.query.material_id || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!material_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH VARIANTS
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("variant")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "material_id",
+          Number(material_id)
+        )
+
+        .order(
+          "row_id",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FORMAT RESULT
+      // =========================
+
+      const result =
+
+        (data || []).map((row) => {
+
+          return {
+
+            // =========================
+            // RAW DATA
+            // =========================
+
+            ...row,
+
+                // =========================
+      // DISCOUNT FIELDS
+      // =========================
+
+      Disc_Percent:
+        Number(
+          row.disc_percent || 0
+        ),
+
+      Disc_Amt:
+        Number(
+          row.disc_amt || 0
+        ),
+
+            // =========================
+            // SAFE STRING FIELDS
+            // =========================
+
+            material_id:
+              String(
+                row.material_id || ""
+              ),
+
+            variant_code:
+              String(
+                row.variant_code || ""
+              ),
+
+            barcode:
+              String(
+                row.barcode || ""
+              ),
+
+            sku:
+              String(
+                row.sku || ""
+              ),
+
+            company_code:
+              String(
+                row.company_code || ""
+              ),
+
+            branch_id:
+              String(
+                row.branch_id || ""
+              ),
+
+            item_name:
+              String(
+                row.item_name || ""
+              ),
+
+            description:
+              String(
+                row.description || ""
+              ),
+
+            variant:
+              String(
+                row.variant || ""
+              ),
+
+            sub_variant:
+              String(
+                row.sub_variant || ""
+              ),
+
+            item_packaging:
+              String(
+                row.item_packaging || ""
+              ),
+
+            // =========================
+            // SAFE NUMBER FIELDS
+            // =========================
+
+            Qty:
+              Number(
+                row.qty || 0
+              ),
+
+            final_multiplier:
+              Number(
+                row.final_multiplier || 0
+              ),
+
+            mrp:
+              Number(
+                row.mrp || 0
+              ),
+
+            purchase_rate:
+              Number(
+                row.purchase_rate || 0
+              ),
+
+            selling_rate:
+              Number(
+                row.selling_rate || 0
+              ),
+
+            Disc_Percent:
+              Number(
+                row.disc_percent || 0
+              ),
+
+            Disc_Amt:
+              Number(
+                row.disc_amt || 0
+              ),
+
+            opening_stock:
+              Number(
+                row.opening_stock || 0
+              ),
+
+            purchase:
+              Number(
+                row.purchase || 0
+              ),
+
+            sale:
+              Number(
+                row.sale || 0
+              ),
+
+            retrun:
+              Number(
+                row.retrun || 0
+              ),
+
+            closing:
+              Number(
+                row.closing || 0
+              ),
+
+            min_stock:
+              Number(
+                row.min_stock || 0
+              ),
+
+            // =========================
+            // SAFE BOOLEAN FIELDS
+            // =========================
+
+            batch_required:
+              Boolean(
+                row.batch_required
+              ),
+
+            expiry_required:
+              Boolean(
+                row.expiry_required
+              ),
+
+            serial_required:
+              Boolean(
+                row.serial_required
+              ),
+
+            is_active:
+              Boolean(
+                row.is_active
+              ),
+
+          };
+
+        });
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+app.post(
+
+  "/holdMaterial",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        material_id,
+        company_code,
+        hold
+
+      } = req.body || {};
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!material_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE HOLD
+      // =========================
+
+      const {
+        error
+      } = await supabase
+
+        .from("mm")
+
+        .update({
+
+          hold:
+            hold === "yes"
+              ? "yes"
+              : null,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "material_id",
+          Number(material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(company_code)
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+
+          hold === "yes"
+
+            ? "Material placed on hold"
+
+            : "Material restored"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+app.post(
+
+  "/deactivateMaterial",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        material_id,
+        company_code,
+        is_active
+
+      } = req.body || {};
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!material_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE STATUS
+      // =========================
+
+      const {
+        error
+      } = await supabase
+
+        .from("mm")
+
+        .update({
+
+          is_active:
+            is_active,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "material_id",
+          Number(material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(company_code)
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+
+          is_active
+
+            ? "Material activated"
+
+            : "Material permanently deactivated"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+// =========================
+// CANCEL MATERIAL
+// =========================
+
+console.log(
+  "cancelMaterial route registered"
+);
+
+app.post(
+
+  "/cancelMaterial",
+
+  async (req, res) => {
+
+    console.log(
+      "========== CANCEL MATERIAL API HIT =========="
+    );
+
+    try {
+
+      console.log(
+        "REQ BODY =>",
+        req.body
+      );
+
+      const {
+
+        material_id,
+        company_code,
+        hold,
+        is_active
+
+      } = req.body || {};
+
+      console.log(
+        "material_id =>",
+        material_id
+      );
+
+      console.log(
+        "company_code =>",
+        company_code
+      );
+
+      console.log(
+        "hold =>",
+        hold
+      );
+
+      console.log(
+        "is_active =>",
+        is_active
+      );
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!material_id) {
+
+        console.log(
+          "VALIDATION FAILED : material_id missing"
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      if (!company_code) {
+
+        console.log(
+          "VALIDATION FAILED : company_code missing"
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE STATUS
+      // =========================
+
+      console.log(
+        "UPDATING MATERIAL STATUS..."
+      );
+
+      const {
+        error
+      } = await supabase
+
+        .from("mm")
+
+        .update({
+
+          hold:
+            hold || null,
+
+          is_active:
+            Boolean(is_active),
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "material_id",
+          Number(material_id)
+        )
+
+        .eq(
+          "company_code",
+          String(company_code)
+        );
+
+      console.log(
+        "SUPABASE UPDATE DONE"
+      );
+
+      if (error) {
+
+        console.log(
+          "SUPABASE ERROR =>",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      console.log(
+        "MATERIAL STATUS UPDATED SUCCESSFULLY"
+      );
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Material status updated"
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "CANCEL MATERIAL API ERROR =>",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+
+// =========================
+// HOLD VARIANT
+// =========================
+
+app.post(
+
+  "/holdVariant",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        material_id,
+        company_code,
+        variant_code,
+        hold
+
+      } = req.body || {};
+
+      if (!material_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "material_id missing"
+
+        });
+
+      }
+
+      if (!variant_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "variant_code missing"
+
+        });
+
+      }
+
+      const {
+        error
+      } = await supabase
+
+        .from("variant")
+
+        .update({
+
+          hold:
+            hold || null,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "material_id",
+          Number(material_id)
+        )
+
+        .eq(
+          "variant_code",
+          String(variant_code)
+        )
+
+        .eq(
+          "company_code",
+          String(company_code)
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Variant hold updated"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+
+// =========================
+// CANCEL VARIANT
+// =========================
+
+app.post(
+
+  "/cancelVariant",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        material_id,
+        company_code,
+        variant_code,
+        hold,
+        is_active
+
+      } = req.body || {};
+
+      console.log(
+        "========== CANCEL VARIANT API HIT =========="
+      );
+
+      console.log(
+        "REQ BODY =>",
+        req.body
+      );
+
+      const {
+        error
+      } = await supabase
+
+        .from("variant")
+
+        .update({
+
+          hold:
+            hold || null,
+
+          is_active:
+            Boolean(is_active),
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "material_id",
+          Number(material_id)
+        )
+
+        .eq(
+          "variant_code",
+          String(variant_code)
+        )
+
+        .eq(
+          "company_code",
+          String(company_code)
+        );
+
+      if (error) {
+
+        console.log(
+          "SUPABASE ERROR =>",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      console.log(
+        "VARIANT STATUS UPDATED SUCCESSFULLY"
+      );
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Variant status updated"
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "CANCEL VARIANT ERROR =>",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+        });
+
+    }
+
+  }
+);
+
+// =========================
+// GET PACKAGING UNITS
+// =========================
+
+app.get(
+  "/getPackagingUnits",
+
+  async (req, res) => {
+
+    try {
+
+      const GLOBAL_PACKING_UNITS = [
+
+  "Box",
+  "Pc",
+  "Pkt",
+  "Carton",
+  "Tin",
+  "Set",
+  "Nos"
+
+];
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH PACKAGING UNITS
+      // =========================
+
+      console.log(
+        "GET PACKAGING UNITS COMPANY:",
+        company_code
+      );
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("pkg_unit")
+
+        .select(`
+        id,
+        company_code,
+        Pk_un:pk_un,
+        active
+      `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "pk_un",
+          {
+            ascending: true
+          }
+        );
+
+      // =========================
+      // ERROR
+      // =========================
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const existingUnits =
+
+  (data || []).map(
+
+    (item) =>
+
+      String(item.Pk_un || "")
+        .trim()
+        .toLowerCase()
+
+  );
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      const globalUnits =
+
+  GLOBAL_PACKING_UNITS
+
+    .filter(
+
+      (unit) =>
+
+        !existingUnits.includes(
+
+          String(unit)
+            .trim()
+            .toLowerCase()
+
+        )
+
+    )
+
+    .map((unit) => ({
+
+    id:
+  `global_${unit}`,
+
+      company_code:
+        company_code,
+
+      Pk_un:
+        unit,
+
+      active:
+        true,
+
+      is_default:
+        true
+
+    }));
+
+      return res.json({
+
+        success: true,
+
+        data: [
+
+  ...globalUnits,
+
+  ...(data || []).map(
+    (item) => ({
+
+      ...item,
+
+      is_default:
+        false
+
+    })
+  )
+
+]
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// SAVE PACKAGING UNIT
+// =========================
+
+app.post(
+  "/savePackagingUnit",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const pk_un =
+
+        String(
+          body.pk_un || ""
+        ).trim();
+
+    const active =
+
+  String(
+    body.active || "TRUE"
+  )
+    .trim()
+    .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!pk_un) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Packing unit required"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH EXISTING DATA
+      // =========================
+
+      const {
+        data: existingData,
+        error: fetchError
+      } = await supabase
+
+        .from("pkg_unit")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const exists =
+
+        (existingData || []).some((row) => {
+
+          return (
+
+            String(
+              row.pk_un || ""
+            )
+              .trim()
+              .toLowerCase()
+
+            ===
+
+            pk_un.toLowerCase()
+
+          );
+
+        });
+
+      if (exists) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Packing unit already exists"
+
+        });
+
+      }
+
+      // =========================
+      // INSERT
+      // =========================
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("pkg_unit")
+
+        .insert([{
+
+  company_code:
+    company_code,
+
+  pk_un:
+    pk_un,
+
+  active:
+    active,
+
+  created_at:
+    new Date(),
+
+  updated_at:
+    null
+
+}]);
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Packing unit saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// UPDATE PACKAGING UNIT
+// =========================
+
+app.post(
+
+  "/updatePackagingUnit",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      console.log(
+        "UPDATE PACKAGING UNIT BODY =>",
+        body
+      );
+
+      const id =
+
+        String(
+          body.id || ""
+        ).trim();
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const pk_un =
+
+        String(
+          body.pk_un || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || "TRUE"
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "id missing"
+
+        });
+
+      }
+
+      // BIGINT VALIDATION
+
+      if (
+        isNaN(Number(id))
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Invalid id"
+
+        });
+
+      }
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!pk_un) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Packing unit required"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH EXISTING DATA
+      // =========================
+
+      const {
+        data: existingData,
+        error: fetchError
+      } = await supabase
+
+        .from("pkg_unit")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const exists =
+
+        (existingData || []).some((row) => {
+
+          return (
+
+            String(row.id) !==
+              String(id)
+
+            &&
+
+            String(
+              row.pk_un || ""
+            )
+              .trim()
+              .toLowerCase()
+
+            ===
+
+            pk_un
+              .trim()
+              .toLowerCase()
+
+          );
+
+        });
+
+      if (exists) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Packing unit already exists"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE
+      // =========================
+
+      console.log(
+        "UPDATE WHERE =>",
+        {
+          id,
+          company_code
+        }
+      );
+
+      const {
+        data: updatedData,
+        error: updateError
+      } = await supabase
+
+        .from("pkg_unit")
+
+        .update({
+
+          pk_un:
+            pk_un,
+
+          active:
+            active,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "id",
+          Number(id)
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .select();
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      // =========================
+      // NOT FOUND CHECK
+      // =========================
+
+      if (
+        !updatedData ||
+        updatedData.length === 0
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Record not found"
+
+        });
+
+      }
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Packing unit updated successfully",
+
+        data:
+          updatedData
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "UPDATE PACKAGING UNIT ERROR =>",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+// =========================
+// GET MEASUREMENT UNITS
+// =========================
+
+app.get(
+  "/getMeasurementUnits",
+
+  async (req, res) => {
+
+    try {
+
+      const GLOBAL_MEASUREMENT_UNITS = [
+
+        "Gm",
+        "Kg",
+        "ML",
+        "Ltr",
+        "Qtl",
+        "Ton",
+        "Lb"
+
+      ];
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH MEASUREMENT UNITS
+      // =========================
+
+      console.log(
+        "GET MEASUREMENT UNITS COMPANY:",
+        company_code
+      );
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("measurement_unit")
+
+        .select(`
+          id,
+          company_code,
+          weight_unit,
+          active
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "weight_unit",
+          {
+            ascending: true
+          }
+        );
+
+      // =========================
+      // ERROR
+      // =========================
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const existingUnits =
+
+        (data || []).map(
+
+          (item) =>
+
+            String(
+              item.weight_unit || ""
+            )
+              .trim()
+              .toLowerCase()
+
+        );
+
+      // =========================
+      // GLOBAL DEFAULT UNITS
+      // =========================
+
+      const globalUnits =
+
+        GLOBAL_MEASUREMENT_UNITS
+
+          .filter(
+
+            (unit) =>
+
+              !existingUnits.includes(
+
+                String(unit)
+                  .trim()
+                  .toLowerCase()
+
+              )
+
+          )
+
+          .map((unit) => ({
+
+            id:
+              `global_${unit}`,
+
+            company_code:
+              company_code,
+
+            weight_unit:
+              unit,
+
+            active:
+              true,
+
+            is_default:
+              true
+
+          }));
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        data: [
+
+          ...globalUnits,
+
+          ...(data || []).map(
+            (item) => ({
+
+              ...item,
+
+              is_default:
+                false
+
+            })
+          )
+
+        ]
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// SAVE MEASUREMENT UNIT
+// =========================
+
+app.post(
+  "/saveMeasurementUnit",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const weight_unit =
+
+        String(
+          body.weight_unit || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || ""
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!weight_unit) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Measurement unit required"
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const {
+        data: existingData,
+        error: fetchError
+      } = await supabase
+
+        .from("measurement_unit")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      const exists =
+
+        (existingData || []).some((row) => {
+
+          return (
+
+            String(
+              row.weight_unit || ""
+            )
+              .trim()
+              .toLowerCase()
+
+            ===
+
+            weight_unit.toLowerCase()
+
+          );
+
+        });
+
+      if (exists) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Measurement unit already exists"
+
+        });
+
+      }
+
+      // =========================
+      // INSERT
+      // =========================
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("measurement_unit")
+
+        .insert([{
+
+          company_code:
+            company_code,
+
+          weight_unit:
+            weight_unit,
+
+          active:
+            active,
+
+          created_at:
+            new Date(),
+
+          updated_at:
+            new Date()
+
+        }]);
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Measurement unit saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// UPDATE MEASUREMENT UNIT
+// =========================
+
+app.post(
+  "/updateMeasurementUnit",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const id =
+
+        Number(
+          body.id || 0
+        );
+
+      const weight_unit =
+
+        String(
+          body.weight_unit || ""
+        ).trim();
+
+      const active =
+
+        String(
+          body.active || ""
+        )
+          .trim()
+          .toUpperCase() === "TRUE";
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "id missing"
+
+        });
+
+      }
+
+      if (!weight_unit) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Measurement unit required"
+
+        });
+
+      }
+
+      // =========================
+      // CHECK EXISTS
+      // =========================
+
+      const {
+        data: existingRow,
+        error: fetchError
+      } = await supabase
+
+        .from("measurement_unit")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "id",
+          id
+        )
+
+        .single();
+
+      if (fetchError || !existingRow) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Measurement unit not found"
+
+        });
+
+      }
+
+
+      // =========================
+// DUPLICATE CHECK
+// =========================
+
+const {
+  data: allRows,
+  error: duplicateError
+} = await supabase
+
+  .from("measurement_unit")
+
+  .select("*")
+
+  .eq(
+    "company_code",
+    company_code
+  );
+
+if (duplicateError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      duplicateError.message
+
+  });
+
+}
+
+const duplicateExists =
+
+  (allRows || []).some((row) => {
+
+    return (
+
+      Number(row.id) !== id
+
+      &&
+
+      String(
+        row.weight_unit || ""
+      )
+        .trim()
+        .toLowerCase()
+
+      ===
+
+      weight_unit.toLowerCase()
+
+    );
+
+  });
+
+if (duplicateExists) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Measurement unit already exists"
+
+  });
+
+}
+
+      // =========================
+      // UPDATE
+      // =========================
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("measurement_unit")
+
+        .update({
+
+          weight_unit:
+            weight_unit,
+
+          active:
+            active,
+
+          updated_at:
+            new Date()
+
+        })
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "id",
+          id
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Measurement unit updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// LOGIN USER
+// =========================
+
+app.post(
+  "/loginUser",
+
+  loginLimiter,
+
+  async (req, res) => {
+
+      console.time("login_api");
+
+    try {
+
+      const body =
+        req.body || {};
+
+      // =========================
+      // INPUTS
+      // =========================
+
+      const email =
+
+        String(
+          body.email || ""
+        )
+          .trim()
+          .toLowerCase();
+
+      const password =
+
+        String(
+          body.password || ""
+        ).trim();
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!email) {
+
+         console.timeEnd("login_api");
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Email or mobile required"
+
+        });
+
+      }
+
+      if (!password) {
+         console.timeEnd("login_api");
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Password required"
+
+        });
+
+      }
+
+
+      if (
+          password.length > 128
+        ) {
+
+           console.timeEnd("login_api");
+
+          return res.json({
+
+            success: false,
+
+            error:
+              "Invalid credentials"
+
+          });
+
+        }
+      // =========================
+      // FETCH USERS
+      // =========================
+
+      console.time("supabase_login");
+
+      console.log("====== SUPABASE CHECK ======");
+console.log("SUPABASE URL:", process.env.SUPABASE_URL);
+console.log(
+  "SUPABASE KEY:",
+  process.env.SUPABASE_SERVICE_ROLE_KEY?.substring(0, 20)
+);
+console.log("============================");
+
+      const {
+  data,
+  error
+} = await supabase
+
+  .from("usersheet")
+
+ .select(
+  "user_id,email,mobile,password,company_code,name,role,is_active,force_password_change,is_ca"
+)
+
+  .or(
+    `email.eq.${email},mobile.eq.${email}`
+  )
+
+  .limit(1);
+
+  console.timeEnd("supabase_login");
+
+      if (error) {
+
+         console.timeEnd("login_api");
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+// FIND USER BY LOGIN ID
+// =========================
+
+const user =
+  data?.[0];
+
+  console.log(
+  "LOGIN USER",
+  user?.email,
+  user?.mobile,
+  user?.force_password_change
+);
+
+// =========================
+// LOGIN ID NOT FOUND
+// =========================
+
+if (!user) {
+
+   console.timeEnd("login_api");
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Invalid Login ID"
+
+  });
+
+}
+
+// =========================
+// PASSWORD CHECK
+// =========================
+console.time("bcrypt_compare");
+
+const passwordMatch =
+  await bcrypt.compare(
+    password,
+    user.password || ""
+  );
+
+console.timeEnd("bcrypt_compare");
+
+if (!passwordMatch) {
+
+   console.timeEnd("login_api");
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Incorrect Password"
+
+  });
+
+}
+
+// =========================
+// ACTIVE CHECK
+// =========================
+
+if (
+  user.is_active !== true
+) {
+
+  console.timeEnd("login_api");
+  return res.json({
+
+    success: false,
+
+    error:
+      "Account Inactive"
+
+  });
+
+}
+      // =========================
+      // SUCCESS
+      // =========================
+console.timeEnd("login_api");
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          user_id:
+            user.user_id || "",
+
+          email:
+            user.email || "",
+
+          mobile:
+            user.mobile || "",
+
+          company_code:
+            user.company_code || "",
+
+            name:
+              user.name || "",
+
+                role:
+  user.role || "",
+
+status:
+  user.is_active === true
+    ? "ACTIVE"
+    : "INACTIVE",
+
+    is_ca:
+  user.is_ca === true,
+
+    force_password_change:
+  user.force_password_change === true,
+
+        }
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.timeEnd("login_api");
+
+      console.log(
+        "LOGIN ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// FORGOT PASSWORD
+// =========================
+
+app.post(
+  "/forgotPassword",
+
+      forgotPasswordLimiter,
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      // =========================
+      // INPUT
+      // =========================
+
+      const email =
+
+        String(
+          body.email || ""
+        )
+          .trim()
+          .toLowerCase();
+
+   
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      if (!email) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Email required"
+
+        });
+
+      }
+
+         if (email.length > 254) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Invalid email"
+
+  });
+
+}
+      // =========================
+      // FIND USER
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("usersheet")
+
+        .select("*")
+
+        .eq(
+          "email",
+          email
+        )
+
+        .single();
+
+      if (error || !data) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Email not found"
+
+        });
+
+      }
+
+      // =========================
+      // GET PASSWORD
+      // =========================
+
+    const tempPassword =
+
+  Math.random()
+    .toString(36)
+    .slice(-8);
+
+      // =========================
+      // SEND EMAIL
+      // =========================
+
+      const hashedPassword =
+  await bcrypt.hash(
+    tempPassword,
+    10
+  );
+
+const {
+  error: updateError
+} = await supabase
+
+  .from("usersheet")
+
+  .update({
+  password: hashedPassword,
+  force_password_change: true
+})
+
+  .eq(
+    "email",
+    email
+  );
+
+if (updateError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      updateError.message
+
+  });
+
+}
+
+console.log("RESEND PAYLOAD:", {
+
+  from: "Billey <noreply@billey.in>",
+
+  to: email,
+
+});
+
+    const result =
+  await resend.emails.send({
+
+   from: "noreply@billey.in",
+
+   to:
+  email,
+
+    subject:
+      "BillKaro Password Recovery",
+
+    html: `
+
+      <div style="font-family:Arial;padding:20px">
+
+        <h2>
+          BillKaro Password Recovery
+        </h2>
+
+        <p>
+          Your password is:
+        </p>
+
+        <h1>
+        ${tempPassword}
+        </h1>
+
+      </div>
+
+    `
+
+  });
+
+console.log(
+  "RESEND RESULT =",
+  result
+);
+
+if (result.error) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      result.error
+
+  });
+
+}
+
+      // =========================
+      // SUCCESS
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Password sent to email"
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "FORGOT PASSWORD ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/searchLicenseUser",
+  async (req, res) => {
+
+    try {
+
+      const { mobile } = req.body;
+
+      if (!mobile) {
+
+        return res.json({
+          success: false,
+          message: "Mobile number required",
+        });
+
+      }
+
+      // STEP 1
+      // SEARCH USER
+
+      const { data: userRow, error: userError } =
+        await supabase
+          .from("usersheet")
+          .select("*")
+          .eq("mobile", mobile)
+          .single();
+
+      if (userError || !userRow) {
+
+        return res.json({
+          success: false,
+          message: "User not found",
+        });
+
+      }
+
+// =========================
+// GET COMPANY DETAILS
+// =========================
+
+const { data: companyRow } =
+  await supabase
+    .from("company")
+    .select(`
+  company_code,
+  businessname,
+  address,
+  state,
+  partner_id,
+  agent_id
+`)
+    .eq(
+      "company_code",
+      userRow.company_code
+    )
+    .single();
+
+
+// =========================
+// GET LAST LICENSE
+// =========================
+
+const { data: lastLicense } =
+  await supabase
+    .from("license_master")
+    .select("*")
+    .eq(
+      "company_code",
+      userRow.company_code
+    )
+    .order(
+      "valid_to",
+      {
+        ascending: false
+      }
+    )
+    .limit(1)
+    .maybeSingle();
+
+console.log(
+  "LICENSE SEARCH RESULT",
+  {
+    mobile,
+    userRow,
+    companyRow,
+    lastLicense
+  }
+);
+
+     return res.json({
+
+  success: true,
+
+  data: {
+
+    name:
+      userRow?.name || "",
+
+    company_code:
+      userRow?.company_code || "",
+
+    businessname:
+  companyRow?.businessname || "",
+
+    address:
+      companyRow?.address || "",
+
+    state:
+      companyRow?.state || "",
+
+    partner_id:
+      companyRow?.partner_id || null,
+
+    agent_id:
+      companyRow?.agent_id || null,
+
+    license_type:
+      lastLicense
+        ? "Renewal"
+        : "Fresh Activation",
+
+    last_renewal_date:
+      lastLicense?.valid_to || null,
+
+  },
+
+});
+
+    } catch (err) {
+
+      console.error(
+        "searchLicenseUser error",
+        err
+      );
+
+      res.json({
+        success: false,
+        message: err.message,
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/saveLicense",
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company_code,
+        valid_from,
+        valid_to,
+        status,
+        created_by,
+        collection_status,
+         login_mobile,
+        role,
+        selected_plan,
+        plan_name,
+        plan_code,
+        subscription_amt
+
+      } = req.body;
+
+      console.log(
+  "SAVE LICENSE BODY",
+  req.body
+);
+
+const roleUpper =
+  String(role || "")
+    .toUpperCase();
+
+// =========================
+// AGENT ACTIVE CHECK
+// =========================
+
+if (
+  roleUpper === "AGENT"
+) {
+
+  const {
+    data: userRow,
+    error: userError
+  } = await supabase
+
+    .from("usersheet")
+
+    .select("is_active")
+
+    .eq(
+      "mobile",
+      login_mobile
+    )
+
+    .single();
+
+  if (
+    userError ||
+    !userRow ||
+    userRow.is_active !== true
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      forceLogout: true,
+
+      message:
+        "Agent account inactive"
+
+    });
+
+  }
+
+}
+
+      if (
+        !company_code ||
+        !valid_from ||
+        !valid_to
+      ) {
+
+        return res.json({
+
+          success: false,
+          message:
+            "Missing required fields"
+
+        });
+
+      }
+
+// =========================
+// ROLE SECURITY CHECK
+// =========================
+
+
+
+if (
+  roleUpper === "AGENT" ||
+  roleUpper === "PARTNER"
+) {
+
+  const {
+    data: companyRow,
+    error: companyFetchError
+  } = await supabase
+    .from("company")
+    .select(`
+      agent_id,
+      partner_id
+    `)
+    .eq(
+      "company_code",
+      company_code
+    )
+    .single();
+
+  if (
+    companyFetchError ||
+    !companyRow
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      message:
+        "Company not found"
+
+    });
+
+  }
+
+  if (
+    roleUpper === "AGENT" &&
+    String(
+      companyRow.agent_id || ""
+    ).trim() !==
+    String(
+      login_mobile || ""
+    ).trim()
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      message:
+        "This company is not assigned to you"
+
+    });
+
+  }
+
+  if (
+    roleUpper === "PARTNER" &&
+    String(
+      companyRow.partner_id || ""
+    ).trim() !==
+    String(
+      login_mobile || ""
+    ).trim()
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      message:
+        "This company is not assigned to you"
+
+    });
+
+  }
+
+}
+
+const { data: existingLicense } =
+  await supabase
+    .from("license_master")
+    .select("id")
+    .eq(
+      "company_code",
+      company_code
+    )
+    .limit(1)
+    .maybeSingle();
+
+    let partner_id = null;
+let agent_id = null;
+
+if (
+  roleUpper === "PARTNER"
+) {
+
+  partner_id =
+    login_mobile;
+
+}
+
+else if (
+  roleUpper === "AGENT"
+) {
+
+  agent_id =
+    login_mobile;
+
+  const {
+  data: mappingRow,
+  error: mappingError
+} = await supabase
+  .from(
+    "user_mapping"
+  )
+    .select(`
+      creator_role,
+      creator_mobile
+    `)
+    .eq(
+      "user_mobile",
+      login_mobile
+    )
+    .eq(
+      "user_role",
+      "AGENT"
+    )
+    .maybeSingle();
+
+    if (
+  mappingError
+) {
+
+  throw mappingError;
+
+}
+
+  if (
+    mappingRow &&
+    mappingRow.creator_role ===
+      "PARTNER"
+  ) {
+
+    partner_id =
+      mappingRow.creator_mobile;
+
+  }
+
+}
+
+      const { data, error } =
+        await supabase
+          .from(
+            "license_master"
+          )
+          .insert([{
+
+            company_code,
+
+            valid_from,
+
+            valid_to,
+
+            status:
+              status ||
+              "Active",
+
+            created_by:
+              created_by ||
+              "OWNER",
+
+            collection_status:
+              collection_status ||
+              "Pending",
+
+              partner_id,
+
+              agent_id,
+
+              selected_plan,
+
+              plan_name,
+
+              plan_code,
+
+              subscription_amt,
+
+          }])
+          .select();
+
+      if (error) {
+
+        console.error(
+          "SAVE LICENSE ERROR",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+          message:
+            error.message
+
+        });
+
+      }
+
+
+// =========================
+// UPDATE COMPANY LICENSE
+// =========================
+
+const updateData = {
+
+  license_from: valid_from,
+
+  license_till: valid_to
+
+};
+
+if (!existingLicense) {
+
+  updateData.license_start =
+    valid_from;
+
+}
+
+const {
+  error: companyError
+} = await supabase
+  .from("company")
+  .update(updateData)
+  .eq(
+    "company_code",
+    company_code
+  );
+
+if (companyError) {
+
+  console.error(
+    "COMPANY UPDATE ERROR",
+    companyError
+  );
+
+  return res.json({
+
+    success: false,
+
+    message:
+      companyError.message
+
+  });
+
+}
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "License activated successfully",
+
+        data
+
+      });
+
+    } catch (err) {
+
+      console.error(
+        "saveLicense error",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        message:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/createAgent",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const agentName =
+
+        String(
+          body.agentName || ""
+        ).trim();
+
+      const mobile =
+
+  String(
+    body.mobile || ""
+  )
+
+    .replace(/\r/g, "")
+    .replace(/\n/g, "")
+    .trim();
+
+      const email =
+
+        String(
+          body.email || ""
+        )
+          .trim()
+          .toLowerCase();
+
+      const creatorRole =
+
+        String(
+          body.creatorRole || ""
+        )
+          .trim()
+          .toUpperCase();
+
+      const creatorMobile =
+
+        String(
+          body.creatorMobile || ""
+        ).trim();
+
+      console.log(
+        "CREATE AGENT BODY:",
+        body
+      );
+
+      // =========================
+      // CHECK USER EXISTS
+      // =========================
+
+      const {
+        data: existingUser,
+        error: userError
+      } = await supabase
+
+        .from("usersheet")
+
+        .select("*")
+
+        .eq(
+          "mobile",
+          mobile
+        )
+
+        .limit(1);
+
+      if (userError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            userError.message
+
+        });
+
+      }
+
+      if (
+        !existingUser ||
+        existingUser.length === 0
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "User not found"
+
+        });
+
+      }
+
+      // =========================
+      // ROLE MUST BE BLANK
+      // =========================
+
+      if (
+        String(
+          existingUser[0]?.role || ""
+        ).trim() !== ""
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "User already assigned role"
+
+        });
+
+      }
+
+      console.log(
+  "MOBILE CHECK:",
+  JSON.stringify(mobile)
+);
+
+      // =========================
+      // CHECK ALREADY MAPPED
+      // =========================
+
+      const {
+        data: existingMapping,
+        error: mappingError
+      } = await supabase
+
+        .from("user_mapping")
+
+        .select("*")
+        
+        .eq(
+          "user_mobile",
+          mobile
+        )
+
+        .limit(1);
+
+        console.log(
+  "EXISTING MAPPING:",
+  existingMapping
+);
+
+
+      if (mappingError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            mappingError.message
+
+        });
+
+      }
+
+      if (
+        existingMapping &&
+        existingMapping.length > 0
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Mobile already mapped"
+
+        });
+
+      }
+
+      // =========================
+      // INSERT MAPPING
+      // =========================
+
+      const {
+        data: insertData,
+        error: insertError
+      } = await supabase
+
+        .from("user_mapping")
+
+        .insert([
+
+          {
+
+            user_mobile:
+              mobile,
+
+            user_role:
+              "AGENT",
+
+            creator_role:
+              creatorRole,
+
+            creator_mobile:
+              creatorMobile
+
+          }
+
+        ])
+
+        .select();
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      console.log(
+        "AGENT INSERTED:",
+        insertData
+      );
+
+      // =========================
+      // UPDATE USER ROLE
+      // =========================
+
+      const {
+        error: roleUpdateError
+      } = await supabase
+
+        .from("usersheet")
+
+        .update({
+
+          role: "AGENT"
+
+        })
+
+        .eq(
+          "mobile",
+          mobile
+        );
+
+      if (
+        roleUpdateError
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            roleUpdateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Agent created"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/searchAgentUser",
+  async (req, res) => {
+
+    try {
+
+      const { mobile } =
+        req.body;
+
+      if (!mobile) {
+
+        return res.json({
+          success: false,
+          error: "Mobile number required",
+        });
+
+      }
+
+      const {
+        data,
+        error,
+      } = await supabase
+        .from("usersheet")
+        .select("*")
+        .eq(
+          "mobile",
+          mobile
+        )
+        .single();
+
+      if (error || !data) {
+
+        return res.json({
+          success: false,
+          error: "User not found",
+        });
+
+      }
+
+      return res.json({
+        success: true,
+        data,
+      });
+
+    } catch (error) {
+
+      console.error(error);
+
+      return res.json({
+        success: false,
+        error:
+          "Something went wrong",
+      });
+
+    }
+
+  }
+);
+
+app.post(
+"/createPartner",
+async (req, res) => {
+
+
+try {
+
+  const {
+
+    mobile,
+
+    creatorRole,
+
+    creatorMobile
+
+  } = req.body;
+
+  if (!mobile) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "Mobile number required"
+
+    });
+
+  }
+
+  // =========================
+  // FIND USER
+  // =========================
+
+  const {
+
+    data: user,
+
+    error: userError
+
+  } = await supabase
+
+    .from("usersheet")
+
+    .select("*")
+
+    .eq(
+      "mobile",
+      mobile
+    )
+
+    .maybeSingle();
+
+  if (
+    userError ||
+    !user
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "User not found"
+
+    });
+
+  }
+
+  // =========================
+  // ROLE VALIDATION
+  // =========================
+
+  if (
+    user.role ===
+    "AGENT"
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "This mobile number is already registered as an Agent."
+
+    });
+
+  }
+
+  if (
+    user.role ===
+    "PARTNER"
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "This mobile number is already registered as a Partner."
+
+    });
+
+  }
+
+  if (
+    user.role ===
+    "OWNER"
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "Owner account cannot be registered as Partner."
+
+    });
+
+  }
+
+  // =========================
+  // DUPLICATE MAPPING CHECK
+  // =========================
+
+  const {
+
+    data: existingMapping
+
+  } = await supabase
+
+    .from("user_mapping")
+
+    .select("id")
+
+    .eq(
+      "user_mobile",
+      mobile
+    )
+
+    .eq(
+      "user_role",
+      "PARTNER"
+    )
+
+    .maybeSingle();
+
+  if (
+    existingMapping
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "Partner mapping already exists"
+
+    });
+
+  }
+
+  // =========================
+  // UPDATE USER ROLE
+  // =========================
+
+  const {
+
+    error: updateError
+
+  } = await supabase
+
+    .from("usersheet")
+
+    .update({
+
+      role:
+        "PARTNER"
+
+    })
+
+    .eq(
+      "mobile",
+      mobile
+    );
+
+  if (
+    updateError
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        updateError.message
+
+    });
+
+  }
+
+  // =========================
+  // USER MAPPING ENTRY
+  // =========================
+
+  const {
+
+    error: mappingError
+
+  } = await supabase
+
+    .from("user_mapping")
+
+    .insert({
+
+      user_mobile:
+        mobile,
+
+      user_role:
+        "PARTNER",
+
+      creator_role:
+        creatorRole,
+
+      creator_mobile:
+        creatorMobile
+
+    });
+
+  if (
+    mappingError
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        mappingError.message
+
+    });
+
+  }
+
+  return res.json({
+
+    success: true,
+
+    message:
+      "Partner created successfully"
+
+  });
+
+} catch (error) {
+
+  console.error(
+    error
+  );
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Something went wrong"
+
+  });
+
+}
+
+
+}
+);
+
+
+
+// =========================
+// GET TOTAL PARTNERS
+// =========================
+
+app.get(
+  "/getTotalPartners",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("usersheet")
+
+        .select("mobile")
+
+        .eq(
+          "role",
+          "PARTNER"
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          totalPartners:
+
+            data?.length || 0
+
+        }
+
+      });
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+app.post(
+  "/createCustomer",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        customerName,
+        mobile,
+        email,
+        creatorRole,
+        creatorMobile
+
+      } = req.body;
+
+      if (!mobile) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Mobile number required"
+
+        });
+
+      }
+
+      // =========================
+      // FIND USER
+      // =========================
+
+      const {
+
+        data: user,
+
+        error: userError
+
+      } = await supabase
+
+        .from("usersheet")
+
+        .select("*")
+
+        .eq(
+          "mobile",
+          mobile
+        )
+
+        .maybeSingle();
+
+      if (
+        userError ||
+        !user
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "User not found"
+
+        });
+
+      }
+
+      // =========================
+      // ROLE MUST BE BLANK
+      // MAIN CONTROL
+      // =========================
+
+      if (
+        String(
+          user.role || ""
+        ).trim() !== ""
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "User already assigned role"
+
+        });
+
+      }
+
+      // =========================
+      // FIND COMPANY
+      // =========================
+
+      const {
+
+        data: company,
+
+        error: companyError
+
+      } = await supabase
+
+        .from("company")
+
+        .select("*")
+
+        .eq(
+          "mobile",
+          mobile
+        )
+
+        .maybeSingle();
+
+      if (
+        companyError ||
+        !company
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Company not found"
+
+        });
+
+      }
+
+      // =========================
+      // ALREADY ASSIGNED ?
+      // SAFETY CHECK
+      // =========================
+
+      if (
+
+        String(
+          company.partner_id || ""
+        ).trim() !== ""
+
+        ||
+
+        String(
+          company.agent_id || ""
+        ).trim() !== ""
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Customer already assigned"
+
+        });
+
+      }
+
+      let partnerId = null;
+
+      let agentId = null;
+
+      // =========================
+      // OWNER
+      // =========================
+
+      if (
+        creatorRole ===
+        "OWNER"
+      ) {
+
+        partnerId = null;
+
+        agentId = null;
+
+      }
+
+      // =========================
+      // PARTNER
+      // =========================
+
+      else if (
+        creatorRole ===
+        "PARTNER"
+      ) {
+
+        partnerId =
+          creatorMobile;
+
+        agentId = null;
+
+      }
+
+      // =========================
+      // AGENT
+      // =========================
+
+      else if (
+        creatorRole ===
+        "AGENT"
+      ) {
+
+        agentId =
+          creatorMobile;
+
+        const {
+
+          data: agentMapping,
+
+          error: mappingError
+
+        } = await supabase
+
+          .from(
+            "user_mapping"
+          )
+
+          .select("*")
+
+          .eq(
+            "user_mobile",
+            creatorMobile
+          )
+
+          .eq(
+            "user_role",
+            "AGENT"
+          )
+
+          .maybeSingle();
+
+        if (
+          mappingError
+        ) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              mappingError.message
+
+          });
+
+        }
+
+        // AGENT UNDER PARTNER
+
+        if (
+          agentMapping &&
+          String(
+            agentMapping.creator_role || ""
+          ).toUpperCase() ===
+            "PARTNER"
+        ) {
+
+          partnerId =
+            agentMapping.creator_mobile;
+
+        }
+
+      }
+      // =========================
+      // UPDATE COMPANY
+      // =========================
+
+      const {
+
+        error: updateError
+
+      } = await supabase
+
+        .from("company")
+
+        .update({
+
+          partner_id:
+            partnerId,
+
+          agent_id:
+            agentId
+
+        })
+
+        .eq(
+          "mobile",
+          mobile
+        );
+
+      if (
+        updateError
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      // =========================
+      // BACKFILL LICENSE MASTER
+      // =========================
+
+      const {
+
+        error: backfillError
+
+      } = await supabase
+
+        .from("license_master")
+
+        .update({
+
+          partner_id:
+            partnerId,
+
+          agent_id:
+            agentId
+
+        })
+
+        .eq(
+          "company_code",
+          company.company_code
+        )
+
+        .or(
+          "partner_id.is.null,agent_id.is.null"
+        );
+
+      if (
+        backfillError
+      ) {
+
+        console.log(
+          "LICENSE MASTER BACKFILL ERROR:",
+          backfillError
+        );
+
+      }
+
+      // =========================
+      // UPDATE USER ROLE
+      // =========================
+
+      const {
+
+        error: roleError
+
+      } = await supabase
+
+        .from("usersheet")
+
+        .update({
+
+          role: "USER"
+
+        })
+
+        .eq(
+          "mobile",
+          mobile
+        );
+
+      if (
+        roleError
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            roleError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Customer added successfully"
+
+      });
+
+    }
+
+    catch (error) {
+
+      console.error(
+        error
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          error.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+app.post(
+  "/searchCustomerUser",
+  async (req, res) => {
+
+    try {
+
+      const { mobile } =
+        req.body;
+
+      if (!mobile) {
+
+        return res.json({
+          success: false,
+          error: "Mobile number required",
+        });
+
+      }
+
+      // STEP 1
+      // FIND USER
+
+      const {
+        data: userData,
+        error: userError,
+      } = await supabase
+        .from("usersheet")
+        .select("*")
+        .eq(
+          "mobile",
+          mobile
+        )
+        .single();
+
+      if (
+        userError ||
+        !userData
+      ) {
+
+        return res.json({
+          success: false,
+          error: "User not found",
+        });
+
+      }
+
+      // STEP 2
+      // FIND COMPANY
+
+      let companyData = null;
+
+      if (
+        userData.company_code
+      ) {
+
+        const {
+          data,
+          error,
+        } = await supabase
+          .from("company")
+          .select("*")
+          .eq(
+            "company_code",
+            userData.company_code
+          )
+          .single();
+
+        if (!error) {
+
+          companyData = data;
+
+        }
+
+      }
+
+      // STEP 3
+      // RETURN COMBINED DATA
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          mobile:
+            userData.mobile || "",
+
+          name:
+            userData.name || "",
+
+          email:
+            userData.email || "",
+
+          role:
+           userData.role || "",
+
+          companyCode:
+            userData.company_code || "",
+
+          companyName:
+            companyData?.businessname || "",
+
+          address:
+            companyData?.address || "",
+
+        },
+
+      });
+
+    } catch (error) {
+
+      console.error(error);
+
+      return res.json({
+
+        success: false,
+
+        error:
+          "Something went wrong",
+
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/getMyCompanies",
+  async (req, res) => {
+
+    try {
+
+      const {
+        mobile,
+        role,
+      } = req.body;
+
+console.log(
+  "ROLE RECEIVED:",
+  role
+);
+
+      let query =
+        supabase
+          .from("company")
+          .select("*");
+if (role === "OWNER") {
+
+  const {
+    data: users,
+    error: userError,
+  } = await supabase
+    .from("usersheet")
+    .select("mobile, role")
+    .eq("role", "USER");
+
+  if (userError) {
+    return res.json({
+      success: false,
+      error: userError.message,
+    });
+  }
+
+  const userMobiles =
+    (users || []).map(
+      (u) => String(u.mobile)
+    );
+
+  console.log(
+    "USER MOBILES:",
+    userMobiles
+  );
+
+  if (userMobiles.length === 0) {
+
+    return res.json({
+      success: true,
+      data: []
+    });
+
+  }
+
+  query =
+    query.in(
+      "mobile",
+      userMobiles
+    );
+
+}
+
+      else if (
+        role === "PARTNER"
+      ) {
+
+        query =
+          query.eq(
+            "partner_id",
+            mobile
+          );
+
+      }
+
+      else if (
+        role === "AGENT"
+      ) {
+
+        query =
+          query.eq(
+            "agent_id",
+            mobile
+          );
+
+      }
+
+      else {
+
+        return res.json({
+          success: false,
+          error:
+            "Invalid role",
+        });
+
+      }
+
+      const {
+        data,
+        error,
+      } = await query;
+
+      if (error) {
+
+        return res.json({
+          success: false,
+          error: error.message,
+        });
+
+      }
+
+      console.log(
+  "GET MY COMPANIES RESULT:",
+  data
+);
+
+
+const {
+  data: allUsers,
+  error: usersError
+} = await supabase
+
+  .from("usersheet")
+
+  .select(
+    "mobile,name,role"
+  );
+
+if (usersError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      usersError.message,
+
+  });
+
+}
+
+const userMap =
+
+  new Map(
+
+    (allUsers || []).map(
+
+      (u) => [
+
+        String(
+          u.mobile
+        ),
+
+        u
+
+      ]
+
+    )
+
+  );
+
+const today =
+  new Date();
+
+const finalData =
+
+  (data || []).map(
+
+    (company) => {
+
+      let subscription_status =
+        "NOT_SUBSCRIBED";
+
+      if (
+        company.license_from
+      ) {
+
+        subscription_status =
+          "ACTIVE";
+
+        if (
+          company.license_till &&
+          new Date(
+            company.license_till
+          ) < today
+        ) {
+
+          subscription_status =
+            "EXPIRED";
+
+        }
+
+      }
+
+     return {
+
+  ...company,
+
+  customer_name:
+    userMap.get(
+      String(company.mobile)
+    )?.name || "",
+
+  partner_name:
+    userMap.get(
+      String(
+        company.partner_id || ""
+      )
+    )?.name || "",
+
+  agent_name:
+    userMap.get(
+      String(
+        company.agent_id || ""
+      )
+    )?.name || "",
+
+  subscription_status
+
+};
+
+}
+
+);
+
+      return res.json({
+
+        success: true,
+
+        data:
+  finalData,
+
+      });
+
+    } catch (error) {
+
+      console.error(error);
+
+      return res.json({
+
+        success: false,
+
+        error:
+          "Something went wrong",
+
+      });
+
+    }
+
+  }
+);
+
+
+
+app.post(
+  "/getRecentActivities",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        mobile,
+        role
+      } = req.body || {};
+
+      if (!mobile) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Mobile required"
+
+        });
+
+      }
+
+      let userMappingQuery =
+
+        supabase
+
+          .from(
+            "user_mapping"
+          )
+
+          .select("*");
+
+      let licenseQuery =
+
+        supabase
+
+          .from(
+            "license_master"
+          )
+
+          .select("*");
+
+      const userRole =
+
+        String(
+          role || ""
+        ).toUpperCase();
+
+      if (
+        userRole ===
+        "PARTNER"
+      ) {
+
+        userMappingQuery =
+
+          userMappingQuery.eq(
+            "creator_mobile",
+            mobile
+          );
+
+        licenseQuery =
+
+          licenseQuery.eq(
+            "partner_id",
+            mobile
+          );
+
+      }
+
+      else if (
+        userRole ===
+        "AGENT"
+      ) {
+
+        userMappingQuery =
+
+          userMappingQuery.eq(
+            "user_mobile",
+            mobile
+          );
+
+        licenseQuery =
+
+          licenseQuery.eq(
+            "agent_id",
+            mobile
+          );
+
+      }
+
+
+      const usersResult =
+
+  await supabase
+    .from("usersheet")
+    .select(
+      "mobile,name"
+    );
+
+if (
+  usersResult.error
+) {
+  throw usersResult.error;
+}
+
+    const userMap = {};
+
+(usersResult.data || [])
+  .forEach((u) => {
+
+    userMap[
+      u.mobile
+    ] = u.name;
+
+  });
+
+      const [
+
+        userResult,
+
+        licenseResult
+
+      ] = await Promise.all([
+
+        userMappingQuery
+          .order(
+            "created_at",
+            {
+              ascending:
+                false
+            }
+          )
+          .limit(100),
+
+        licenseQuery
+          .order(
+            "created_on",
+            {
+              ascending:
+                false
+            }
+          )
+          .limit(100)
+
+      ]);
+
+      if (
+        userResult.error
+      ) {
+
+        throw userResult.error;
+
+      }
+
+      if (
+        licenseResult.error
+      ) {
+
+        throw licenseResult.error;
+
+      }
+
+      const userActivities =
+
+        (
+          userResult.data || []
+        ).map(
+
+          (row) => ({
+
+            activity_type:
+              "USER_CREATED",
+
+            activity:
+
+              `Created ${row.user_role}`,
+
+            user_mobile:
+              row.user_mobile,
+
+            user_role:
+              row.user_role,
+
+            creator_mobile:
+              row.creator_mobile,
+
+            creator_role:
+              row.creator_role,
+
+            creator_name:
+
+  userMap[
+    row.creator_mobile
+  ] || "",  
+
+           created_at:
+  new Date(
+    row.created_at
+  ).toISOString()
+
+          })
+
+        );
+
+      const licenseActivities =
+
+        (
+          licenseResult.data || []
+        ).map(
+
+          (row) => ({
+
+            activity_type:
+              "LICENSE",
+
+            activity:
+
+              `${row.selected_plan} Plan Activated`,
+
+            company_code:
+              row.company_code,
+
+            selected_plan:
+              row.selected_plan,
+
+            amount:
+              row.subscription_amt,
+
+            created_by:
+              row.created_by,
+
+                payment_verified:
+        row.payment_verified,
+
+            partner_id:
+              row.partner_id,
+
+            agent_id:
+              row.agent_id,
+
+          creator_name:
+
+  userMap[
+    row.agent_id
+  ] ||
+
+  userMap[
+    row.partner_id
+  ] ||
+
+  "",
+
+agent_name:
+
+  userMap[
+    row.agent_id
+  ] || "",
+
+partner_name:
+
+  userMap[
+    row.partner_id
+  ] || "",
+
+           created_at:
+  new Date(
+    row.created_on
+  ).toISOString()
+
+          })
+
+        );
+
+      const activities =
+
+        [
+
+          ...userActivities,
+
+          ...licenseActivities
+
+        ]
+
+          .sort(
+
+            (a, b) =>
+
+              new Date(
+                b.created_at
+              ) -
+
+              new Date(
+                a.created_at
+              )
+
+          )
+
+          .slice(
+            0,
+            100
+          );
+
+      return res.json({
+
+        success: true,
+
+        count:
+          activities.length,
+
+        data:
+          activities
+
+      });
+
+    } catch (error) {
+
+      console.error(
+        error
+      );
+
+      return res.json({
+
+        success: false,
+
+        message:
+          error.message ||
+          "Server Error"
+
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/getAgentActivationReport",
+  async (req, res) => {
+
+    try {
+
+     const {
+  mobile,
+  role,
+  dateFilter,
+  fromDate,
+  toDate
+} = req.body || {};
+
+      if (!mobile) {
+
+        return res.json({
+          success: false,
+          message: "Mobile required"
+        });
+
+      }
+
+      let query = supabase
+        .from("license_master")
+        .select("*");
+
+              let partnerAgentMap = {};
+
+        const today =
+  new Date();
+
+if (
+  dateFilter ===
+  "TODAY"
+) {
+
+  const start =
+    new Date();
+
+  start.setHours(
+    0, 0, 0, 0
+  );
+
+  query =
+    query.gte(
+      "created_on",
+      start.toISOString()
+    );
+
+}
+else if (
+  dateFilter ===
+  "THIS_WEEK"
+) {
+
+  const start =
+    new Date();
+
+  const day =
+    start.getDay();
+
+  const diff =
+    day === 0
+      ? 6
+      : day - 1;
+
+  start.setDate(
+    start.getDate() -
+    diff
+  );
+
+  start.setHours(
+    0, 0, 0, 0
+  );
+
+  query =
+    query.gte(
+      "created_on",
+      start.toISOString()
+    );
+
+}
+
+else if (
+  dateFilter ===
+  "THIS_MONTH"
+) {
+
+  const start =
+    new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      1
+    );
+
+  query =
+    query.gte(
+      "created_on",
+      start.toISOString()
+    );
+
+}
+
+else if (
+  dateFilter ===
+  "DATE_RANGE" &&
+  fromDate &&
+  toDate
+) {
+
+  query =
+    query
+      .gte(
+        "created_on",
+        fromDate
+      )
+      .lte(
+        "created_on",
+        toDate +
+        "T23:59:59"
+      );
+
+}
+
+      const userRole =
+        String(role || "")
+          .toUpperCase();
+
+      if (
+        userRole === "PARTNER"
+      ) {
+
+        query =
+          query.eq(
+            "partner_id",
+            mobile
+          );
+
+      }
+
+      else if (
+        userRole === "AGENT"
+      ) {
+
+        query =
+          query.eq(
+            "agent_id",
+            mobile
+          );
+
+      }
+
+else if (
+  userRole === "OWNER"
+) {
+
+  const {
+    data: mappings,
+    error: mappingError
+  } = await supabase
+
+    .from("user_mapping")
+
+   .select(`
+  user_mobile,
+  user_role,
+  creator_mobile,
+  creator_role
+`)
+    .eq(
+      "creator_mobile",
+      mobile
+    )
+
+    .eq(
+      "creator_role",
+      "OWNER"
+    )
+
+  //  .eq(
+ //     "user_role",
+ //     "AGENT"
+ //   );
+
+  if (mappingError) {
+
+    throw mappingError;
+
+  }
+
+  console.log(
+  "OWNER MAPPINGS",
+  mappings
+);
+
+const ownerPartners =
+
+  (mappings || [])
+    .filter(
+      row =>
+        row.user_role ===
+        "PARTNER"
+    );
+
+console.log(
+  "OWNER PARTNERS",
+  ownerPartners
+);
+
+
+const partnerMobiles =
+
+  ownerPartners.map(
+    row => row.user_mobile
+  );
+
+console.log(
+  "PARTNER MOBILES",
+  partnerMobiles
+);
+
+
+const {
+  data: partnerAgentMappings,
+  error: partnerAgentError
+} = await supabase
+
+  .from("user_mapping")
+
+  .select(`
+    user_mobile,
+    creator_mobile
+  `)
+
+  .in(
+    "creator_mobile",
+    partnerMobiles
+  )
+
+  .eq(
+    "creator_role",
+    "PARTNER"
+  )
+
+  .eq(
+    "user_role",
+    "AGENT"
+  );
+
+if (partnerAgentError) {
+
+  throw partnerAgentError;
+
+}
+
+console.log(
+  "PARTNER AGENTS",
+  partnerAgentMappings
+);
+
+
+
+(partnerAgentMappings || [])
+  .forEach(row => {
+
+    partnerAgentMap[
+      row.user_mobile
+    ] = row.creator_mobile;
+
+  });
+
+const ownerDirectAgents =
+
+  (mappings || [])
+
+    .filter(
+      row =>
+        row.user_role ===
+        "AGENT"
+    )
+
+    .map(
+      row =>
+        row.user_mobile
+    );
+
+const partnerAgents =
+
+  (partnerAgentMappings || [])
+
+    .map(
+      row =>
+        row.user_mobile
+    );
+
+const ownerAgents = [
+
+  ...ownerDirectAgents,
+
+  ...partnerAgents
+
+];
+
+console.log(
+  "ALL OWNER AGENTS",
+  ownerAgents
+);
+
+const {
+  data: allMappings,
+  error: allMappingsError
+} = await supabase
+
+  .from("user_mapping")
+
+  .select(`
+    user_mobile,
+    user_role,
+    creator_mobile,
+    creator_role
+  `);
+
+if (allMappingsError) {
+
+  throw allMappingsError;
+
+}
+
+console.log(
+  "ALL MAPPINGS",
+  allMappings
+);
+
+  query =
+    query.in(
+      "agent_id",
+      ownerAgents
+    );
+
+}
+      
+      const {
+        data: licenses,
+        error: licenseError
+      } = await query;
+
+      if (licenseError) {
+        throw licenseError;
+      }
+
+      const {
+        data: users,
+        error: usersError
+      } = await supabase
+        .from("usersheet")
+       .select(
+  "mobile,name,role"
+);
+
+      if (usersError) {
+        throw usersError;
+      }
+
+      const userMap = {};
+
+      const roleMap = {};
+
+
+
+     (users || []).forEach(
+  (u) => {
+
+    userMap[
+      String(u.mobile)
+    ] = u.name;
+
+    roleMap[
+      String(u.mobile)
+    ] = u.role;
+
+  }
+);
+      const grouped = {};
+
+      (licenses || []).forEach(
+        (row) => {
+
+          const agentMobile =
+            String(
+              row.agent_id || ""
+            );
+
+          if (!agentMobile) {
+            return;
+          }
+
+          if (
+            !grouped[
+              agentMobile
+            ]
+          ) {
+
+            grouped[
+              agentMobile
+            ] = {
+
+              agent_mobile:
+                agentMobile,
+
+              agent_name:
+
+                userMap[
+                  agentMobile
+                ] || "",
+
+             parent_mobile:
+
+              partnerAgentMap[
+                agentMobile
+              ] || mobile,
+
+            parent_name:
+
+              userMap[
+                partnerAgentMap[
+                  agentMobile
+                ] || mobile
+              ] || "",
+
+            parent_role:
+
+              partnerAgentMap[
+                agentMobile
+              ]
+                ? "PARTNER"
+                : "OWNER",
+
+              activations: 0,
+
+              collection: 0,
+
+              details: []
+
+            };
+
+          }
+
+          grouped[
+            agentMobile
+          ].activations += 1;
+
+          grouped[
+            agentMobile
+          ].collection +=
+            Number(
+              row.subscription_amt || 0
+            );
+
+          grouped[
+            agentMobile
+          ].details.push({
+
+            date:
+              row.created_on,
+
+            company:
+              row.company_code,
+
+            plan:
+              row.selected_plan,
+
+            amount:
+              Number(
+                row.subscription_amt || 0
+              )
+
+          });
+
+        }
+      );
+
+      return res.json({
+
+        success: true,
+
+        data:
+
+          Object.values(
+            grouped
+          )
+
+      });
+
+    } catch (error) {
+
+      console.error(error);
+
+      return res.json({
+
+        success: false,
+
+        message:
+          error.message ||
+          "Server Error"
+
+      });
+
+    }
+
+  }
+);
+
+
+app.get(
+  "/getActivePlans",
+  async (req, res) => {
+
+    try {
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("license")
+
+        .select("*")
+
+        .eq(
+          "launched",
+          true
+        )
+
+        .order(
+          "sort_order",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+        throw error;
+      }
+
+      return res.json({
+        success: true,
+        data
+      });
+
+    } catch (err) {
+
+      console.error(err);
+
+      return res.status(500)
+        .json({
+          success: false,
+          message:
+            err.message
+        });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET AGENTS
+// =========================
+
+app.post(
+  "/getAgents",
+
+  async (req, res) => {
+
+    try {
+
+      const mobile =
+
+        String(
+          req.body.mobile || ""
+        ).trim();
+
+        const role =
+
+          String(
+            req.body.role || ""
+          )
+            .toUpperCase();
+
+            
+
+      if (!mobile) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "mobile missing"
+
+        });
+
+      }
+
+      // =========================
+      // GET PARTNER AGENTS
+      // =========================
+
+      const {
+
+        data: mappings,
+
+        error: mappingError
+
+      } = await supabase
+
+        .from("user_mapping")
+
+        .select(`
+          user_mobile
+        `)
+
+        .eq(
+          "creator_mobile",
+          mobile
+        )
+
+        .eq(
+          "creator_role",
+          role
+        )
+
+        .eq(
+          "user_role",
+          "AGENT"
+        );
+
+      if (mappingError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            mappingError.message
+
+        });
+
+      }
+
+      const agentMobiles =
+
+        (mappings || []).map(
+          row =>
+            String(
+              row.user_mobile || ""
+            )
+        );
+
+      if (
+        agentMobiles.length === 0
+      ) {
+
+        return res.json({
+
+          success: true,
+
+          data: []
+
+        });
+
+      }
+
+      // =========================
+      // GET AGENT DETAILS
+      // =========================
+
+      const {
+
+        data,
+
+        error
+
+      } = await supabase
+
+        .from("usersheet")
+
+        .select(`
+          id,
+          name,
+          mobile,
+          is_active
+        `)
+
+        .in(
+          "mobile",
+          agentMobiles
+        )
+
+        .eq(
+          "role",
+          "AGENT"
+        )
+
+        .order(
+          "name",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data:
+          data || []
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// UPDATE AGENT STATUS
+// =========================
+
+app.post(
+  "/updateAgentStatus",
+
+  async (req, res) => {
+
+    try {
+
+     const {
+
+  partner_mobile,
+  agent_mobile,
+  is_active,
+  role
+
+} = req.body;
+
+const roleUpper =
+
+  String(
+    role || ""
+  )
+    .toUpperCase();
+
+      if (
+        !partner_mobile ||
+        !agent_mobile
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Missing required fields"
+
+        });
+
+      }
+
+      // =========================
+      // SECURITY CHECK
+      // =========================
+
+      const {
+
+        data: mapping,
+
+        error: mappingError
+
+      } = await supabase
+
+        .from("user_mapping")
+
+        .select("id")
+
+        .eq(
+          "creator_mobile",
+          partner_mobile
+        )
+
+       .eq(
+  "creator_role",
+  roleUpper
+)
+
+        .eq(
+          "user_mobile",
+          agent_mobile
+        )
+
+        .eq(
+          "user_role",
+          "AGENT"
+        )
+
+        .maybeSingle();
+
+      if (
+        mappingError
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            mappingError.message
+
+        });
+
+      }
+
+      if (
+        !mapping
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Unauthorized agent"
+
+        });
+
+      }
+
+      // =========================
+      // UPDATE STATUS
+      // =========================
+
+      const {
+
+        error
+
+      } = await supabase
+
+        .from("usersheet")
+
+        .update({
+
+          is_active
+
+        })
+
+        .eq(
+          "mobile",
+          agent_mobile
+        )
+
+        .eq(
+          "role",
+          "AGENT"
+        );
+
+      if (
+        error
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          is_active
+            ? "Agent activated successfully"
+            : "Agent deactivated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        message:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// LICENSE DASHBOARD STATS
+// =========================
+
+app.get(
+  "/getLicenseDashboardStats",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("company")
+
+        .select(
+          "license_till"
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const today =
+        new Date();
+
+      today.setHours(
+        0, 0, 0, 0
+      );
+
+      const next7Days =
+        new Date(today);
+
+      next7Days.setDate(
+        next7Days.getDate() + 7
+      );
+
+      let activeLicenses = 0;
+
+      let pendingRenewals = 0;
+
+      let expiredLicenses = 0;
+
+      (data || []).forEach(
+        (row) => {
+
+          if (
+            !row.license_till
+          ) return;
+
+          const validTill =
+            new Date(
+              row.license_till
+            );
+
+          validTill.setHours(
+            0, 0, 0, 0
+          );
+
+          // Expired
+
+          if (
+            validTill < today
+          ) {
+
+            expiredLicenses++;
+
+            return;
+
+          }
+
+          // Active
+
+          activeLicenses++;
+
+          // Pending Renewal
+          // (next 7 days)
+
+          if (
+
+            validTill >= today
+
+            &&
+
+            validTill <= next7Days
+
+          ) {
+
+            pendingRenewals++;
+
+          }
+
+        }
+      );
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          activeLicenses,
+
+          pendingRenewals,
+
+          expiredLicenses
+
+        }
+
+      });
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// COLLECTION STATS
+// =========================
+
+app.get(
+  "/getCollectionStats",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("license_master")
+
+        .select(
+          "subscription_amt, created_on"
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const today =
+        new Date();
+
+      const todayStr =
+        today
+          .toISOString()
+          .split("T")[0];
+
+      const currentMonth =
+        today.getMonth();
+
+      const currentYear =
+        today.getFullYear();
+
+      let todayCollection = 0;
+
+      let monthCollection = 0;
+
+      (data || []).forEach(
+        (row) => {
+
+          const amount =
+            Number(
+              row.subscription_amt || 0
+            );
+
+          const createdDate =
+            new Date(
+              row.created_on
+            );
+
+          const rowDate =
+            createdDate
+              .toISOString()
+              .split("T")[0];
+
+          // Today
+
+          if (
+            rowDate ===
+            todayStr
+          ) {
+
+            todayCollection +=
+              amount;
+
+          }
+
+          // Month
+
+          if (
+
+            createdDate.getMonth()
+              === currentMonth
+
+            &&
+
+            createdDate.getFullYear()
+              === currentYear
+
+          ) {
+
+            monthCollection +=
+              amount;
+
+          }
+
+        }
+      );
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          todayCollection,
+
+          monthCollection
+
+        }
+
+      });
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// PARTNER LICENSE STATS
+// =========================
+
+app.post(
+  "/getPartnerLicenseStats",
+
+  async (req, res) => {
+
+    try {
+
+      const { mobile } =
+        req.body;
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("company")
+
+        .select(
+          "license_till"
+        )
+
+        .eq(
+          "partner_id",
+          mobile
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const today =
+        new Date();
+
+      today.setHours(
+        0, 0, 0, 0
+      );
+
+      const next7Days =
+        new Date(today);
+
+      next7Days.setDate(
+        next7Days.getDate() + 7
+      );
+
+      let activeLicenses = 0;
+
+      let pendingRenewals = 0;
+
+      let expiredLicenses = 0;
+
+      (data || []).forEach(
+        (row) => {
+
+          if (
+            !row.license_till
+          ) return;
+
+          const validTill =
+            new Date(
+              row.license_till
+            );
+
+          validTill.setHours(
+            0, 0, 0, 0
+          );
+
+          if (
+            validTill < today
+          ) {
+
+            expiredLicenses++;
+
+            return;
+
+          }
+
+          activeLicenses++;
+
+          if (
+
+            validTill >= today
+
+            &&
+
+            validTill <= next7Days
+
+          ) {
+
+            pendingRenewals++;
+
+          }
+
+        }
+      );
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          activeLicenses,
+
+          pendingRenewals,
+
+          expiredLicenses
+
+        }
+
+      });
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// PARTNER COLLECTION STATS
+// =========================
+
+app.post(
+  "/getPartnerCollectionStats",
+
+  async (req, res) => {
+
+    try {
+
+      const { mobile } =
+        req.body;
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("license_master")
+
+        .select(
+          "subscription_amt, created_on"
+        )
+
+        .eq(
+          "partner_id",
+          mobile
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const today =
+        new Date();
+
+      const todayStr =
+        today
+          .toISOString()
+          .split("T")[0];
+
+      const currentMonth =
+        today.getMonth();
+
+      const currentYear =
+        today.getFullYear();
+
+      let todayCollection = 0;
+
+      let monthCollection = 0;
+
+      (data || []).forEach(
+        (row) => {
+
+          const amount =
+            Number(
+              row.subscription_amt || 0
+            );
+
+          const createdDate =
+            new Date(
+              row.created_on
+            );
+
+          const rowDate =
+            createdDate
+              .toISOString()
+              .split("T")[0];
+
+          if (
+            rowDate ===
+            todayStr
+          ) {
+
+            todayCollection +=
+              amount;
+
+          }
+
+          if (
+
+            createdDate.getMonth()
+              === currentMonth
+
+            &&
+
+            createdDate.getFullYear()
+              === currentYear
+
+          ) {
+
+            monthCollection +=
+              amount;
+
+          }
+
+        }
+      );
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          todayCollection,
+
+          monthCollection
+
+        }
+
+      });
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET LICENSE PLANS
+// =========================
+
+app.get(
+  "/getLicensePlans",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("license")
+
+        .select("*")
+
+        .eq(
+          "launched",
+          true
+        )
+
+        .order(
+          "sort_order",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const result =
+
+        (data || []).map((row) => ({
+
+          id:
+            row.id,
+
+          plan_name:
+            row.plan_name || "",
+
+          plan_code:
+            row.plan_code || "",
+
+          plan_amount:
+            Number(
+              row.plan_amount || 0
+            ),
+
+          validity_days:
+            Number(
+              row.validity_days || 0
+            ),
+
+          features:
+            row.features || ""
+
+        }));
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+
+  "/getSubscriptionPaymentDetails",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        mobile,
+
+        plan_code
+
+      } = req.body;
+
+      const {
+
+        data: company,
+
+        error: companyError
+
+      } = await supabase
+
+        .from("company")
+
+        .select(`
+          company_code,
+          license_till,
+          partner_id,
+          agent_id,
+          country
+        `)
+
+        .eq(
+          "mobile",
+          mobile
+        )
+
+        .single();
+
+      if (
+
+        companyError ||
+
+        !company
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Company not found"
+
+        });
+
+      }
+
+      const {
+
+        data: plan,
+
+        error: planError
+
+      } = await supabase
+
+        .from("license")
+
+        .select(`
+          plan_name,
+          plan_code,
+          plan_amount,
+          validity_days
+        `)
+
+        .eq(
+          "plan_code",
+          plan_code
+        )
+
+        .single();
+
+      if (
+
+        planError ||
+
+        !plan
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Plan not found"
+
+        });
+
+      }
+
+      // 👇 YAHAN LAGA
+
+console.log(
+  "BEFORE CALCULATION"
+);
+
+console.log(
+  "COMPANY DATA =",
+  company
+);
+
+console.log(
+  "PLAN DATA =",
+  plan
+);
+      const details =
+
+        calculateSubscriptionDetails(
+
+          company,
+
+          plan
+
+        );
+
+      return res.json({
+
+        success: true,
+
+        ...details
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(err);
+
+      return res.json({
+
+        success: false,
+
+        message:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+app.post(
+
+  "/submitLicensePayment",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        mobile,
+
+        plan_code,
+
+        payment_screenshot
+
+      } = req.body;
+
+      const {
+
+        data: company,
+
+        error: companyError
+
+      } = await supabase
+
+        .from("company")
+
+        .select(`
+          company_code,
+          license_till,
+          license_start,
+          partner_id,
+          agent_id,
+          country
+        `)
+
+        .eq(
+          "mobile",
+          mobile
+        )
+
+        .single();
+
+      if (
+
+        companyError ||
+
+        !company
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Company not found"
+
+        });
+
+      }
+
+      const {
+
+        data: plan,
+
+        error: planError
+
+      } = await supabase
+
+        .from("license")
+
+        .select(`
+          plan_name,
+          plan_code,
+          plan_amount,
+          validity_days
+        `)
+
+        .eq(
+          "plan_code",
+          plan_code
+        )
+
+        .single();
+
+      if (
+
+        planError ||
+
+        !plan
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Plan not found"
+
+        });
+
+      }
+
+      const details =
+
+        calculateSubscriptionDetails(
+
+          company,
+
+          plan
+
+        );
+
+      const {
+
+        error: insertError
+
+      } = await supabase
+
+        .from(
+          "license_master"
+        )
+
+        .insert({
+
+          company_code:
+            company.company_code,
+
+          valid_from:
+            details.valid_from,
+
+          valid_to:
+            details.valid_to,
+
+          status:
+            "Active",
+
+          created_by:
+            "USER",
+
+          collection_status:
+            "UPI",
+
+          created_on:
+            new Date()
+              .toISOString(),
+
+          updated_on:
+            new Date()
+              .toISOString(),
+
+          selected_plan:
+            plan.plan_name,
+
+          plan_name:
+  plan.plan_name,
+
+plan_code:
+  plan.plan_code,  
+
+          subscription_amt:
+            details.amount,
+
+          partner_id:
+            company.partner_id,
+
+          agent_id:
+            company.agent_id,
+
+          payment_verified:
+            null,
+
+          payment_screenshot
+
+        });
+
+      if (
+
+        insertError
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            insertError.message
+
+        });
+
+      }
+
+      const updateData = {
+
+  license_from:
+    details.valid_from,
+
+  license_till:
+    details.valid_to
+
+};
+
+if (
+  !company.license_start
+) {
+
+  updateData.license_start =
+    details.valid_from;
+
+}
+
+await supabase
+
+  .from("company")
+
+  .update(updateData)
+
+  .eq(
+    "company_code",
+    company.company_code
+  );
+
+      return res.json({
+
+        success: true,
+
+        ...details
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(err);
+
+      return res.json({
+
+        success: false,
+
+        message:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+function calculateSubscriptionDetails(
+
+  company,
+
+  plan
+
+) {
+
+  console.log(
+    "CALCULATION FUNCTION HIT"
+  );
+
+
+  // ===================================
+  // TEST MODE
+  // Change date here for testing
+  // ===================================
+
+  //const today =
+    //new Date("2026-07-30");
+
+  // ===================================
+  // PRODUCTION MODE
+  // Uncomment after testing
+  // ===================================
+
+   const today =
+     new Date();
+
+  today.setHours(
+    0,
+    0,
+    0,
+    0
+  );
+
+  const country =
+
+  String(
+    company.country || ""
+  ).trim() ||
+
+  "India";
+
+  console.log(
+  "TEST TODAY =",
+
+ formatDateByCountry(
+  today,
+  country
+)
+);
+
+  let validFrom;
+
+  let cycles = 1;
+
+  let isRenewal =
+    false;
+
+    console.log(
+  "COMPANY =",
+  company
+);
+
+console.log(
+  "PLAN =",
+  plan
+);
+
+  // =====================
+  // FRESH SUBSCRIPTION
+  // =====================
+
+  if (
+
+    !company.license_till
+
+  ) {
+
+    validFrom =
+      new Date(
+        today
+      );
+
+  }
+
+  // =====================
+  // RENEWAL
+  // =====================
+
+  else {
+
+    isRenewal =
+      true;
+
+    validFrom =
+      new Date(
+        company.license_till
+      );
+
+    validFrom.setDate(
+      validFrom.getDate() + 1
+    );
+
+    console.log(
+  "LICENSE TILL =",
+  company.license_till
+);
+
+console.log(
+  "VALID FROM =",
+  formatDateByCountry(
+    validFrom,
+    country
+  )
+);
+
+    const diffMs =
+      today -
+      validFrom;
+
+    const expiredDays =
+      Math.max(
+
+        0,
+
+        Math.ceil(
+
+          diffMs /
+
+          (
+            1000 *
+            60 *
+            60 *
+            24
+          )
+
+        )
+
+      );
+
+    cycles =
+      Math.max(
+
+        1,
+
+        Math.ceil(
+
+          expiredDays /
+
+          plan.validity_days
+
+        )
+
+      );
+
+      console.log(
+  "EXPIRED DAYS =",
+  expiredDays
+);
+
+console.log(
+  "CYCLES AFTER CALC =",
+  cycles
+);
+
+  }
+
+
+  let totalDays =
+    cycles *
+    plan.validity_days;
+
+  let validTo =
+    new Date(
+      validFrom
+    );
+
+  validTo.setDate(
+
+    validTo.getDate() +
+
+    totalDays -
+
+    1
+
+  );
+
+  while (
+
+    validTo < today
+
+  ) {
+
+    cycles++;
+
+    totalDays =
+      cycles *
+      plan.validity_days;
+
+    validTo =
+      new Date(
+        validFrom
+      );
+
+    validTo.setDate(
+
+      validTo.getDate() +
+
+      totalDays -
+
+      1
+
+    );
+
+  }
+
+  const amount =
+
+    cycles *
+
+    Number(
+      plan.plan_amount
+    );
+
+
+    console.log(
+  "FINAL CYCLES =",
+  cycles
+);
+
+console.log(
+  "FINAL AMOUNT =",
+  amount
+);
+
+console.log(
+  "VALID TO =",
+  validTo
+    .toISOString()
+    .split("T")[0]
+);
+
+  return {
+
+    company_code:
+      company.company_code,
+
+    isRenewal,
+
+    cycles,
+
+    totalDays,
+
+    amount,
+
+valid_from:
+
+  formatDateByCountry(
+    validFrom,
+    country
+  ),
+
+    
+
+    valid_to:
+
+      validTo
+
+        .toISOString()
+
+        .split("T")[0]
+
+  };
+
+}
+
+app.post(
+
+  "/getSubscriptionVerifyDetails",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        data,
+
+        error
+
+      } = await supabase
+
+        .from(
+          "license_master"
+        )
+
+        .select(`
+          id,
+          company_code,
+          selected_plan,
+          valid_from,
+          valid_to,
+          subscription_amt,
+          payment_verified,
+          partner_id,
+          agent_id,
+          payment_screenshot,
+          created_on
+        `)
+
+
+        .eq(
+  "created_by",
+  "USER"
+)
+
+        .order(
+          "created_on",
+          {
+            ascending: false
+          }
+        );
+
+
+        const licenseIds =
+
+  (data || []).map(
+
+    (x) => x.id
+
+  );
+
+console.log(
+
+  "LICENSE IDS:",
+
+  licenseIds
+
+);
+
+const {
+  data: proofs
+} = await supabase
+  .from("license_payment_proofs")
+  .select(`
+    license_id,
+    validated
+  `)
+  .in("license_id", licenseIds);
+
+const filteredData =
+  (data || []).filter((row) => {
+
+    // First Stage
+    if (row.payment_verified == null) {
+      return true;
+    }
+
+    // Second Stage
+    if (row.payment_verified === false) {
+
+      const proof = (proofs || []).find(
+        x => x.license_id === row.id
+      );
+
+      return proof && proof.validated == null;
+    }
+
+    return false;
+  });
+
+  console.log(
+  "FILTERED DATA",
+  filteredData.map(x => ({
+    company_code: x.company_code,
+    payment_verified: x.payment_verified
+  }))
+);
+
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            error.message
+
+        });
+
+      }
+
+     return res.json({
+
+  success: true,
+
+  data: filteredData
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        message:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+app.post(
+
+  "/verifySubscriptionPayment",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+  String(
+    req.body.company_code || ""
+  ).trim();
+
+const license_id =
+  Number(
+    req.body.license_id
+  );
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+
+        data,
+
+        error
+
+      } = await supabase
+
+        .from(
+          "license_master"
+        )
+
+        .update({
+  payment_verified: true
+})
+.eq(
+  "company_code",
+  company_code
+)
+.eq(
+  "id",
+  license_id
+)
+
+        
+
+        .select();
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+const { data: company } =
+await supabase
+  .from("company")
+  .select("mobile")
+  .eq("company_code", company_code)
+  .single();
+
+console.log(
+  "COMPANY:",
+  company
+);
+
+  if (!company?.mobile) {
+
+  console.log(
+    "COMPANY MOBILE NOT FOUND:",
+    company_code
+  );
+
+}
+else {
+
+  const { data: matchedUser } =
+await supabase
+  .from("usersheet")
+  .select("*")
+  .eq("user_id", company.mobile);
+
+console.log(
+  "MATCHED USER:",
+  matchedUser
+);
+
+  const {
+    data: userUpdate,
+    error: userError
+  } = await supabase
+    .from("usersheet")
+    .update({
+      role: "USER"
+    })
+    .eq("user_id", company.mobile)
+    .select();
+
+ console.log(
+  "USER ROLE UPDATE:",
+  userUpdate
+);
+
+console.log(
+  "USER ROLE ERROR:",
+  userError
+);
+
+}
+
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Payment verified successfully",
+
+        data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+app.post(
+  "/createConsolidatedShare",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+        company_code,
+        invoice_ids
+      } = req.body;
+
+      const token =
+        crypto
+          .randomBytes(16)
+          .toString("hex");
+
+      const {
+        error
+      } = await supabase
+
+        .from(
+          "consolidated_share"
+        )
+
+        .insert([{
+
+          token,
+
+          company_code,
+
+          invoice_ids
+
+        }]);
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        token
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+app.post(
+  "/sendConsolidatedShareEmail",
+  async (req, res) => {
+
+    try {
+
+      const {
+        token,
+        email,
+        companyName,
+        companyEmail,
+        periodText
+      } = req.body;
+
+      const shareUrl =
+        `https://www.billey.in/share-consolidated/${token}`;
+
+      const result =
+        await resend.emails.send({
+
+          from:
+            "Billey <noreply@billey.in>",
+
+          replyTo:
+            companyEmail || undefined,
+
+          to:
+            email,
+
+          subject:
+            `${companyName || "Company"} - Consolidated Invoice Statement`,
+
+          html: `
+            <div style="
+              font-family: Arial, sans-serif;
+              max-width: 600px;
+              margin: auto;
+              line-height: 1.6;
+              color: #333;
+            ">
+
+              <h2 style="
+                margin-bottom: 10px;
+              ">
+                Consolidated Invoice Statement
+              </h2>
+
+              <p>
+                Please find the consolidated invoice statement shared by
+                <strong>
+                  ${companyName || "Company"}
+                </strong>.
+              </p>
+
+              ${
+                periodText
+                  ? `
+                    <p>
+                      Period:
+                      <strong>
+                        ${periodText}
+                      </strong>
+                    </p>
+                  `
+                  : ""
+              }
+
+              <p>
+                This link contains all invoices included in the selected period.
+              </p>
+
+              <p style="
+                margin: 25px 0;
+              ">
+                <a
+                  href="${shareUrl}"
+                  style="
+                    background:#2563eb;
+                    color:#ffffff;
+                    padding:12px 20px;
+                    text-decoration:none;
+                    border-radius:6px;
+                    display:inline-block;
+                  "
+                >
+                  View Invoice Statement
+                </a>
+              </p>
+
+              <p>
+                If the button above does not work,
+                copy and paste the following link into your browser:
+              </p>
+
+              <p>
+                <a href="${shareUrl}">
+                  ${shareUrl}
+                </a>
+              </p>
+
+              <hr />
+
+              <p>
+                Regards,
+                <br />
+                <strong>
+                  ${companyName || "Company"}
+                </strong>
+              </p>
+
+              ${
+                companyEmail
+                  ? `
+                    <p>
+                      Contact:
+                      ${companyEmail}
+                    </p>
+                  `
+                  : ""
+              }
+
+              <p style="
+                color:#666;
+                font-size:12px;
+              ">
+                Sent securely via Billey.
+              </p>
+
+            </div>
+          `
+
+        });
+
+        console.log(
+  "RESEND RESULT:",
+  JSON.stringify(
+    result,
+    null,
+    2
+  )
+);
+
+      if (result.error) {
+
+        console.log(
+          "RESEND ERROR:",
+          result.error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            result.error
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+app.get(
+  "/getConsolidatedShare/:token",
+
+  async (req, res) => {
+
+    try {
+
+      const { token } =
+        req.params;
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from(
+          "consolidated_share"
+        )
+
+        .select("*")
+
+        .eq(
+          "token",
+          token
+        )
+
+        .single();
+
+      if (error || !data) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Invalid token"
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+app.get(
+  "/getConsolidatedInvoices/:token",
+
+  async (req, res) => {
+
+    try {
+
+      const { token } =
+        req.params;
+
+      // =====================
+      // GET SHARE ROW
+      // =====================
+
+      const {
+        data: shareRow,
+        error: shareError
+      } = await supabase
+
+        .from(
+          "consolidated_share"
+        )
+
+        .select("*")
+
+        .eq(
+          "token",
+          token
+        )
+
+        .single();
+
+      if (
+        shareError ||
+        !shareRow
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Invalid token"
+
+        });
+
+      }
+
+      const invoiceIds =
+        shareRow.invoice_ids || [];
+
+      // =====================
+      // GET INVOICES
+      // =====================
+
+      const {
+        data: invoices,
+        error: invoiceError
+      } = await supabase
+
+        .from("invoices")
+
+        .select("*")
+
+        .in(
+          "invoice_id",
+          invoiceIds
+        );
+
+      if (invoiceError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            invoiceError.message
+
+        });
+
+      }
+
+const {
+  data: company,
+  error: companyError
+} = await supabase
+
+  .from("company")
+
+  .select("*")
+
+  .eq(
+    "company_code",
+    shareRow.company_code
+  )
+
+  .single();
+
+  if (companyError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      companyError.message
+
+  });
+
+}
+
+  
+      
+
+// =====================
+// GET INVOICE ITEMS
+// =====================
+
+const {
+
+  data: invoiceItems,
+
+  error: itemsError
+
+} = await supabase
+
+  .from("invoice_items")
+
+  .select("*")
+
+  .in(
+
+    "invoice_id",
+
+    invoiceIds
+
+  );
+
+if (itemsError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      itemsError.message
+
+  });
+
+}
+
+const invoicesWithItems =
+
+  (invoices || []).map(
+
+    (invoice) => ({
+
+      ...invoice,
+
+      items:
+
+        (invoiceItems || []).filter(
+
+          item =>
+
+            item.invoice_id ===
+
+            invoice.invoice_id
+
+        )
+
+    })
+
+  );
+
+    return res.json({
+
+  success: true,
+
+  company,
+
+  company_code:
+    shareRow.company_code,
+
+  invoices:
+    invoicesWithItems
+
+});
+    }
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// GET TUTORIALS
+// =========================
+
+app.get(
+  "/getTutorials",
+  async (req, res) => {
+
+    try {
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("tutorials")
+
+        .select("*")
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .order(
+          "sort_order",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data: data || []
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/saveTutorial",
+  async (req, res) => {
+
+    try {
+
+      const tutorial =
+        req.body;
+
+      let result;
+
+      if (tutorial.id) {
+
+        // UPDATE
+
+        result =
+          await supabase
+
+            .from("tutorials")
+
+            .update({
+
+              sort_order:
+                tutorial.sort_order,
+
+              title:
+                tutorial.title,
+
+              description:
+                tutorial.description,
+
+              youtube_url:
+                tutorial.youtube_url,
+
+              thumbnail_url:
+                tutorial.thumbnail_url,
+
+              duration_minutes:
+                tutorial.duration_minutes,
+
+              category:
+                tutorial.category,
+
+              is_active:
+                tutorial.is_active
+
+            })
+
+            .eq(
+              "id",
+              tutorial.id
+            )
+
+            .select();
+
+      } else {
+
+        // INSERT
+
+        result =
+          await supabase
+
+            .from("tutorials")
+
+            .insert([{
+
+              sort_order:
+                tutorial.sort_order,
+
+              title:
+                tutorial.title,
+
+              description:
+                tutorial.description,
+
+              youtube_url:
+                tutorial.youtube_url,
+
+              thumbnail_url:
+                tutorial.thumbnail_url,
+
+              duration_minutes:
+                tutorial.duration_minutes,
+
+              category:
+                tutorial.category,
+
+              is_active:
+                tutorial.is_active ?? true
+
+            }])
+
+            .select();
+
+      }
+
+      if (result.error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            result.error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data:
+          result.data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET CLIENT
+// =========================
+
+app.get(
+  "/getClientMobile",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      const client_code =
+
+        String(
+          req.query.client_code || ""
+        ).trim();
+
+      console.log(
+        "GET CLIENT API HIT"
+      );
+
+      console.log(
+        "COMPANY CODE:",
+        company_code
+      );
+
+      console.log(
+        "CLIENT CODE:",
+        client_code
+      );
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (!client_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "client_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH CLIENT
+      // =========================
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("client")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "client_code",
+          client_code
+        )
+
+        .single();
+
+      console.log(
+        "RAW CLIENT DATA:",
+        data
+      );
+
+      if (error) {
+
+        console.log(
+          "GET CLIENT ERROR:",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      // =========================
+      // FINAL RESPONSE
+      // =========================
+
+      const result = {
+
+        company_code:
+          String(
+            data.company_code || ""
+          ),
+
+        client_code:
+          String(
+            data.client_code || ""
+          ),
+
+        client_name:
+          data.client_name || "",
+
+        gstin:
+          data.gstin || "",
+
+        billing_address:
+          data.billing_address || "",
+
+        bill_state:
+          data.bill_state || "",
+
+        bill_stateCode:
+          String(
+            data.bill_statecode || ""
+          ),
+
+        bill_pincode:
+          String(
+            data.bill_pincode || ""
+          ),
+
+        mobile:
+          String(
+            data.mobile || ""
+          ),
+
+        email:
+          data.email || "",
+
+        same_address:
+          data.same_address || "",
+
+        shipping_address:
+          data.shipping_address || "",
+
+        shipping_state:
+          data.shipping_state || "",
+
+        shipping_stateCode:
+          String(
+            data.shipping_statecode || ""
+          ),
+
+        shipping_pincode:
+          String(
+            data.shipping_pincode || ""
+          ),
+
+        createdAt:
+          data.created_at || "",
+
+        updatedAt:
+          data.updated_at || "",
+
+        is_active:
+          data.is_active,
+
+        contact_person:
+          data.contact_person || "",
+
+        credit_limit:
+          data.credit_limit || 0,
+
+        opening_balance:
+          data.opening_balance || 0,
+
+        remarks:
+          data.remarks || "",
+
+        credit_period:
+          data.credit_period || 0
+
+      };
+
+      console.log(
+        "FINAL CLIENT RESPONSE:",
+        result
+      );
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "GET CLIENT CATCH ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+
+// =========================
+// GET LICENSE STATUS
+// =========================
+
+app.get(
+  "/getLicenseStatus",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("license_master")
+
+        .select(`
+  id,
+  payment_verified,
+  payment_status,
+  expected_amount,
+  received_amount
+`)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "created_on",
+          {
+            ascending: false
+          }
+        )
+
+        .limit(1)
+
+        .single();
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// SUBMIT PENDING PAYMENT PROOF
+// =========================
+
+app.post(
+  "/submitPendingPaymentProof",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+
+        String(
+          body.company_code || ""
+        ).trim();
+
+      const mobile =
+
+        String(
+          body.mobile || ""
+        ).trim();
+
+      if (
+        !company_code ||
+        !mobile
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code or mobile missing"
+
+        });
+
+      }
+
+
+      const {
+  data: licenseRow,
+  error: licenseError
+} = await supabase
+
+  .from("license_master")
+
+  .select(`
+    id,
+    plan_name,
+    plan_code,
+    valid_from,
+    valid_to
+  `)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .order(
+    "created_on",
+    {
+      ascending: false
+    }
+  )
+
+  .limit(1)
+
+  .single();
+
+if (licenseError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      licenseError.message
+
+  });
+
+}
+
+
+
+
+const {
+  data: existingProof,
+  error: existingProofError
+} = await supabase
+
+
+
+  .from(
+    "license_payment_proofs"
+  )
+
+  .select("id")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "license_id",
+    licenseRow.id
+  )
+
+  .eq(
+    "valid_from",
+    licenseRow.valid_from
+  )
+
+  .eq(
+    "valid_to",
+    licenseRow.valid_to
+  )
+
+  .eq(
+    "status",
+    "pending_verification"
+  )
+
+  .limit(1)
+
+  .maybeSingle();
+
+if (existingProofError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      existingProofError.message
+
+  });
+
+}
+
+if (existingProof) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Payment proof already submitted and under verification"
+
+  });
+
+}
+      const {
+        error
+      } = await supabase
+
+        .from(
+          "license_payment_proofs"
+        )
+
+   .insert([{
+
+  company_code,
+
+  mobile,
+
+  license_id:
+    licenseRow?.id || null,
+
+  plan_name:
+    licenseRow?.plan_name || null,
+
+  plan_code:
+    licenseRow?.plan_code || null,
+
+  valid_from:
+    licenseRow?.valid_from || null,
+
+  valid_to:
+    licenseRow?.valid_to || null,
+
+  expected_amount:
+    Number(
+      body.expected_amount || 0
+    ),
+
+  received_amount:
+    Number(
+      body.received_amount || 0
+    ),
+
+  pending_amount:
+    Number(
+      body.pending_amount || 0
+    ),
+
+  screenshot:
+    body.screenshot || "",
+
+  status:
+    "pending_verification"
+
+}]);
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Payment proof submitted successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET PENDING PAYMENT PROOF STATUS
+// =========================
+
+app.get(
+
+  "/getPendingPaymentProofStatus",
+
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from(
+          "license_payment_proofs"
+        )
+
+        .select(`
+          id,
+          status,
+          validated,
+          license_id,
+          plan_name,
+          plan_code,
+          valid_from,
+          valid_to,
+          created_on
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "created_on",
+          {
+            ascending: false
+          }
+        )
+
+        .limit(1)
+
+
+        .maybeSingle();
+
+        console.log(
+  "CHECK COMPANY:",
+  company_code
+);
+
+
+console.log(
+  "PENDING PROOF STATUS DATA:",
+  data
+);
+
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data:
+          data || null
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
+// MARK PARTIAL PAYMENT
+// =========================
+
+app.post(
+
+  "/markPartialSubscriptionPayment",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company_code,
+
+        received_amount
+
+      } = req.body || {};
+
+      if (
+
+        !company_code ||
+
+        received_amount == null
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code or received_amount missing"
+
+        });
+
+      }
+
+      const {
+
+        data: licenseRow,
+
+        error: fetchError
+
+      } = await supabase
+
+        .from("license_master")
+
+        .select(`
+          id,
+          subscription_amt
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "created_on",
+          {
+            ascending: false
+          }
+        )
+
+        .limit(1)
+
+        .single();
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      const {
+
+        error: updateError
+
+      } = await supabase
+
+        .from("license_master")
+
+        .update({
+
+  payment_verified:
+    false,
+
+  payment_status:
+    "pending",
+
+  expected_amount:
+    licenseRow.subscription_amt,
+
+  received_amount:
+    Number(
+      received_amount
+    )
+
+})
+
+        .eq(
+          "id",
+          licenseRow.id
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Partial payment saved successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+// =========================
+// REJECT SUBSCRIPTION PAYMENT
+// =========================
+
+app.post(
+
+  "/rejectSubscriptionPayment",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+  company_code,
+  license_id
+} = req.body || {};
+
+     if (
+  !company_code ||
+  !license_id
+) {
+  return res.json({
+    success: false,
+    error: "company_code or license_id missing"
+  });
+}
+
+      const {
+
+        data: licenseRow,
+
+        error: fetchError
+
+      } = await supabase
+
+        .from("license_master")
+
+        .select(`
+  id,
+  subscription_amt
+`)
+
+       .eq("company_code", company_code)
+.eq("id", license_id)
+.single();
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      const {
+
+        error: updateError
+
+      } = await supabase
+
+        .from("license_master")
+
+       .update({
+
+  payment_verified:
+    false,
+
+  payment_status:
+    "rejected",
+
+  received_amount:
+    0,
+
+  expected_amount:
+    licenseRow.subscription_amt
+
+})
+
+        .eq(
+          "id",
+          licenseRow.id
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Payment rejected successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+
+// =========================
+// GET PENDING PAYMENT PROOFS
+// =========================
+
+app.get(
+
+  "/getPendingPaymentProofs",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        data,
+
+        error
+
+      } = await supabase
+
+        .from(
+          "license_payment_proofs"
+        )
+
+        .select(`
+          id,
+          company_code,
+  validation_stage,
+          plan_name,
+          plan_code,
+
+          expected_amount,
+          received_amount,
+          pending_amount,
+
+          screenshot,
+
+          status,
+
+          license_id,
+
+          valid_from,
+          valid_to,
+
+          created_on
+        `)
+
+       .is(
+  "validated",
+  null
+)
+        .order(
+          "created_on",
+          {
+            ascending: false
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data:
+          data || []
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+
+// =========================
+// VERIFY PENDING PAYMENT PROOF
+// =========================
+
+app.post(
+
+  "/verifyPendingPaymentProof",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        proof_id
+
+      } = req.body || {};
+
+      if (
+
+        !proof_id
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "proof_id missing"
+
+        });
+
+      }
+
+      const {
+
+        error: updateError
+
+      } = await supabase
+
+        .from(
+          "license_payment_proofs"
+        )
+
+        .update({
+
+          validated:
+            true,
+
+          validated_on:
+            new Date(),
+
+          status:
+            "verified"
+
+        })
+
+        .eq(
+          "id",
+          proof_id
+        )
+
+        .eq(
+          "validation_stage",
+          2
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Payment proof verified successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+// =========================
+// REJECT PENDING PAYMENT PROOF
+// =========================
+
+app.post(
+
+  "/rejectPendingPaymentProof",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        proof_id
+
+      } = req.body || {};
+
+
+       console.log(
+        "REJECT PROOF BODY:",
+        req.body
+      );
+
+      console.log(
+        "PROOF ID:",
+        proof_id
+      );
+
+      if (
+
+        !proof_id
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "proof_id missing"
+
+        });
+
+      }
+
+     const {
+
+  data: updatedRows,
+
+  error: updateError
+
+} = await supabase
+
+  .from(
+    "license_payment_proofs"
+  )
+
+  .update({
+
+    status:
+      "rejected",
+
+    validated:
+      false,
+
+    validated_on:
+      new Date()
+
+  })
+
+  .eq(
+    "id",
+    proof_id
+  )
+
+  .eq(
+    "validation_stage",
+    2
+  )
+
+  .select();
+
+console.log(
+  "UPDATED ROWS:",
+  updatedRows
+);
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Payment proof rejected successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+app.post(
+  "/changePassword",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const email =
+        String(body.email || "")
+          .trim()
+          .toLowerCase();
+
+      const oldPassword =
+        String(body.oldPassword || "")
+          .trim();
+
+      const newPassword =
+        String(body.newPassword || "")
+          .trim();
+
+      if (
+        !email ||
+        !oldPassword ||
+        !newPassword
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Email, old password and new password required"
+
+        });
+
+      }
+
+      const {
+        data: user,
+        error
+      } = await supabase
+
+        .from("usersheet")
+
+        .select("*")
+
+        .eq(
+          "email",
+          email
+        )
+
+        .single();
+
+      if (
+        error ||
+        !user
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "User not found"
+
+        });
+
+      }
+
+      const passwordMatch =
+        await bcrypt.compare(
+          oldPassword,
+          user.password || ""
+        );
+
+      if (!passwordMatch) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Old password incorrect"
+
+        });
+
+      }
+
+      const hashedPassword =
+        await bcrypt.hash(
+          newPassword,
+          10
+        );
+
+      const {
+        error: updateError
+      } = await supabase
+
+        .from("usersheet")
+
+       .update({
+  password: hashedPassword,
+  force_password_change: false
+})
+
+        .eq(
+          "email",
+          email
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Password changed successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "CHANGE PASSWORD ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// SAVE RECEIPT
+// =========================
+
+app.post(
+  "/saveReceipt",
+  async (req, res) => {
+
+    try {
+
+      console.log(
+        "SAVE RECEIPT API HIT"
+      );
+
+      console.log(
+        "REQ BODY:",
+        req.body
+      );
+
+      const body =
+        req.body || {};
+
+      const company_code =
+        String(
+          body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const receipt =
+  req.body;
+
+  
+const date =
+  new Date(
+    receipt.receipt_date
+  );
+
+const fy =
+  date.getMonth() >= 3
+    ? date.getFullYear()
+    : date.getFullYear() - 1;
+
+const fy_code =
+  `${String(fy).slice(-2)}-${String(fy + 1).slice(-2)}`;
+
+console.log(
+  "RECEIPT DATA:",
+  receipt
+);
+
+if (
+  !receipt.receipt_date ||
+  !receipt.party_id ||
+  !receipt.party_name ||
+  !receipt.amount
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Required fields missing"
+
+  });
+
+}
+
+if (
+  !receipt.payment_mode
+) {
+
+  receipt.payment_mode =
+    "Cash";
+
+}
+
+let voucher_type =
+  receipt.payment_mode === "Bank"
+    ? "BR"
+    : "CR";
+
+let voucher_series =
+  receipt.payment_mode === "Bank"
+
+    ? `BR-${receipt.bank_code}-${fy_code}`
+
+    : `CR-${fy_code}`;
+
+console.log(
+  "VOUCHER TYPE:",
+  voucher_type
+);
+
+console.log(
+  "VOUCHER SERIES:",
+  voucher_series
+);
+
+if (
+  receipt.payment_mode ===
+  "Cash"
+) {
+
+  receipt.reference_no = "";
+
+  receipt.bank_code = "";
+
+  receipt.bank_name = "";
+
+  receipt.cheque_date = null;
+
+}
+
+if (
+  receipt.payment_mode === "Bank" &&
+  !receipt.bank_code
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Bank required"
+
+  });
+
+}
+
+if (
+  receipt.payment_mode === "Bank" &&
+  receipt.reference_no &&
+  receipt.bank_code
+) {
+
+  const {
+    data: duplicateCheque,
+    error: duplicateError
+  } = await supabase
+
+    .from("receipt_entry")
+
+    .select("id")
+
+    .eq(
+      "company_code",
+      company_code
+    )
+
+    .eq(
+      "fy_code",
+      fy_code
+    )
+
+    .eq(
+      "voucher_series",
+      voucher_series
+    )
+
+    .eq(
+      "bank_code",
+      receipt.bank_code
+    )
+
+    .eq(
+      "reference_no",
+      receipt.reference_no
+    )
+
+    .maybeSingle();
+
+  if (duplicateError) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        duplicateError.message
+
+    });
+
+  }
+
+  if (duplicateCheque) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "Cheque number already exists"
+
+    });
+
+  }
+
+}
+
+const {
+  data: lastReceipt,
+  error: lastReceiptError
+} = await supabase
+  .from("receipt_entry")
+  .select("voucher_no")
+  .eq(
+  "company_code",
+  company_code
+)
+.eq(
+  "fy_code",
+  fy_code
+)
+.eq(
+  "voucher_series",
+  voucher_series
+)
+.not(
+    "voucher_no",
+    "is",
+    null
+  )
+  .order(
+    "voucher_no",
+    {
+      ascending: false
+    }
+  )
+  .limit(1)
+  .maybeSingle();
+
+    if (
+  lastReceiptError
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      lastReceiptError.message
+
+  });
+
+}
+
+const nextVoucherNo =
+  Number(
+    lastReceipt?.voucher_no || 0
+  ) + 1;
+  console.log(
+  "LAST VOUCHER:",
+  lastReceipt
+);
+
+console.log(
+  "NEXT VOUCHER:",
+  nextVoucherNo
+);
+
+const {
+  data: lastReceiptNo,
+  error: lastReceiptNoError
+} = await supabase
+
+  .from("receipt_entry")
+
+  .select("receipt_no")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .order(
+    "id",
+    {
+      ascending: false
+    }
+  )
+
+  .limit(1)
+
+  .maybeSingle();
+
+if (
+  lastReceiptNoError
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      lastReceiptNoError.message
+
+  });
+
+}
+
+const nextReceiptNo =
+  lastReceiptNo?.receipt_no
+
+    ? Number(
+        lastReceiptNo.receipt_no
+          .split("-")
+          .pop()
+      ) + 1
+
+    : 1;
+
+const receipt_no =
+  "RCPT-" +
+  company_code +
+  "-" +
+  receipt.receipt_date
+    .substring(2)
+    .replaceAll("-", "") +
+  "-" +
+  String(
+    nextReceiptNo
+  ).padStart(
+    5,
+    "0"
+  );
+
+  console.log(
+  "RECEIPT NO:",
+  receipt_no
+);
+
+const {
+  data,
+  error
+} = await supabase
+
+  .from("receipt_entry")
+
+  .insert([{
+
+    receipt_no,
+
+voucher_no:
+  nextVoucherNo,
+
+  voucher_type,
+
+voucher_series,
+
+fy_code,
+
+company_code,
+
+    receipt_date:
+      receipt.receipt_date,
+
+    party_id:
+      receipt.party_id,
+
+    party_name:
+      receipt.party_name,
+
+    amount:
+      Number(
+        receipt.amount
+      ),
+
+    payment_mode:
+      receipt.payment_mode,
+
+   reference_no:
+  receipt.reference_no || "",
+
+bank_code:
+  receipt.bank_code || "",
+
+bank_name:
+  receipt.bank_name || "",
+
+    cheque_date:
+      receipt.cheque_date,
+
+    remarks:
+      receipt.remarks || "",
+
+    status:
+      "RECEIVED"
+
+    }])
+
+  .select()
+
+  .single();
+
+console.log(
+  "RECEIPT INSERT ERROR:",
+  error
+);
+
+console.log(
+  "INSERTED RECEIPT:",
+  data
+);
+
+     if (error) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      error.message
+
+  });
+
+}
+return res.json({
+
+  success: true,
+
+  message:
+    "Receipt Saved",
+
+  receipt_no,
+
+  voucher_no:
+    nextVoucherNo,
+
+    fy_code,
+
+voucher_type,
+
+voucher_series,
+
+    data
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET COMPANY BANKS
+// =========================
+
+app.get(
+  "/getCompanyBanks",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+          success: false,
+          error: "company_code missing"
+        });
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("company_bank")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .order(
+          "bank_name"
+        );
+
+      if (error) {
+
+        return res.json({
+          success: false,
+          error: error.message
+        });
+
+      }
+
+      return res.json({
+        success: true,
+        data
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+        success: false,
+        error: err.message
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// SAVE COMPANY BANK
+// =========================
+
+app.post(
+  "/saveCompanyBank",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+        String(
+          body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const bank_name =
+        String(
+          body.bank_name || ""
+        ).trim();
+
+      if (!bank_name) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Bank name required"
+
+        });
+
+      }
+
+      // =========================
+      // FETCH EXISTING BANKS
+      // =========================
+
+      const {
+        data: banks,
+        error: fetchError
+      } = await supabase
+
+        .from("company_bank")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+      // =========================
+      // DUPLICATE CHECK
+      // =========================
+
+      const duplicate =
+        (banks || []).find(
+          (b) =>
+
+            String(
+              b.bank_name || ""
+            )
+              .trim()
+              .toUpperCase()
+
+            ===
+
+            bank_name
+              .toUpperCase()
+        );
+
+      if (duplicate) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Bank already exists"
+
+        });
+
+      }
+
+      // =========================
+      // GENERATE BANK CODE
+      // =========================
+
+      let maxNumber = 0;
+
+      (banks || []).forEach(
+        (row) => {
+
+          const num =
+            parseInt(
+              String(
+                row.bank_code || ""
+              ).replace(
+                "BK",
+                ""
+              )
+            );
+
+          if (!isNaN(num)) {
+
+            maxNumber =
+              Math.max(
+                maxNumber,
+                num
+              );
+
+          }
+
+        }
+      );
+
+      const bank_code =
+
+        "BK" +
+
+        String(
+          maxNumber + 1
+        ).padStart(4, "0");
+
+      // =========================
+      // INSERT
+      // =========================
+
+      const {
+        error: insertError
+      } = await supabase
+
+        .from("company_bank")
+
+        .insert([{
+
+          company_code,
+
+          bank_code,
+
+          bank_name,
+
+          account_number:
+            body.account_number || "",
+
+          ifsc:
+            body.ifsc || "",
+
+          branch:
+            body.branch || "",
+
+            is_default:
+             body.is_default || false,
+
+          is_active: true,
+
+          created_at:
+            new Date()
+
+        }]);
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            insertError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Bank saved successfully",
+
+        bank_code
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+        });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET CLIENT LEDGER
+// =========================
+
+app.post(
+  "/getClientLedger",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+        body.company_code;
+
+      const client_code =
+        body.client_code;
+
+      const from_date =
+        body.from_date;
+
+      const to_date =
+        body.to_date;
+
+      if (
+        !company_code ||
+        !client_code
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code or client_code missing"
+
+        });
+
+      }
+
+      // Client Fetch
+
+      const {
+        data: clientRow
+      } = await supabase
+
+        .from("client")
+
+        .select(
+          "opening_balance"
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "client_code",
+          client_code
+        )
+
+        .single();
+
+      let openingBalance =
+        Number(
+          clientRow
+            ?.opening_balance || 0
+        );
+
+      // Previous Invoices
+
+      const {
+        data: oldInvoices
+      } = await supabase
+
+        .from("invoices")
+
+        .select(
+          "grand_total"
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "client_code",
+          client_code
+        )
+
+        .eq(
+          "doc_type",
+          "invoice"
+        )
+
+        .eq(
+          "status",
+          "Posted"
+        )
+
+        .lt(
+          "invoice_date",
+          from_date
+        );
+
+      // Previous Receipts
+
+      const {
+        data: oldReceipts
+      } = await supabase
+
+        .from("receipt_entry")
+
+        .select(
+          "amount"
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "party_id",
+          client_code
+        )
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .lt(
+          "receipt_date",
+          from_date
+        );
+
+      openingBalance +=
+
+        (oldInvoices || [])
+          .reduce(
+
+            (sum, row) =>
+
+              sum +
+
+              Number(
+                row.grand_total || 0
+              ),
+
+            0
+          );
+
+      openingBalance -=
+
+        (oldReceipts || [])
+          .reduce(
+
+            (sum, row) =>
+
+              sum +
+
+              Number(
+                row.amount || 0
+              ),
+
+            0
+          );
+
+
+
+          // Current Period Invoices
+
+const {
+  data: invoices
+} = await supabase
+
+  .from("invoices")
+
+ .select(`
+  id,
+  invoice_id,
+  invoice_date,
+  invoice_number,
+  grand_total
+`)
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "client_code",
+    client_code
+  )
+
+  .eq(
+    "doc_type",
+    "invoice"
+  )
+
+  .eq(
+    "status",
+    "Posted"
+  )
+
+  .gte(
+    "invoice_date",
+    from_date
+  )
+
+  .lte(
+    "invoice_date",
+    to_date
+  );
+
+// Current Period Receipts
+
+const {
+  data: receipts
+} = await supabase
+
+  .from("receipt_entry")
+
+ .select(`
+  id,
+  receipt_date,
+  receipt_no,
+  amount,
+  payment_mode
+`)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "party_id",
+    client_code
+  )
+
+  .eq(
+    "is_active",
+    true
+  )
+
+  .gte(
+    "receipt_date",
+    from_date
+  )
+
+  .lte(
+    "receipt_date",
+    to_date
+  );
+
+  const transactions = [];
+
+// Invoices
+
+(invoices || []).forEach(
+  (row) => {
+
+    transactions.push({
+
+      id:
+     row.invoice_id,  
+
+      date:
+        row.invoice_date,
+
+      type:
+        "Invoice",
+
+      doc_no:
+        row.invoice_number,
+
+      debit:
+        Number(
+          row.grand_total || 0
+        ),
+
+      credit: 0
+
+    });
+
+  }
+);
+
+// Receipts
+
+(receipts || []).forEach(
+  (row) => {
+
+   transactions.push({
+
+  id:
+    row.id,
+
+  date:
+    row.receipt_date,
+
+  type:
+    "Receipt",
+
+  doc_no:
+    row.receipt_no,
+
+  debit: 0,
+
+  credit:
+    Number(
+      row.amount || 0
+    ),
+
+  payment_mode:
+    row.payment_mode
+
+});
+
+  }
+);
+
+// Sort By Date
+
+transactions.sort(
+  (a, b) =>
+    new Date(a.date) -
+    new Date(b.date)
+);
+
+  return res.json({
+
+  success: true,
+
+  openingBalance,
+
+  transactions
+
+});
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET VENDORS
+// =========================
+
+app.get(
+  "/getVendors",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("vendor")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+         .eq(
+    "is_active",
+    true
+  )
+
+        .order(
+          "created_at",
+          {
+            ascending: false
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data: data || []
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+
+// =========================
+// GET VENDOR MASTER API
+// =========================
+
+app.get(
+  "/getVendormaster",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("vendor")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .order(
+          "created_at",
+          {
+            ascending: false
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data: data || []
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET MATERIALS
+// =========================
+
+app.get(
+   "/getPurchaseMaterials",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+        req.query.company_code;
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("mm")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .order(
+          "item_name",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data
+
+      });
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET PURCHASE MASTER MATERIALS
+// =========================
+
+app.get(
+  "/getPurchaseMasterMaterials",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+          success: false,
+          error:
+            "company_code missing"
+        });
+
+      }
+
+      // =====================
+      // SINGLE ITEMS
+      // =====================
+
+      const {
+        data: materials,
+        error: materialsError
+      } = await supabase
+
+        .from("mm")
+
+        .select(`
+          material_id,
+          item_code,
+          mat_type,
+          item_name,
+          base_unit,
+          hsn_code,
+          pur_mrp,
+          gst_percent,
+          pur_disc_percent,
+          pur_disc_amt,
+          pur_rate
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .eq(
+          "mat_type",
+          "single"
+        );
+
+        const {
+  data: allMaterials
+} = await supabase
+
+  .from("mm")
+
+  .select(`
+  material_id,
+  item_name,
+  hsn_code,
+  gst_percent
+`)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "is_active",
+    true
+  );
+
+      if (materialsError) {
+
+        return res.json({
+          success: false,
+          error:
+            materialsError.message
+        });
+
+      }
+
+      // =====================
+      // VARIANTS
+      // =====================
+
+      const {
+        data: variants,
+        error: variantsError
+      } = await supabase
+
+        .from("variant")
+
+        .select(`
+          id,
+          material_id,
+          variant_code,
+          item_name,
+          description,
+          variant,
+          base_unit,
+          sub_variant,
+          pur_mrp,
+          pur_disc_percent,
+          pur_disc_amt,
+          pur_rate
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "is_active",
+          true
+        );
+
+      if (variantsError) {
+
+        return res.json({
+          success: false,
+          error:
+            variantsError.message
+        });
+
+      }
+
+      
+      const hsnMap = {};
+
+(allMaterials || []).forEach(
+  (item) => {
+
+    hsnMap[
+      item.item_name
+    ] =
+      item.hsn_code;
+
+  }
+);
+
+       const gstMap = {};
+
+(allMaterials || []).forEach(
+  (item) => {
+
+    gstMap[
+      item.item_name
+    ] =
+      item.gst_percent;
+
+  }
+);
+
+      // =====================
+      // ONLY BASE UNIT ROWS
+      // =====================
+
+        const baseUnitVariants =
+  (variants || []).filter(
+    (item) =>
+      item.variant ===
+      item.base_unit
+  );
+
+      // =====================
+      // FORMAT SINGLE ITEMS
+      // =====================
+
+      const singleItems =
+        (materials || []).map(
+          (item) => ({
+
+            row_type:
+              "single",
+
+            material_id:
+              item.material_id,
+
+            item_code:
+              item.item_code,
+
+            item_name:
+              item.item_name,
+
+            display_name:
+              item.item_name,
+
+            base_unit:
+              item.base_unit,  
+
+            hsn_code:
+              item.hsn_code,  
+
+            gst_percent:
+             item.gst_percent,
+
+            pur_mrp:
+              item.pur_mrp,
+
+            pur_disc_percent:
+              item.pur_disc_percent,
+
+            pur_disc_amt:
+              item.pur_disc_amt,
+
+            pur_rate:
+              item.pur_rate
+
+          })
+        );
+
+      // =====================
+      // FORMAT VARIANTS
+      // =====================
+
+      const variantItems =
+        baseUnitVariants.map(
+          (item) => ({
+
+            row_type:
+              "variant",
+
+            variant_id:
+              item.id,
+
+            variant_code:
+              item.variant_code,
+
+            material_id:
+              item.material_id,
+
+            item_name:
+              item.item_name,
+
+            display_name:
+              item.description,
+
+            base_unit:
+              item.base_unit,  
+            
+           hsn_code:
+  hsnMap[
+    item.item_name
+  ] || "",
+
+gst_percent:
+  gstMap[
+    item.item_name
+  ] || 0,
+            pur_mrp:
+              item.pur_mrp,
+
+            pur_disc_percent:
+              item.pur_disc_percent,
+
+            pur_disc_amt:
+              item.pur_disc_amt,
+
+            pur_rate:
+              item.pur_rate
+
+          })
+        );
+
+      // =====================
+      // FINAL DATA
+      // =====================
+
+      const finalData = [
+
+        ...singleItems,
+
+        ...variantItems
+
+      ].sort(
+        (a, b) =>
+          a.display_name.localeCompare(
+            b.display_name
+          )
+      );
+
+      return res.json({
+
+        success: true,
+
+        data:
+          finalData
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// SAVE PURCHASE MASTER
+// =========================
+
+app.post(
+  "/savePurchaseMaster",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const row_type =
+        String(
+          body.row_type || ""
+        ).trim();
+
+      if (!row_type) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "row_type missing"
+
+        });
+
+      }
+
+      // =========================
+      // SINGLE ITEM
+      // =========================
+
+      if (
+        row_type === "single"
+      ) {
+
+        const material_id =
+          Number(
+            body.material_id || 0
+          );
+
+        if (!material_id) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              "material_id missing"
+
+          });
+
+        }
+
+        const {
+          error
+        } = await supabase
+
+          .from("mm")
+
+          .update({
+
+            pur_mrp:
+              Number(
+                body.pur_mrp || 0
+              ),
+
+            pur_disc_percent:
+              Number(
+                body.pur_disc_percent || 0
+              ),
+
+            pur_disc_amt:
+              Number(
+                body.pur_disc_amt || 0
+              ),
+
+            pur_rate:
+              Number(
+                body.pur_rate || 0
+              ),
+
+            updated_at:
+              new Date()
+
+          })
+
+          .eq(
+            "material_id",
+            material_id
+          );
+
+        if (error) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              error.message
+
+          });
+
+        }
+
+      }
+
+      // =========================
+      // VARIANT ITEM
+      // =========================
+
+      else if (
+        row_type === "variant"
+      ) {
+
+        const variant_id =
+          Number(
+            body.variant_id || 0
+          );
+
+        if (!variant_id) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              "variant_id missing"
+
+          });
+
+        }
+
+        const {
+          error
+        } = await supabase
+
+          .from("variant")
+
+          .update({
+
+            pur_mrp:
+              Number(
+                body.pur_mrp || 0
+              ),
+
+            pur_disc_percent:
+              Number(
+                body.pur_disc_percent || 0
+              ),
+
+            pur_disc_amt:
+              Number(
+                body.pur_disc_amt || 0
+              ),
+
+            pur_rate:
+              Number(
+                body.pur_rate || 0
+              ),
+
+            updated_at:
+              new Date()
+
+          })
+
+          .eq(
+            "id",
+            variant_id
+          );
+
+        if (error) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              error.message
+
+          });
+
+        }
+
+      }
+
+      else {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "invalid row_type"
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Purchase master updated successfully"
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+app.post(
+  "/savePurchase",
+  async (req, res) => {
+
+    try {
+
+         const purchase =
+        req.body || {};
+
+      console.log(
+        "PURCHASE REQ BODY:",
+        purchase
+      );
+
+      const isEdit =
+        purchase.isEdit === true;
+
+      const company_code =
+
+        String(
+          purchase.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      if (
+        !purchase.vendor_id
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "vendor missing"
+
+        });
+
+      }
+
+      if (
+        !purchase.invoice_no
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "invoice no missing"
+
+        });
+
+      }
+
+      let purchase_no =
+
+        String(
+          purchase.purchase_no || ""
+        ).trim();
+        
+        
+//=========================
+//PART 2
+//DUPLICATE CHECK
+//=========================
+      const {
+        data: duplicateRows
+      } = await supabase
+
+        .from(
+          "purchase_header"
+        )
+
+        .select(
+          "purchase_no"
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "vendor_id",
+          purchase.vendor_id
+        )
+
+        .eq(
+          "invoice_no",
+          purchase.invoice_no
+        )
+
+        .eq(
+          "is_active",
+          true
+        );
+
+    const duplicate =
+
+  (duplicateRows || [])
+
+    .filter(
+
+      row =>
+
+        row.purchase_no
+
+        !==
+
+        purchase_no
+
+    );
+
+      if (
+        duplicate.length > 0
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+
+            `Invoice No ${purchase.invoice_no} already exists for this vendor`
+
+        });
+
+      }
+
+//=========================
+//PART 3
+//PURCHASE NUMBER
+//=========================      
+
+      if (!isEdit) {
+
+        if (
+  !String(
+    purchase.book_date || ""
+  ).trim()
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "book date missing"
+
+  });
+
+}
+
+        const dt =
+          new Date(
+            purchase.book_date
+          );
+
+        const dd =
+          String(
+            dt.getDate()
+          ).padStart(
+            2,
+            "0"
+          );
+
+        const mm =
+          String(
+            dt.getMonth() + 1
+          ).padStart(
+            2,
+            "0"
+          );
+
+        const yy =
+          String(
+            dt.getFullYear()
+          ).slice(-2);
+
+        const datePart =
+
+          `${dd}${mm}${yy}`;
+
+       const {
+  data: existingDocs,
+  error: existingError
+} = await supabase
+
+  .from(
+    "purchase_header"
+  )
+
+  .select(
+    "purchase_no"
+  )
+
+  .like(
+    "purchase_no",
+    `${company_code}-${datePart}-%`
+  );
+
+if (existingError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      existingError.message
+
+  });
+
+}
+
+        let maxNo = 0;
+
+        (existingDocs || [])
+
+          .forEach(
+            row => {
+
+              const parts =
+
+                String(
+                  row.purchase_no || ""
+                )
+
+                .split("-");
+
+              if (
+
+                parts.length === 3
+
+                &&
+
+                parts[0] === company_code
+
+                &&
+
+                parts[1] === datePart
+
+              ) {
+
+                const seq =
+
+                  parseInt(
+                    parts[2],
+                    10
+                  );
+
+                if (
+                  !isNaN(seq)
+                ) {
+
+                  maxNo =
+                    Math.max(
+                      maxNo,
+                      seq
+                    );
+
+                }
+
+              }
+
+            }
+          );
+
+        purchase_no =
+
+          `${company_code}-${datePart}-${String(
+
+            maxNo + 1
+
+          ).padStart(
+            4,
+            "0"
+          )}`;
+
+      }
+
+      console.log(
+        "PURCHASE NO:",
+        purchase_no
+      );
+
+// =========================
+// SAVE / UPDATE HEADER
+// =========================
+
+if (isEdit) {
+
+  const {
+    error: headerError
+  } = await supabase
+
+    .from(
+      "purchase_header"
+    )
+
+    .update({
+
+      vendor_id:
+        purchase.vendor_id,
+
+      vendor_name:
+        purchase.vendor_name,
+
+      invoice_no:
+        purchase.invoice_no,
+
+      invoice_date:
+        purchase.invoice_date,
+
+      book_date:
+        purchase.book_date,
+
+      remarks:
+        purchase.remarks || "",
+
+      company_state_code:
+        purchase.company_state_code,
+
+      vendor_state_code:
+        purchase.vendor_state_code,
+
+      subtotal:
+        Number(
+          purchase.subtotal || 0
+        ),
+
+      total_charges:
+        Number(
+          purchase.total_charges || 0
+        ),
+
+      cgst:
+        Number(
+          purchase.cgst || 0
+        ),
+
+      sgst:
+        Number(
+          purchase.sgst || 0
+        ),
+
+      igst:
+        Number(
+          purchase.igst || 0
+        ),
+
+      grand_total:
+        Number(
+          purchase.grand_total || 0
+        ),
+
+      updated_at:
+  new Date()
+    .toISOString()
+
+    })
+
+    .eq(
+      "purchase_no",
+      purchase_no
+    );
+
+  if (headerError) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        headerError.message
+
+    });
+
+  }
+
+} else {
+
+  const {
+    error: headerError
+  } = await supabase
+
+    .from(
+      "purchase_header"
+    )
+
+    .insert([{
+
+      purchase_no:
+        purchase_no,
+
+      company_code:
+        company_code,
+
+      vendor_id:
+        purchase.vendor_id,
+
+      vendor_name:
+        purchase.vendor_name,
+
+      invoice_no:
+        purchase.invoice_no,
+
+      invoice_date:
+        purchase.invoice_date,
+
+      book_date:
+        purchase.book_date,
+
+      remarks:
+        purchase.remarks || "",
+
+      company_state_code:
+        purchase.company_state_code,
+
+      vendor_state_code:
+        purchase.vendor_state_code,
+
+      subtotal:
+        Number(
+          purchase.subtotal || 0
+        ),
+
+      total_charges:
+        Number(
+          purchase.total_charges || 0
+        ),
+
+      cgst:
+        Number(
+          purchase.cgst || 0
+        ),
+
+      sgst:
+        Number(
+          purchase.sgst || 0
+        ),
+
+      igst:
+        Number(
+          purchase.igst || 0
+        ),
+
+      grand_total:
+        Number(
+          purchase.grand_total || 0
+        ),
+
+      is_active:
+        true,
+
+    created_at:
+  new Date()
+    .toISOString(),
+
+updated_at:
+  new Date()
+    .toISOString()
+
+    }]);
+
+  if (headerError) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        headerError.message
+
+    });
+
+  }
+
+}
+
+// =========================
+// DELETE OLD ROWS ON EDIT
+// =========================
+if (isEdit) {
+
+  const {
+    error: deleteItemError
+  } = await supabase
+
+    .from(
+      "purchase_detail"
+    )
+
+    .delete()
+
+    .eq(
+      "purchase_no",
+      purchase_no
+    );
+
+  if (deleteItemError) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        deleteItemError.message
+
+    });
+
+  }
+
+  const {
+    error: deleteChargeError
+  } = await supabase
+
+    .from(
+      "purchase_charge"
+    )
+
+    .delete()
+
+    .eq(
+      "purchase_no",
+      purchase_no
+    );
+
+  if (deleteChargeError) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        deleteChargeError.message
+
+    });
+
+  }
+
+}
+
+// =========================
+// SAVE ITEMS
+// =========================
+
+const items =
+  purchase.items || [];
+
+  const detailRows =
+
+  items.map(
+    (item) => ({
+
+      purchase_no:
+        purchase_no,
+
+      sr_no:
+        Number(
+          item.sr_no || 0
+        ),
+
+      item_name:
+        item.item_name || "",
+
+      hsn_code:
+        item.hsn_code || "",
+
+      qty:
+        Number(
+          item.qty || 0
+        ),
+
+      unit:
+        item.unit || "",
+
+      mrp:
+        Number(
+          item.mrp || 0
+        ),
+
+      disc_percent:
+        Number(
+          item.disc_percent || 0
+        ),
+
+      disc_amt:
+        Number(
+          item.disc_amt || 0
+        ),
+
+      rate:
+        Number(
+          item.rate || 0
+        ),
+
+      gst_percent:
+        Number(
+          item.gst_percent || 0
+        ),
+
+      amount:
+        Number(
+          item.amount || 0
+        )
+
+    })
+  );
+
+if (
+  detailRows.length === 0
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "No purchase items found"
+
+  });
+
+}  
+
+const {
+  error: itemError
+} = await supabase
+
+  .from(
+    "purchase_detail"
+  )
+
+  .insert(
+    detailRows
+  );
+
+if (itemError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      itemError.message
+
+  });
+
+}
+
+
+// =========================
+// SAVE CHARGES
+// =========================
+
+const charges =
+  purchase.charges || [];
+
+const chargeRows =
+
+  charges
+
+    .filter(
+      row =>
+        Number(
+          row.amount || 0
+        ) > 0
+    )
+
+    .map(
+      (row) => ({
+
+        purchase_no:
+          purchase_no,
+
+        charge_name:
+          row.charge_name || "",
+
+        amount:
+          Number(
+            row.amount || 0
+          )
+
+      })
+    );
+
+
+if (
+  chargeRows.length > 0
+) {
+
+  const {
+    error: chargeError
+  } = await supabase
+
+    .from(
+      "purchase_charge"
+    )
+
+    .insert(
+      chargeRows
+    );
+
+  if (chargeError) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        chargeError.message
+
+    });
+
+  }
+
+}
+
+// =========================
+// SUCCESS RESPONSE
+// =========================
+
+return res.json({
+
+  success: true,
+
+  message:
+    isEdit
+
+      ? "Purchase updated successfully"
+
+      : "Purchase saved successfully",
+
+  purchase_no:
+    purchase_no,
+
+  isEdit:
+  isEdit
+
+});
+
+    }
+
+    catch (err) {
+
+      console.log(
+        "SAVE PURCHASE ERROR:",
+        err
+      );
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET VENDOR LEDGER
+// =========================
+
+app.post(
+  "/getVendorLedger",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+        body.company_code;
+
+      const vendor_id =
+        body.vendor_id;
+
+      const from_date =
+        body.from_date;
+
+      const to_date =
+        body.to_date;
+
+        console.log(
+  "VENDOR REQUEST:",
+  {
+    company_code,
+    vendor_id,
+    from_date,
+    to_date
+  }
+);
+
+      if (
+        !company_code ||
+        !vendor_id
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code or vendor_id missing"
+
+        });
+
+      }
+
+      // Vendor Fetch
+
+    const {
+  data: vendorRow,
+  error: vendorError
+} = await supabase
+        .from("vendor")
+
+        .select(
+          "opening_balance"
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "vendor_code",
+          vendor_id
+        )
+
+        .single();
+
+      let openingBalance =
+        Number(
+          vendorRow
+            ?.opening_balance || 0
+        );
+
+      // Previous Purchases
+
+      const {
+        data: oldPurchases
+      } = await supabase
+
+        .from(
+          "purchase_header"
+        )
+
+        .select(
+          "grand_total"
+        )
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "vendor_id",
+          vendor_id
+        )
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .lt(
+          "book_date",
+          from_date
+        );
+
+     openingBalance -=
+
+  (oldPurchases || [])
+    .reduce(
+
+      (sum, row) =>
+
+        sum +
+
+        Number(
+          row.grand_total || 0
+        ),
+
+      0
+
+    );
+
+          const {
+  data: oldPayments
+} = await supabase
+
+  .from(
+    "vendor_payment"
+  )
+
+  .select(
+    "amount"
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "vendor_id",
+    vendor_id
+  )
+
+  .eq(
+  "is_active",
+  true
+)
+
+  .lt(
+    "payment_date",
+    from_date
+  );
+
+openingBalance +=
+
+  (oldPayments || [])
+    .reduce(
+
+      (sum, row) =>
+
+        sum +
+
+        Number(
+          row.amount || 0
+        ),
+
+      0
+
+    );
+
+      // Current Period Purchases
+
+      const {
+        data: purchases
+      } = await supabase
+
+        .from(
+          "purchase_header"
+        )
+
+        .select(`
+          book_date,
+          purchase_no,
+          grand_total
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "vendor_id",
+          vendor_id
+        )
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .gte(
+          "book_date",
+          from_date
+        )
+
+        .lte(
+          "book_date",
+          to_date
+        );
+
+
+        console.log(
+  "PURCHASES:",
+  purchases
+);
+
+
+const {
+  data: payments
+} = await supabase
+
+  .from(
+    "vendor_payment"
+  )
+
+  .select(`
+    payment_date,
+    payment_no,
+    amount,
+    payment_mode
+  `)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "vendor_id",
+    vendor_id
+  )
+
+  .eq(
+  "is_active",
+  true
+)
+
+  .gte(
+    "payment_date",
+    from_date
+  )
+
+  .lte(
+    "payment_date",
+    to_date
+  );
+      const transactions = [];
+
+      (purchases || []).forEach(
+        (row) => {
+
+          transactions.push({
+
+            date:
+              row.book_date,
+
+            type:
+              "Purchase",
+
+            doc_no:
+              row.purchase_no,
+
+            debit: 0,
+
+            credit:
+              Number(
+                row.grand_total || 0
+              )
+
+          });
+
+        }
+      );
+
+      (payments || []).forEach(
+  (row) => {
+
+    transactions.push({
+
+      date:
+        row.payment_date,
+
+      type:
+        "Payment",
+
+      doc_no:
+        row.payment_no,
+
+      debit:
+        Number(
+          row.amount || 0
+        ),
+
+      credit: 0,
+
+      payment_mode:
+        row.payment_mode,
+
+    });
+
+  }
+);
+
+      transactions.sort(
+        (a, b) =>
+          new Date(a.date) -
+          new Date(b.date)
+      );
+
+      return res.json({
+
+        success: true,
+
+        openingBalance,
+
+        transactions
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// SAVE VENDOR PAYMENT
+// =========================
+
+app.post(
+  "/saveVendorPayment",
+  async (req, res) => {
+
+    try {
+
+      console.log(
+        "SAVE PAYMENT API HIT"
+      );
+
+      console.log(
+        "REQ BODY:",
+        req.body
+      );
+
+      const body =
+        req.body || {};
+
+      const company_code =
+        String(
+          body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const payment =
+        req.body;
+
+      console.log(
+        "PAYMENT DATA:",
+        payment
+      );
+
+      const date =
+  new Date(
+    payment.payment_date
+  );
+
+const fy =
+  date.getMonth() >= 3
+    ? date.getFullYear()
+    : date.getFullYear() - 1;
+
+const fy_code =
+  `${String(fy).slice(-2)}-${String(fy + 1).slice(-2)}`;
+
+      if (
+        !payment.payment_date ||
+        !payment.vendor_id ||
+        !payment.vendor_name ||
+        !payment.amount
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Required fields missing"
+
+        });
+
+      }
+
+      if (
+        !payment.payment_mode
+      ) {
+
+        payment.payment_mode =
+          "Cash";
+
+      }
+
+      let voucher_type =
+  payment.payment_mode === "Bank"
+    ? "BP"
+    : "CP";
+
+let voucher_series =
+  payment.payment_mode === "Bank"
+
+    ? `BP-${payment.bank_code}-${fy_code}`
+
+    : `CP-${fy_code}`;
+
+    console.log(
+  "VOUCHER TYPE:",
+  voucher_type
+);
+
+console.log(
+  "VOUCHER SERIES:",
+  voucher_series
+);
+ 
+
+    if (
+  payment.payment_mode === "Bank" &&
+  !payment.bank_code
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Bank required"
+
+  });
+
+}
+
+      if (
+  payment.payment_mode === "Bank" &&
+  payment.reference_no &&
+  payment.bank_code
+) {
+
+  const {
+  data: duplicateCheque,
+  error: duplicateError
+} = await supabase
+
+    .from("vendor_payment")
+
+    .select("id")
+
+    .eq(
+      "company_code",
+      company_code
+    )
+    .eq(
+        "fy_code",
+        fy_code
+      )
+
+      .eq(
+  "voucher_series",
+  voucher_series
+)
+
+    .eq(
+      "bank_code",
+      payment.bank_code
+    )
+
+    .eq(
+      "reference_no",
+      payment.reference_no
+    )
+
+    .maybeSingle();
+
+    if (duplicateError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      duplicateError.message
+
+  });
+
+}
+
+  if (duplicateCheque) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "Cheque number already exists"
+
+    });
+
+  }
+
+}
+
+      const {
+        data: lastPayment,
+        error: lastPaymentError
+      } = await supabase
+        .from("vendor_payment")
+        .select("voucher_no")
+        .eq(
+          "company_code",
+          company_code
+        )
+        .eq(
+          "fy_code",
+          fy_code
+        )
+        .eq(
+  "voucher_series",
+  voucher_series
+)
+        .not(
+          "voucher_no",
+          "is",
+          null
+        )
+        .order(
+          "voucher_no",
+          {
+            ascending: false
+          }
+        )
+        .limit(1)
+        .maybeSingle();
+
+      if (
+        lastPaymentError
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            lastPaymentError.message
+
+        });
+
+      }
+
+     const nextVoucherNo =
+  Number(
+    lastPayment?.voucher_no || 0
+  ) + 1;
+
+      console.log(
+        "LAST VOUCHER:",
+        lastPayment
+      );
+
+      console.log(
+        "NEXT VOUCHER:",
+        nextVoucherNo
+      );
+
+     const {
+  data: lastPaymentNo
+} = await supabase
+
+  .from("vendor_payment")
+
+  .select("payment_no")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .order(
+  "id",
+  {
+    ascending: false
+  }
+)
+
+  .limit(1)
+
+  .maybeSingle();
+
+const nextPaymentNo =
+  lastPaymentNo?.payment_no
+
+    ? Number(
+        lastPaymentNo.payment_no
+          .split("-")
+          .pop()
+      ) + 1
+
+    : 1;
+
+     const payment_no =
+  "PAY-" +
+  company_code +
+  "-" +
+  payment.payment_date
+    .substring(2)
+    .replaceAll("-", "") +
+  "-" +
+  String(
+    nextPaymentNo
+  ).padStart(
+    5,
+    "0"
+  );
+
+      console.log(
+        "PAYMENT NO:",
+        payment_no
+      );
+
+      if (
+  payment.payment_mode ===
+  "Cash"
+) {
+
+  payment.reference_no = "";
+
+  payment.bank_code = "";
+
+  payment.bank_name = "";
+
+  payment.cheque_date = null;
+
+}
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("vendor_payment")
+
+        .insert([{
+
+          payment_no,
+
+          voucher_no:
+            nextVoucherNo,
+
+            voucher_type,
+
+            voucher_series,
+
+          fy_code,
+
+          company_code,
+
+          payment_date:
+            payment.payment_date,
+
+          vendor_id:
+            payment.vendor_id,
+
+          vendor_name:
+            payment.vendor_name,
+
+          amount:
+            Number(
+              payment.amount
+            ),
+
+          payment_mode:
+            payment.payment_mode,
+
+          reference_no:
+            payment.reference_no || "",
+
+          bank_code:
+            payment.bank_code || "",  
+
+          bank_name:
+            payment.bank_name || "",
+
+          cheque_date:
+            payment.cheque_date,
+
+          remarks:
+            payment.remarks || "",
+
+          status:
+            "PAID"
+
+        }])
+
+        .select()
+
+        .single();
+
+      console.log(
+        "PAYMENT INSERT ERROR:",
+        error
+      );
+
+      console.log(
+        "INSERTED PAYMENT:",
+        data
+      );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+     return res.json({
+
+  success: true,
+
+  message:
+    "Payment Saved",
+
+  payment_no,
+
+  voucher_no:
+    nextVoucherNo,
+
+  fy_code,
+
+  data
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);  
+
+// =========================
+// UPDATE VENDOR PAYMENT
+// =========================
+
+app.post(
+  "/updateVendorPayment",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+        const company_code =
+  String(
+    body.company_code || ""
+  ).trim();
+
+if (!company_code) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "company_code missing"
+
+  });
+
+}
+
+      const date =
+  new Date(
+    body.payment_date
+  );
+
+const fy =
+  date.getMonth() >= 3
+    ? date.getFullYear()
+    : date.getFullYear() - 1;
+
+const fy_code =
+  `${String(fy).slice(-2)}-${String(fy + 1).slice(-2)}`;  
+
+     let voucher_type =
+  body.payment_mode === "Bank"
+    ? "BP"
+    : "CP";
+
+let voucher_series =
+  body.payment_mode === "Bank"
+
+    ? `BP-${body.bank_code}-${fy_code}`
+
+    : `CP-${fy_code}`;
+
+let voucher_no;
+
+    if (!body.id) {
+
+  return res.json({
+    success: false,
+    error: "Payment id missing"
+  });
+
+}
+
+if (
+  body.payment_mode === "Bank" &&
+  !body.bank_code
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Bank required"
+
+  });
+
+}
+
+if (
+  body.payment_mode === "Cash"
+) {
+
+  body.reference_no = "";
+
+  body.bank_code = "";
+
+  body.bank_name = "";
+
+  body.cheque_date = null;
+
+}
+
+if (
+  body.payment_mode === "Bank" &&
+  body.reference_no &&
+  body.bank_code
+) {
+
+  const {
+    data: duplicateCheque
+  } = await supabase
+
+    .from("vendor_payment")
+
+    .select("id")
+
+    .eq(
+  "company_code",
+  company_code
+)
+
+.eq(
+  "fy_code",
+  fy_code
+)
+
+    .eq(
+      "bank_code",
+      body.bank_code
+    )
+
+    .eq(
+      "reference_no",
+      body.reference_no
+    )
+
+    .neq(
+      "id",
+      body.id
+    )
+
+    .maybeSingle();
+
+  if (duplicateCheque) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        "Cheque number already exists"
+
+    });
+
+  }
+
+}
+
+const {
+  data: oldPayment
+} = await supabase
+
+  .from("vendor_payment")
+
+  .select(
+    "voucher_series"
+  )
+
+  .eq(
+    "id",
+    body.id
+  )
+
+  .single();
+
+if (
+  oldPayment?.voucher_series !==
+  voucher_series
+) {
+
+  const {
+    data: lastVoucher
+  } = await supabase
+
+    .from("vendor_payment")
+
+    .select(
+      "voucher_no"
+    )
+
+    .eq(
+      "company_code",
+      company_code
+    )
+
+    .eq(
+      "fy_code",
+      fy_code
+    )
+
+    .eq(
+      "voucher_series",
+      voucher_series
+    )
+
+    .order(
+      "voucher_no",
+      {
+        ascending: false
+      }
+    )
+
+    .limit(1)
+
+    .maybeSingle();
+
+  voucher_no =
+    Number(
+      lastVoucher?.voucher_no || 0
+    ) + 1;
+
+} else {
+
+  const {
+    data: currentPayment
+  } = await supabase
+
+    .from("vendor_payment")
+
+    .select(
+      "voucher_no"
+    )
+
+    .eq(
+      "id",
+      body.id
+    )
+
+    .single();
+
+  voucher_no =
+    currentPayment?.voucher_no;
+
+}
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("vendor_payment")
+
+        .update({
+
+          payment_date:
+            body.payment_date,
+
+          vendor_id:
+            body.vendor_id,
+
+          vendor_name:
+            body.vendor_name,
+
+          amount:
+            Number(body.amount),
+
+          payment_mode:
+            body.payment_mode,
+
+            voucher_type,
+
+            voucher_series,
+
+            voucher_no,
+
+            fy_code,
+
+          reference_no:
+            body.reference_no || "",
+
+          bank_code:
+            body.bank_code || "",
+
+          bank_name:
+            body.bank_name || "",
+
+          cheque_date:
+            body.cheque_date,
+
+          remarks:
+            body.remarks || ""
+
+        })
+
+        .eq("id", body.id)
+
+        .select()
+
+        .single();
+
+      if (error) {
+
+        return res.json({
+          success: false,
+          error: error.message
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Payment Updated",
+
+        data
+
+      });
+
+    } catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error: err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// UPDATE RECEIPT
+// =========================
+
+app.post(
+  "/updateReceipt",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+        String(
+          body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      const date =
+        new Date(
+          body.receipt_date
+        );
+
+      const fy =
+        date.getMonth() >= 3
+          ? date.getFullYear()
+          : date.getFullYear() - 1;
+
+      const fy_code =
+        `${String(fy).slice(-2)}-${String(fy + 1).slice(-2)}`;
+
+      let voucher_type =
+        body.payment_mode === "Bank"
+          ? "BR"
+          : "CR";
+
+      let voucher_series =
+        body.payment_mode === "Bank"
+
+          ? `BR-${body.bank_code}-${fy_code}`
+
+          : `CR-${fy_code}`;
+
+      let voucher_no;
+
+      if (!body.id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Receipt id missing"
+
+        });
+
+      }
+
+      if (
+        body.payment_mode === "Bank" &&
+        !body.bank_code
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Bank required"
+
+        });
+
+      }
+
+      if (
+        body.payment_mode === "Cash"
+      ) {
+
+        body.reference_no = "";
+
+        body.bank_code = "";
+
+        body.bank_name = "";
+
+        body.cheque_date = null;
+
+      }
+
+      if (
+        body.payment_mode === "Bank" &&
+        body.reference_no &&
+        body.bank_code
+      ) {
+
+        const {
+          data: duplicateCheque
+        } = await supabase
+
+          .from("receipt_entry")
+
+          .select("id")
+
+          .eq(
+            "company_code",
+            company_code
+          )
+
+          .eq(
+            "fy_code",
+            fy_code
+          )
+
+          .eq(
+            "bank_code",
+            body.bank_code
+          )
+
+          .eq(
+            "reference_no",
+            body.reference_no
+          )
+
+          .neq(
+            "id",
+            body.id
+          )
+
+          .maybeSingle();
+
+        if (duplicateCheque) {
+
+          return res.json({
+
+            success: false,
+
+            error:
+              "Cheque number already exists"
+
+          });
+
+        }
+
+      }
+
+      const {
+        data: oldReceipt
+      } = await supabase
+
+        .from("receipt_entry")
+
+        .select(
+          "voucher_series"
+        )
+
+        .eq(
+          "id",
+          body.id
+        )
+
+        .single();
+
+      if (
+        oldReceipt?.voucher_series !==
+        voucher_series
+      ) {
+
+        const {
+          data: lastVoucher
+        } = await supabase
+
+          .from("receipt_entry")
+
+          .select(
+            "voucher_no"
+          )
+
+          .eq(
+            "company_code",
+            company_code
+          )
+
+          .eq(
+            "fy_code",
+            fy_code
+          )
+
+          .eq(
+            "voucher_series",
+            voucher_series
+          )
+
+          .order(
+            "voucher_no",
+            {
+              ascending: false
+            }
+          )
+
+          .limit(1)
+
+          .maybeSingle();
+
+        voucher_no =
+          Number(
+            lastVoucher?.voucher_no || 0
+          ) + 1;
+
+      } else {
+
+        const {
+          data: currentReceipt
+        } = await supabase
+
+          .from("receipt_entry")
+
+          .select(
+            "voucher_no"
+          )
+
+          .eq(
+            "id",
+            body.id
+          )
+
+          .single();
+
+        voucher_no =
+          currentReceipt?.voucher_no;
+
+      }
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("receipt_entry")
+
+        .update({
+
+          receipt_date:
+            body.receipt_date,
+
+          party_id:
+            body.party_id,
+
+          party_name:
+            body.party_name,
+
+          amount:
+            Number(
+              body.amount
+            ),
+
+          payment_mode:
+            body.payment_mode,
+
+          voucher_type,
+
+          voucher_series,
+
+          voucher_no,
+
+          fy_code,
+
+          reference_no:
+            body.reference_no || "",
+
+          bank_code:
+            body.bank_code || "",
+
+          bank_name:
+            body.bank_name || "",
+
+          cheque_date:
+            body.cheque_date,
+
+          remarks:
+            body.remarks || ""
+
+        })
+
+        .eq(
+          "id",
+          body.id
+        )
+
+        .select()
+
+        .single();
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Receipt Updated",
+
+        data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// GET RECEIPT BY NO
+// =========================
+
+app.post(
+  "/getReceiptByNo",
+  async (req, res) => {
+
+    const receipt_no =
+      req.body.receipt_no;
+
+    const {
+      data,
+      error
+    } = await supabase
+
+      .from("receipt_entry")
+
+      .select("*")
+
+      .eq(
+        "receipt_no",
+        receipt_no
+      )
+
+      .single();
+
+    if (error) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          error.message
+
+      });
+
+    }
+
+    return res.json({
+
+      success: true,
+
+      data
+
+    });
+
+  }
+);
+
+app.post(
+  "/getPurchaseByNo",
+  async (req, res) => {
+
+    try {
+
+      const purchase_no =
+        req.body.purchase_no;
+
+      // =====================
+      // HEADER
+      // =====================
+
+      const {
+        data: header,
+        error: headerError
+      } = await supabase
+
+        .from("purchase_header")
+
+        .select("*")
+
+        .eq(
+          "purchase_no",
+          purchase_no
+        )
+
+        .single();
+
+      if (headerError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            headerError.message
+
+        });
+
+      }
+
+      // =====================
+      // ITEMS
+      // =====================
+
+      const {
+        data: items,
+        error: itemError
+      } = await supabase
+
+        .from("purchase_detail")
+
+        .select("*")
+
+        .eq(
+          "purchase_no",
+          purchase_no
+        )
+
+        .order(
+          "sr_no",
+          {
+            ascending: true
+          }
+        );
+
+      if (itemError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            itemError.message
+
+        });
+
+      }
+
+      // =====================
+      // CHARGES
+      // =====================
+
+      const {
+        data: charges,
+        error: chargeError
+      } = await supabase
+
+        .from("purchase_charge")
+
+        .select("*")
+
+        .eq(
+          "purchase_no",
+          purchase_no
+        );
+
+      if (chargeError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            chargeError.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data: {
+
+          ...header,
+
+          items:
+            items || [],
+
+          charges:
+            charges || []
+
+        }
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+app.post(
+  "/getVendorPaymentByNo",
+  async (req, res) => {
+
+    const payment_no =
+      req.body.payment_no;
+
+    const {
+      data,
+      error
+    } = await supabase
+
+      .from("vendor_payment")
+
+      .select("*")
+
+      .eq(
+        "payment_no",
+        payment_no
+      )
+
+      .single();
+
+    if (error) {
+
+      return res.json({
+        success: false,
+        error: error.message
+      });
+
+    }
+
+    return res.json({
+      success: true,
+      data
+    });
+
+  }
+);
+
+// =========================
+// GET STOCK SUMMARY
+// =========================
+
+app.post(
+  "/getStockSummary",
+  async (req, res) => {
+
+      console.log(
+      "STOCK API HIT"
+    );
+
+    try {
+
+      const company_code =
+        req.body.company_code;
+
+      if (!company_code) {
+
+        return res.json({
+          success: false,
+          error: "company_code missing"
+        });
+
+      }
+
+      const stockMap = {};
+
+
+      const {
+  data: mm
+} = await supabase
+
+  .from("mm")
+
+ .select(
+  "material_id, item_code, item_name, base_unit, mat_type, opening_stock, hsn_code"
+)
+
+  .eq(
+    "company_code",
+    company_code
+  );
+
+const {
+  data: variants
+} = await supabase
+
+  .from("variant")
+
+ .select(
+  "material_id, item_name, description, variant, sub_variant, opening_stock"
+)
+
+  .eq(
+    "company_code",
+    company_code
+  );
+
+const validStockItems = {};
+const itemCodeMap = {};
+const materialMap = {};
+const openingMap = {};
+const unitMap = {};
+const hsnMap = {};
+
+mm?.forEach((m) => {
+
+  if (
+    m.mat_type ===
+    "single"
+  ) {
+
+    validStockItems[
+      m.item_name
+    ] = true;
+
+  itemCodeMap[
+  m.item_name
+] = m.item_code;
+
+materialMap[
+  m.item_name
+] = m.material_id;
+
+openingMap[
+  m.item_name
+] = Number(
+  m.opening_stock || 0
+);
+
+unitMap[
+  m.item_name
+] = m.base_unit || "";
+
+hsnMap[
+  m.item_name
+] = m.hsn_code || "";
+
+}
+
+  if (
+    m.mat_type ===
+    "multi"
+  ) {
+
+    variants?.forEach((v) => {
+
+      if (
+
+        v.material_id ===
+  m.material_id &&
+
+        v.variant ===
+          m.base_unit &&
+
+        v.sub_variant ===
+          m.base_unit
+
+      ) {
+
+        validStockItems[
+          v.description
+        ] = true;
+
+         itemCodeMap[
+            v.description
+          ] = m.item_code;
+
+          materialMap[
+            v.description
+          ] = m.material_id;
+
+          openingMap[
+  v.description
+] = Number(
+  v.opening_stock || 0
+);
+
+unitMap[
+  v.description
+] = m.base_unit || "";
+
+hsnMap[
+  v.description
+] = m.hsn_code || "";
+
+      }
+
+    });
+
+  }
+
+});
+
+Object.keys(validStockItems).forEach((name) => {
+
+  console.log(
+    "HSN DEBUG:",
+    name,
+    hsnMap[name]
+  );
+
+
+  stockMap[name] = {
+
+  material_id:
+    materialMap[name],
+
+  item_code:
+    itemCodeMap[name],
+
+  item_name: name,
+
+    hsn_code:
+  hsnMap[name],
+
+  
+
+  base_unit:
+    unitMap[name],
+  
+ opening_qty:
+  Number(
+    openingMap[name] || 0
+  ),
+
+  purchase_qty: 0,
+
+  sales_qty: 0,
+
+  closing_qty: 0
+
+};
+
+});
+
+     // PURCHASES
+const {
+  data: purchaseHeaders
+} = await supabase
+
+  .from("purchase_header")
+
+  .select("purchase_no")
+
+  .eq(
+    "company_code",
+    company_code
+  );
+
+const purchaseNos =
+  purchaseHeaders?.map(
+    x => x.purchase_no
+  ) || [];
+
+const {
+  data: purchases
+} = purchaseNos.length
+
+  ? await supabase
+
+      .from("purchase_detail")
+
+      .select(
+        "item_name, qty"
+      )
+
+      .in(
+        "purchase_no",
+        purchaseNos
+      )
+
+  : { data: [] };
+
+purchases?.forEach((item) => {
+
+ const name =
+  item.item_name;
+
+if (
+  !validStockItems[name]
+) {
+  return;
+}
+
+
+  stockMap[name].purchase_qty +=
+    Number(item.qty || 0);
+
+});
+
+// SALES
+const {
+  data: invoices
+} = await supabase
+
+  .from("invoices")
+
+  .select(
+    "invoice_id"
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  );
+
+const invoiceIds =
+  invoices?.map(
+    x => x.invoice_id
+  ) || [];
+
+const {
+  data: sales
+} = invoiceIds.length
+
+  ? await supabase
+
+      .from("invoice_items")
+
+      .select(
+        "item_name, qty"
+      )
+
+      .in(
+        "invoice_id",
+        invoiceIds
+      )
+
+  : { data: [] };
+
+      sales?.forEach((item) => {
+
+   const name =
+  item.item_name;
+
+if (
+  !validStockItems[name]
+) {
+  return;
+}
+
+        stockMap[name].sales_qty +=
+          Number(item.qty || 0);
+
+      });
+
+      const result =
+        Object.values(stockMap)
+          .map((item) => ({
+
+            ...item,
+
+           closing_qty:
+
+  item.opening_qty +
+
+  item.purchase_qty -
+
+  item.sales_qty
+
+          }));
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error: err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// SAVE VENDOR
+// =========================
+
+app.post(
+  "/saveVendorMaster",
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const company_code =
+        String(
+          body.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "company_code missing"
+
+        });
+
+      }
+
+
+const vendor_name =
+  String(
+    body.vendor_name || ""
+  ).trim();
+
+if (!vendor_name) {
+
+  return res.json({
+
+    success: false,
+
+    message:
+      "Vendor Name is required"
+
+  });
+
+}
+
+// =========================
+// FETCH VENDOR
+// =========================
+
+
+            const {
+        data: allVendors,
+        error: fetchError
+      } = await supabase
+
+        .from("vendor")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        );
+
+      if (fetchError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            fetchError.message
+
+        });
+
+      }
+
+// =========================
+// DUPLICATE GSTIN CHECK
+// =========================
+
+            const gstin =
+
+        String(
+          body.gstin || ""
+        )
+          .trim()
+          .toUpperCase();
+
+    const duplicateGST =
+  gstin
+    ? (allVendors || []).find(
+        (row) =>
+
+          row.vendor_code !==
+            body.vendor_code &&
+
+          String(
+            row.gstin || ""
+          )
+            .trim()
+            .toUpperCase()
+
+          ===
+
+          gstin
+      )
+    : null;
+
+      if (duplicateGST) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            "Vendor with same GSTIN already exists"
+
+        });
+
+      }
+
+
+const duplicateName =
+  (allVendors || []).find(
+
+    (row) =>
+
+      row.vendor_code !==
+        body.vendor_code &&
+
+      String(
+        row.vendor_name || ""
+      )
+        .trim()
+        .toUpperCase()
+
+      ===
+
+      vendor_name.toUpperCase()
+
+  );
+
+if (duplicateName) {
+
+  return res.json({
+
+    success: false,
+
+    message:
+      "Vendor already exists"
+
+  });
+
+}
+
+
+// =========================
+// VENDOR CODE GENERATION
+// =========================
+
+
+            let vendor_code =
+  body.vendor_code;
+
+if (!vendor_code) {
+
+  let maxNumber = 0;
+
+  (allVendors || []).forEach((row) => {
+
+    const code =
+      String(
+        row.vendor_code || ""
+      );
+
+    const num =
+      parseInt(
+        code.replace(
+          "VN",
+          ""
+        )
+      );
+
+    if (!isNaN(num)) {
+
+      maxNumber =
+        Math.max(
+          maxNumber,
+          num
+        );
+
+    }
+
+  });
+
+  vendor_code =
+    "VN" +
+
+    String(
+      maxNumber + 1
+    ).padStart(4, "0");
+
+}
+
+
+// =========================
+// INSERT OBJECT
+// =========================
+
+
+
+      const insertObj = {
+
+        company_code,
+
+        vendor_code,
+
+        vendor_name,
+
+        contact_person:
+          body.contact_person || "",
+
+        mobile:
+          body.mobile || "",
+
+        email:
+          body.email || "",
+
+        gstin:
+          String(
+            body.gstin || ""
+          )
+            .trim()
+            .toUpperCase(),
+
+        state:
+          body.state || "",
+
+        statecode:
+          body.statecode || "",
+
+        pincode:
+          body.pincode || "",
+
+        address:
+          body.address || "",
+
+        opening_balance:
+          Number(
+            body.opening_balance || 0
+          ),
+
+        opening_type:
+          body.opening_type || "Payable",
+
+       opening_date:
+
+          body.vendor_code
+
+            ? undefined
+
+            : new Date(),
+
+
+        credit_period:
+          Number(
+            body.credit_period || 30
+          ),
+
+        remarks:
+          body.remarks || "",
+
+        is_active:
+
+        body.vendor_code
+
+          ? body.is_active ?? true
+
+          : true,
+
+            created_at:
+
+        body.vendor_code
+
+          ? undefined
+
+          : new Date(),
+
+          updated_at:
+            new Date()
+
+                };
+
+      if (
+          body.vendor_code
+        ) {
+
+          delete insertObj.created_at;
+
+          delete insertObj.opening_date;
+
+        }
+
+        console.log(
+        "VENDOR INSERT:",
+        insertObj
+      );
+
+// =========================
+// INSERT
+// =========================
+
+
+const query =
+
+  body.vendor_code
+
+    ? supabase
+
+        .from("vendor")
+
+        .update(insertObj)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "vendor_code",
+          body.vendor_code
+        )
+
+    : supabase
+
+        .from("vendor")
+
+        .insert([
+          insertObj
+        ]);
+
+const {
+  error: insertError
+} = await query;
+
+      if (insertError) {
+
+        return res.json({
+
+          success: false,
+
+          message:
+            insertError.message
+
+        });
+
+      }
+
+     return res.json({
+
+  success: true,
+
+  message:
+
+    body.vendor_code
+
+      ? "Vendor updated successfully"
+
+      : "Vendor saved successfully",
+
+  vendor_code
+
+});
+    }
+
+  catch (err) {
+
+  console.error(
+    "SAVE VENDOR ERROR:",
+    err
+  );
+
+  return res.json({
+
+    success: false,
+
+    message:
+      err?.message ||
+      "Something went wrong"
+
+  });
+
+}
+
+  }
+);
+
+
+
+// =========================
+// GET STOCK LEDGER
+// =========================
+
+app.post(
+  "/getStockLedger",
+  async (req, res) => {
+
+      console.log(
+      "STOCK API HIT"
+    );
+
+    try {
+
+      const company_code =
+        req.body.company_code;
+
+      if (!company_code) {
+
+        return res.json({
+          success: false,
+          error: "company_code missing"
+        });
+
+      }
+
+      const item_name =
+  String(
+    req.body.item_name || ""
+  ).trim();
+
+const from_date =
+  req.body.from_date;
+
+const to_date =
+  req.body.to_date;
+
+
+   const ledger = [];
+
+
+      const {
+  data: mm
+} = await supabase
+
+  .from("mm")
+
+ .select(
+  "material_id, item_code, item_name, base_unit, mat_type, opening_stock, hsn_code"
+)
+
+  .eq(
+    "company_code",
+    company_code
+  );
+
+const {
+  data: variants
+} = await supabase
+
+  .from("variant")
+
+ .select(
+  "material_id, item_name, description, variant, sub_variant, opening_stock"
+)
+
+  .eq(
+    "company_code",
+    company_code
+  );
+
+const validStockItems = {};
+const itemCodeMap = {};
+const materialMap = {};
+const openingMap = {};
+const unitMap = {};
+const hsnMap = {};
+
+mm?.forEach((m) => {
+
+  if (
+    m.mat_type ===
+    "single"
+  ) {
+
+    validStockItems[
+      m.item_name
+    ] = true;
+
+  itemCodeMap[
+  m.item_name
+] = m.item_code;
+
+materialMap[
+  m.item_name
+] = m.material_id;
+
+openingMap[
+  m.item_name
+] = Number(
+  m.opening_stock || 0
+);
+
+unitMap[
+  m.item_name
+] = m.base_unit || "";
+
+hsnMap[
+  m.item_name
+] = m.hsn_code || "";
+
+}
+
+  if (
+    m.mat_type ===
+    "multi"
+  ) {
+
+    variants?.forEach((v) => {
+
+      if (
+
+        v.material_id ===
+  m.material_id &&
+
+        v.variant ===
+          m.base_unit &&
+
+        v.sub_variant ===
+          m.base_unit
+
+      ) {
+
+        validStockItems[
+          v.description
+        ] = true;
+
+         itemCodeMap[
+            v.description
+          ] = m.item_code;
+
+          materialMap[
+            v.description
+          ] = m.material_id;
+
+          openingMap[
+  v.description
+] = Number(
+  v.opening_stock || 0
+);
+
+unitMap[
+  v.description
+] = m.base_unit || "";
+
+hsnMap[
+  v.description
+] = m.hsn_code || "";
+
+      }
+
+    });
+
+  }
+
+});
+
+
+let openingQty =
+  Number(
+    openingMap[item_name] || 0
+  );
+
+
+
+     // PURCHASES
+const {
+  data: purchaseHeaders
+} = await supabase
+
+  .from("purchase_header")
+
+  .select(
+  "id, purchase_no, invoice_date, vendor_name"
+)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .gte(
+    "invoice_date",
+    from_date
+  )
+
+  .lte(
+    "invoice_date",
+    to_date
+  );
+
+  const {
+  data: previousPurchaseHeaders
+} = await supabase
+
+  .from("purchase_header")
+
+  .select(
+    "purchase_no"
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .lt(
+    "invoice_date",
+    from_date
+  );
+
+const purchaseNos =
+  purchaseHeaders?.map(
+    x => x.purchase_no
+  ) || [];
+
+const purchaseMap = {};
+
+purchaseHeaders?.forEach((p) => {
+
+  purchaseMap[
+    p.purchase_no
+  ] = p;
+
+});
+
+
+const {
+  data: purchases
+} = purchaseNos.length
+
+  ? await supabase
+
+      .from("purchase_detail")
+
+     .select(
+  "purchase_no, item_name, qty"
+)
+
+      .in(
+        "purchase_no",
+        purchaseNos
+      )
+
+  : { data: [] };
+
+
+const previousPurchaseNos =
+  previousPurchaseHeaders?.map(
+    x => x.purchase_no
+  ) || [];
+
+const {
+  data: previousPurchases
+} = previousPurchaseNos.length
+
+  ? await supabase
+
+      .from("purchase_detail")
+
+      .select(
+        "purchase_no, item_name, qty"
+      )
+
+      .in(
+        "purchase_no",
+        previousPurchaseNos
+      )
+
+  : { data: [] };
+
+previousPurchases?.forEach((item) => {
+
+  if (
+    item.item_name === item_name
+  ) {
+
+    openingQty +=
+      Number(item.qty || 0);
+
+  }
+
+});  
+
+purchases?.forEach((item) => {
+
+    console.log(
+    "PURCHASE:",
+    item.item_name,
+    "SEARCH:",
+    item_name
+  );
+
+  if (
+    item.item_name !== item_name
+  ) {
+    return;
+  }
+
+  const header =
+  purchaseMap[
+    item.purchase_no
+  ];
+
+ledger.push({
+
+  id:
+  header?.id,
+
+  date:
+  header?.invoice_date || "",
+
+  voucher:
+    item.purchase_no,
+
+  type:
+    "Purchase",
+
+  party:
+    header?.vendor_name || "",
+
+  item_name:
+    item.item_name,
+
+  in_qty:
+    Number(item.qty || 0),
+
+  out_qty:
+    0
+
+});
+
+});
+
+
+
+// SALES
+const {
+  data: invoices
+} = await supabase
+
+  .from("invoices")
+
+  .select(
+  "id, invoice_id, invoice_number, invoice_date, customer_name"
+)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .gte(
+  "invoice_date",
+  from_date
+)
+
+.lte(
+  "invoice_date",
+  to_date
+);
+
+
+const {
+  data: previousInvoices
+} = await supabase
+
+  .from("invoices")
+
+  .select(
+    "invoice_id"
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .lt(
+    "invoice_date",
+    from_date
+  );
+
+const invoiceIds =
+  invoices?.map(
+    x => x.invoice_id
+  ) || [];
+
+  const invoiceMap = {};
+
+invoices?.forEach((i) => {
+
+  invoiceMap[
+    i.invoice_id
+  ] = i;
+
+});
+
+const previousInvoiceIds =
+  previousInvoices?.map(
+    x => x.invoice_id
+  ) || [];
+
+const {
+  data: sales
+} = invoiceIds.length
+
+  ? await supabase
+
+      .from("invoice_items")
+
+      .select(
+  "invoice_id, item_name, qty"
+)
+
+      .in(
+        "invoice_id",
+        invoiceIds
+      )
+
+  : { data: [] };
+
+const {
+  data: previousSales
+} = previousInvoiceIds.length
+
+  ? await supabase
+
+      .from("invoice_items")
+
+      .select(
+        "invoice_id, item_name, qty"
+      )
+
+      .in(
+        "invoice_id",
+        previousInvoiceIds
+      )
+
+  : { data: [] };
+
+previousSales?.forEach((item) => {
+
+  if (
+    item.item_name === item_name
+  ) {
+
+    openingQty -=
+      Number(item.qty || 0);
+
+  }
+
+});
+
+ledger.push({
+
+  id: null,
+
+  date:
+    from_date,
+
+  voucher:
+    "OPENING",
+
+  type:
+    "Opening",
+
+  party: "",  
+
+  item_name:
+    item_name,
+
+in_qty:
+  openingQty,
+
+  out_qty:
+    0
+
+});
+
+  sales?.forEach((item) => {
+
+     console.log(
+    "SALE:",
+    item.item_name,
+    "SEARCH:",
+    item_name
+  );
+
+  if (
+    item.item_name !== item_name
+  ) {
+    return;
+  }
+
+  const header =
+    invoiceMap[
+      item.invoice_id
+    ];
+
+
+
+  ledger.push({
+
+       id:
+  header?.id,
+
+    date:
+      header?.invoice_date || "",
+
+    voucher:
+      header?.invoice_number,
+
+    type:
+      "Sale",
+
+    party:
+      header?.customer_name || "",
+
+    item_name:
+      item.item_name,
+
+    in_qty:
+      0,
+
+    out_qty:
+      Number(item.qty || 0)
+
+  });
+
+  
+
+});   
+
+   ledger.sort((a, b) =>
+
+  new Date(a.date).getTime()
+
+  -
+
+  new Date(b.date).getTime()
+
+);
+
+
+
+     return res.json({
+
+  success: true,
+
+  data: ledger
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error: err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+// =========================
+// GET CA COMPANIES
+// =========================
+
+app.get(
+  "/getCACompanies",
+
+  async (req, res) => {
+
+    try {
+
+      const partner_id =
+
+        String(
+          req.query.partner_id || ""
+        ).trim();
+
+      if (!partner_id) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "partner_id missing"
+
+        });
+
+      }
+
+      const {
+  data: caUser,
+  error: caError
+} = await supabase
+
+  .from("usersheet")
+
+  .select("id")
+
+  .eq(
+    "user_id",
+    partner_id
+  )
+
+  .eq(
+    "role",
+    "PARTNER"
+  )
+
+  .eq(
+    "is_ca",
+    true
+  )
+
+  .eq(
+    "is_active",
+    true
+  )
+
+  .single();
+
+if (
+  caError ||
+  !caUser
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "Unauthorized CA"
+
+  });
+
+}
+
+      const {
+        data,
+        error
+      } = await supabase
+
+        .from("company")
+
+        .select(`
+          company_code,
+          businessname,
+          ca_tally_company,
+          partner_id
+        `)
+
+        .eq(
+          "partner_id",
+          partner_id
+        )
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .order(
+          "businessname",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      const result =
+
+        (data || []).map((row) => ({
+
+          company_code:
+            row.company_code,
+
+          businessname:
+            row.businessname,
+
+          partner_id:
+            row.partner_id,
+
+          ca_tally_company:
+            row.ca_tally_company || ""
+
+        }));
+
+      return res.json({
+
+        success: true,
+
+        data: result
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+// =========================
+// SAVE TALLY COMPANY
+// =========================
+
+app.post(
+
+  "/saveTallyCompany",
+
+  async (req, res) => {
+
+    try {
+
+     const {
+  company_code,
+  is_ca = true,
+  tally_company,
+  tally_company_guid
+} = req.body || {};
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code required"
+
+        });
+
+      }
+
+      if (!tally_company) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Tally company required"
+
+        });
+
+      }
+
+      if (!tally_company_guid) {
+
+  return res.json({
+    success: false,
+    error:
+      "Tally company GUID required"
+  });
+
+}
+
+/*
+const companyInfo = await importCompany({
+  company: tally_company
+});
+*/
+
+const {
+  data: existingCompany,
+  error: companyLookupError
+} = await supabase
+  .from("company")
+  .select(
+    is_ca
+      ? "ca_connector_id"
+      : "client_connector_id"
+  )
+  .eq("company_code", company_code)
+  .single();
+
+if (companyLookupError) {
+  return res.json({
+    success: false,
+    error: companyLookupError.message
+  });
+}
+
+const connectorId = is_ca
+  ? existingCompany?.ca_connector_id
+  : existingCompany?.client_connector_id;
+
+if (!connectorId) {
+  return res.json({
+    success: false,
+    error: "Connector not found for this Tally company"
+  });
+}
+
+const connectorSocket =
+  registry.get(
+    connectorId,
+    company_code
+  );
+
+if (!connectorSocket) {
+  return res.json({
+    success: false,
+    error: "Connector is offline"
+  });
+}
+
+const companyInfo = await sendToConnector(
+  connectorSocket,
+  "getTallyCompanyInfo",
+  {
+    company: tally_company
+  }
+);
+
+if (!companyInfo?.booksBeginningFrom) {
+  return res.json({
+    success: false,
+    error: "Books Beginning From not found in Tally company"
+  });
+}
+      // =========================
+      // BUILD UPDATE OBJECT
+      // =========================
+
+      const updateObj = {};
+
+     if (is_ca) {
+
+  updateObj.ca_tally_company =
+    tally_company;
+
+  updateObj.ca_tally_company_guid =
+    tally_company_guid;
+
+  updateObj.ca_tally_books_begining_from =
+    companyInfo.booksBeginningFrom;
+
+} else {
+
+  updateObj.client_tally_company =
+    tally_company;
+
+  updateObj.client_tally_company_guid =
+    tally_company_guid;
+  
+  updateObj.client_tally_books_begining_from =
+    companyInfo.booksBeginningFrom;
+
+
+}
+
+      // =========================
+      // UPDATE COMPANY
+      // =========================
+
+      const {
+
+        data,
+
+        error
+
+      } = await supabase
+
+        .from("company")
+
+        .update(updateObj)
+
+        .eq(
+
+          "company_code",
+
+          company_code
+
+        )
+
+        .select()
+
+        .single();
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+// =========================
+// GET TALLY COMPANIES
+// =========================
+
+app.get(
+  "/getTallyCompaniesdebug",
+  async (req, res) => {
+
+    try {
+
+      console.log("GET TALLY COMPANIES API HIT");
+
+      const result =
+        await getTallyCompanies();
+
+      console.log("TALLY RESULT:", result);
+
+      return res.json(result);
+
+    }
+
+    catch (err) {
+
+      console.log("TALLY ERROR:", err);
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// EXPORT TO TALLY
+// =========================
+
+app.post(
+
+  "/exportToTally",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company_code
+
+      } = req.body || {};
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code required"
+
+        });
+
+      }
+
+      const {
+
+        data: company,
+
+        error
+
+      } = await supabase
+
+        .from("company")
+
+      .select(`
+
+  company_code,
+
+  businessname,
+
+  ca_tally_company,
+
+  country
+
+`)
+
+        .eq(
+
+          "company_code",
+
+          company_code
+
+        )
+
+        .single();
+
+      if (
+
+        error ||
+
+        !company
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Company not found"
+
+        });
+
+      }
+
+      console.log(
+
+        "EXPORT COMPANY:",
+
+        company
+
+      );
+
+      console.log("STEP-1");
+
+      const {
+
+  data: clients,
+
+  error: clientError
+
+} = await supabase
+
+  .from("client")
+
+  .select(`
+    company_code,
+
+  client_code,
+
+  client_name,
+
+  gstin,
+
+  billing_address,
+
+  bill_state,
+
+  bill_pincode,
+
+  mobile,
+
+  email,
+
+contact_person,
+
+credit_period,
+
+opening_balance,
+
+gst_registered,
+
+tally_exported
+
+`)
+
+  .eq(
+
+    "company_code",
+
+    company_code
+
+  )
+
+  .eq(
+
+    "is_active",
+
+    true
+
+  )
+
+  .eq(
+
+    "tally_exported",
+
+    false
+
+  )
+
+  .order(
+
+    "client_name",
+
+    {
+
+      ascending: true
+
+    }
+
+  );
+
+  console.log("STEP-2");
+
+if (clientError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      clientError.message
+
+  });
+
+}
+
+if (!clients || clients.length === 0) {
+
+  return res.json({
+
+    success: true,
+
+    message:
+      "All clients are already exported to Tally.",
+
+    data: {
+
+      exported: 0
+
+    }
+
+  });
+
+}
+
+console.log(
+
+  "CLIENTS TO EXPORT:",
+
+  clients
+
+);
+
+console.log("STEP-3");
+
+for (const client of clients) {
+
+  console.log(
+
+    "EXPORTING:",
+
+    client.client_name
+
+  );
+
+  console.log("STEP-4");
+
+try {
+
+const tallyResponse = await createLedger({
+
+  company:
+    company.ca_tally_company,
+
+  name:
+    client.client_name,
+
+  gstin:
+    client.gstin,
+
+  address:
+    client.billing_address,
+
+  state:
+    client.bill_state,
+
+  pincode:
+    client.bill_pincode,
+
+  mobile:
+    client.mobile,
+
+  email:
+    client.email,
+
+ contactPerson:
+  client.contact_person,
+
+creditPeriod:
+  client.credit_period,
+
+openingBalance:
+  client.opening_balance,
+
+gstRegistered:
+  client.gst_registered,
+
+country:
+  company.country
+
+});
+
+console.log("STEP-5");
+
+console.log("===== TALLY RESPONSE MAIN =====");
+console.log(tallyResponse);
+
+const {
+
+  error: updateError
+
+} = await supabase
+
+  .from("client")
+
+  .update({
+
+    tally_exported: true,
+
+    tally_exported_at: new Date()
+
+  })
+
+  .eq(
+
+    "company_code",
+
+    client.company_code
+
+  )
+
+  .eq(
+
+    "client_code",
+
+    client.client_code
+
+  );
+
+if (updateError) {
+
+  throw updateError;
+
+}
+
+console.log(
+
+  "CREATED:",
+
+  client.client_name
+
+);
+
+
+ } catch (err) {
+
+    console.error(
+      "FAILED:",
+      client.client_name,
+      err.message
+    );
+}
+}
+    return res.json({
+
+  success: true,
+
+  data: {
+
+    company,
+
+    clients
+
+  }
+
+});
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+// =========================
+// CREATE UNITS IN TALLY
+// =========================
+
+app.post(
+  "/createUnitsInTally",
+  async (req, res) => {
+
+   try {
+
+const {
+  company,
+  units
+} = req.body;
+
+
+
+const company_code =
+  String(req.body.company_code || "").trim();
+
+console.log("================================");
+console.log("CREATE UNITS API");
+console.log("REQ BODY :", req.body);
+console.log("COMPANY CODE :", company_code);
+console.log("REGISTERED :", registry.list());
+
+const is_ca =
+  Boolean(req.body.is_ca);
+
+const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
+
+const {
+  data: companyData,
+  error: companyError
+} = await supabase
+
+  .from("company")
+
+  .select(
+    `company_code, ${connectorField}`
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .single();
+
+if (companyError) {
+
+  return res.json({
+    success: false,
+    error: companyError.message
+  });
+
+}
+
+const connector_id =
+  companyData?.[connectorField];
+
+console.log(
+  "CONNECTOR ID FROM DB :",
+  connector_id
+);
+
+if (!connector_id) {
+
+  return res.json({
+    success: false,
+    error: "Connector not paired"
+  });
+
+}
+
+const socket =
+  registry.get(connector_id);
+
+console.log(
+  "SOCKET FOUND :",
+  !!socket
+);
+
+if (socket) {
+
+  console.log(
+    "SOCKET ID :",
+    socket.id
+  );
+
+}
+
+if (!socket) {
+
+  return res.json({
+
+    success: false,
+
+    error: "Connector offline"
+
+  });
+
+}
+
+if (!company || !Array.isArray(units)) {
+
+  return res.json({
+
+    success: false,
+
+    error: "Invalid request",
+
+  });
+
+}
+
+console.log("REQ BODY =", req.body);
+
+console.log("UNITS =", units);
+ 
+
+// =========================
+// GET COMPANY
+// =========================
+// =========================
+// UNITS FROM PAYLOAD
+// =========================
+
+if (!units?.length) {
+
+  return res.json({
+
+    success: false,
+
+    error: "No units received."
+
+  });
+
+}
+
+console.log(
+  "UNITS FROM PAYLOAD",
+  units
+);
+
+
+// =========================
+// CLEAR UNIT DEBUG LOG
+// =========================
+
+fs.writeFileSync(
+
+  path.join(
+    __dirname,
+    "unit-debug.log"
+  ),
+
+  ""
+
+);
+
+
+// =========================
+// CREATE UNITS IN TALLY
+// =========================
+
+const results = [];
+
+for (const row of units) {
+
+  console.log(
+
+  "CREATING UNIT",
+
+  row.unitName,
+
+  row.uqcCode
+
+);
+
+ console.log(
+  "COMPANY OBJECT",
+  company
+);
+
+  const xml = createUnit({
+company:
+  company,
+
+  unitName:
+  row.unitName,
+
+  uqcCode:
+    row.uqcCode,
+
+  });
+
+  // =========================
+// SAVE UNIT XML
+// =========================
+
+fs.appendFileSync(
+
+  path.join(
+    __dirname,
+    "unit-debug.log"
+  ),
+
+  "========== XML ==========\n\n" +
+
+  xml +
+
+  "\n\n"
+
+);
+
+ const response =
+  await sendToConnector(
+
+    socket,
+
+    "createUnitsInTally",
+
+    {
+      xml
+    }
+
+);
+  // =========================
+// SAVE UNIT RESPONSE
+// =========================
+
+fs.appendFileSync(
+
+  path.join(
+    __dirname,
+    "unit-debug.log"
+  ),
+
+  "========== RESPONSE ==========\n\n" +
+
+  response +
+
+  "\n\n"
+
+);
+
+    if (response.includes("<LINEERROR>")) {
+
+  return res.json({
+
+    success: false,
+
+    error: response
+
+  });
+
+}
+
+    console.log(
+
+  "UNIT NAME:",
+
+  row.unitName,
+
+  "RESULT:",
+
+  response
+
+);
+
+results.push(response);
+
+}
+     return res.json({
+
+  success: true,
+
+  results,
+
+});
+ 
+    }
+
+    catch (err) {
+
+  console.error(
+    "CREATE UNIT ERROR",
+    err
+  );
+
+  return res.json({
+
+    success: false,
+
+    error: err.message
+
+  });
+
+}
+
+  }
+
+);
+
+app.post("/exportSalesToTally", async (req, res) => {
+
+  try {
+
+    // abhi sirf test
+
+ const {
+
+  company_code,
+
+  batch_id,
+
+  tally_owner,
+
+  inv_from,
+
+  inv_to
+
+} = req.body || {};
+
+
+if (
+
+  !company_code ||
+
+  !batch_id ||
+
+  !tally_owner ||
+
+  inv_from == null ||
+
+  inv_to == null
+
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "company_code, batch_id, tally_owner, inv_from and inv_to required"
+
+  });
+
+}
+
+// =========================
+// GET CONNECTOR SOCKET
+// =========================
+
+const is_ca =
+  String(tally_owner).toUpperCase() === "CA";
+
+const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
+
+const {
+  data: connectorCompany,
+  error: connectorError
+} = await supabase
+
+  .from("company")
+
+  .select(
+    `company_code, ${connectorField}`
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .single();
+
+if (connectorError) {
+
+  return res.json({
+    success: false,
+    error: connectorError.message
+  });
+
+}
+
+const connector_id =
+  connectorCompany?.[connectorField];
+
+console.log(
+  "SALES EXPORT CONNECTOR ID :",
+  connector_id
+);
+
+if (!connector_id) {
+
+  return res.json({
+    success: false,
+    error: "Connector not paired"
+  });
+
+}
+
+const socket =
+  registry.get(connector_id);
+
+console.log(
+  "SALES EXPORT SOCKET FOUND :",
+  !!socket
+);
+
+if (!socket) {
+
+  return res.json({
+
+    success: false,
+
+    error: "Connector offline"
+
+  });
+
+}
+
+console.log(
+  "=================================="
+);
+
+console.log(
+  "EXPORT SALES REQUEST"
+);
+
+console.log({
+  company_code,
+  batch_id,
+  tally_owner,
+  inv_from,
+  inv_to
+});
+
+// =========================
+// GET EXPORT SETTINGS
+// =========================
+
+const {
+
+  data: exportCompany,
+
+  error: exportCompanyError
+
+} = await supabase
+
+  .from("company")
+
+  .select(`
+
+    company_code,
+
+    businessname,
+
+    country,
+
+    client_tally_company,
+
+    ca_tally_company,
+
+    client_voucher_number_mode,
+
+    client_voucher_prefix,
+
+    client_voucher_digits,
+
+    voucher_number_mode,
+
+    voucher_prefix,
+
+    voucher_digits,
+
+    round_off_ledger,
+
+    client_round_off_ledger
+
+  `)
+
+  .eq(
+
+    "company_code",
+
+    company_code
+
+  )
+
+  .single();
+
+
+if (
+
+  exportCompanyError ||
+
+  !exportCompany
+
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      exportCompanyError?.message ||
+
+      "Company not found."
+
+  });
+
+}
+
+
+const isCaOwner =
+
+  String(tally_owner)
+
+    .toUpperCase() === "CA";
+
+const batchIdColumn =
+  isCaOwner
+    ? "batch_id"
+    : "client_batch_id";
+
+
+const tallyExportedColumn =
+  isCaOwner
+    ? "tally_exported"
+    : "client_tally_exported";
+
+
+const tallyExportedAtColumn =
+  isCaOwner
+    ? "tally_exported_at"
+    : "client_tally_exported_at";
+
+const exportSettings = {
+
+  tally_company:
+
+    isCaOwner
+
+      ? exportCompany.ca_tally_company
+
+      : exportCompany.client_tally_company,
+
+
+  voucher_number_mode:
+
+    isCaOwner
+
+      ? exportCompany.voucher_number_mode
+
+      : exportCompany.client_voucher_number_mode,
+
+
+  voucher_prefix:
+
+    isCaOwner
+
+      ? exportCompany.voucher_prefix
+
+      : exportCompany.client_voucher_prefix,
+
+
+  voucher_digits:
+
+    Number(
+
+      isCaOwner
+
+        ? exportCompany.voucher_digits
+
+        : exportCompany.client_voucher_digits
+
+    ) || 4,
+
+round_off_ledger:
+
+  isCaOwner
+
+    ? exportCompany.round_off_ledger
+
+    : exportCompany.client_round_off_ledger
+
+};
+
+
+console.log(
+  "EXPORT SETTINGS:",
+  exportSettings
+);
+
+if (!exportSettings.round_off_ledger) {
+
+  return res.json({
+
+    success: false,
+
+    code: "ROUND_OFF_LEDGER_NOT_CONFIGURED",
+
+    error:
+      "Round Off ledger is not configured in Tally Export Settings."
+
+  });
+
+}
+ 
+// =========================
+// BUILD VOUCHER NUMBER PREVIEW
+// =========================
+
+function getInvoiceSequence(
+
+  invoiceNumber
+
+) {
+
+  const value =
+    String(
+      invoiceNumber || ""
+    ).trim();
+
+
+  const match =
+    value.match(
+      /(\d+)\s*$/
+    );
+
+
+  if (!match) {
+
+    return null;
+
+  }
+
+
+  return Number(
+    match[1]
+  );
+
+}
+
+
+function buildVoucherNumber(
+
+  invoice
+
+) {
+
+  const mode =
+    String(
+      exportSettings.voucher_number_mode || "AUTO"
+    ).toUpperCase();
+
+
+  // =========================
+  // TALLY AUTOMATIC
+  // =========================
+
+  if (mode === "AUTO") {
+
+    return "";
+
+  }
+
+
+  // =========================
+  // USE BILLEY INVOICE NUMBER
+  // =========================
+
+  if (mode === "BILLEY") {
+
+    return String(
+      invoice.invoice_number || ""
+    ).trim();
+
+  }
+
+
+  // =========================
+  // CUSTOM PREFIX + BILLEY NUMBER
+  // =========================
+
+  if (mode === "CUSTOM") {
+
+    const sequence =
+      getInvoiceSequence(
+        invoice.invoice_number
+      );
+
+
+    if (sequence == null) {
+
+      throw new Error(
+
+        `Unable to extract invoice sequence from ${invoice.invoice_number}`
+
+      );
+
+    }
+
+
+    const paddedSequence =
+      String(sequence).padStart(
+
+        exportSettings.voucher_digits,
+
+        "0"
+
+      );
+
+
+    return (
+
+      String(
+        exportSettings.voucher_prefix || ""
+      ) +
+
+      paddedSequence
+
+    );
+
+  }
+
+
+  throw new Error(
+
+    `Invalid voucher number mode: ${mode}`
+
+  );
+
+}
+
+// =========================
+// TEST VOUCHER NUMBER PREVIEW
+// =========================
+
+const {
+
+  data: previewInvoices,
+
+  error: previewInvoiceError
+
+} = await supabase
+
+  .from("invoices")
+
+  .select(`
+
+    id,
+
+    invoice_id,
+
+    invoice_number,
+
+    invoice_date,
+
+    batch_id
+
+  `)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+.eq(
+  batchIdColumn,
+  batch_id
+)
+
+.eq(
+  "doc_type",
+  "invoice"
+)
+
+.eq(
+  tallyExportedColumn,
+  false
+)
+
+  .order(
+    "invoice_date",
+    {
+      ascending: true
+    }
+  )
+
+  .order(
+    "id",
+    {
+      ascending: true
+    }
+  );
+
+
+if (previewInvoiceError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      previewInvoiceError.message
+
+  });
+
+}
+
+previewInvoices.sort((a, b) => {
+
+  return (
+    getInvoiceSequence(a.invoice_number) -
+    getInvoiceSequence(b.invoice_number)
+  );
+
+});
+
+console.log(
+  "=================================="
+);
+
+console.log(
+  "VOUCHER NUMBER PREVIEW"
+);
+
+
+for (
+  const invoice of previewInvoices || []
+) {
+
+  console.log(
+
+    String(
+      invoice.invoice_number || ""
+    ).trim(),
+
+    "=>",
+
+    buildVoucherNumber(invoice) || "[TALLY AUTOMATIC]"
+
+  );
+
+}
+
+
+console.log(
+  "=================================="
+);
+
+
+// =========================
+// TEMPORARY TEST MODE
+// REMOVE BEFORE FINAL EXPORT
+// =========================
+/*
+return res.json({
+
+  success: true,
+
+  test_mode: true,
+
+  received: {
+
+  company_code,
+
+  batch_id,
+
+  tally_owner,
+
+  inv_from,
+
+  inv_to,
+
+  exportSettings
+
+},
+
+  message:
+    "Export request received successfully. No invoice exported in test mode."
+
+});
+
+*/
+
+const {
+
+  data: company,
+
+  error: companyError
+
+} = await supabase
+
+  .from("company")
+
+  .select(`
+  company_code,
+  businessname,
+  ca_tally_company,
+  country
+`)
+
+  .eq(
+
+    "company_code",
+
+    company_code
+
+  )
+
+  .single();
+
+if (
+
+  companyError ||
+
+  !company
+
+) {
+
+  return res.json({
+
+    success: false,
+
+    error: "Company not found."
+
+  });
+
+}  
+
+// =========================
+// EXPORT WIZARD
+// =========================
+
+console.log("==================================");
+console.log("START EXPORT WIZARD");
+console.log("COMPANY :", company.company_code);
+console.log("==================================");
+
+// =========================
+// STEP 1 : CHECK UNIT
+// =========================
+
+console.log(
+  "STEP 1 : CHECK UNIT"
+);
+
+const billeyMapping =
+  await buildBilleyMapping(
+    company_code,
+    batch_id,
+    tally_owner
+  );
+
+  const stockMappingMethod =
+  billeyMapping.stockMappingMethod;
+
+console.log(
+  "BILLEY MAPPING",
+  billeyMapping
+);
+
+const pendingUnits =
+  billeyMapping.units.filter(
+    (row) => !row.tally_name
+  );
+
+console.log(
+  "PENDING UNITS",
+  pendingUnits
+);
+
+if (pendingUnits.length > 0) {
+
+  return res.json({
+
+    success: true,
+
+    next_step: "CREATE_UNITS",
+
+    pending: pendingUnits.length
+
+  });
+
+}
+
+// =========================
+// STEP 2 : CHECK STOCK
+// =========================
+
+console.log(
+  "STEP 2 : CHECK STOCK"
+);
+
+// TODO
+
+// =========================
+// STEP 3 : CHECK SALE GL
+// =========================
+
+console.log(
+  "STEP 3 : CHECK SALE GL"
+);
+
+// TODO
+
+// =========================
+// STEP 4 : CHECK TAX GL
+// =========================
+
+console.log(
+  "STEP 4 : CHECK TAX GL"
+);
+
+// TODO
+
+// =========================
+// STEP 4 : CHECK TAX GL
+// =========================
+
+console.log(
+  "STEP 4 : CHECK TAX GL"
+);
+
+// TODO
+
+const {
+
+  data: invoices,
+
+  error: invoiceError
+
+} = await supabase
+
+  .from("invoices")
+
+  .select("*")
+
+  .eq(
+
+    "company_code",
+
+    company_code
+
+  )
+
+  .eq(
+  batchIdColumn,
+  batch_id
+)
+
+.eq(
+  "doc_type",
+  "invoice"
+);
+
+  if (
+
+  invoices &&
+
+  invoices.length > 0
+
+) {
+
+  invoices.sort((a, b) => {
+
+    return (
+
+      getInvoiceSequence(a.invoice_number) -
+
+      getInvoiceSequence(b.invoice_number)
+
+    );
+
+  });
+
+}
+
+// =========================
+// FILTER INVOICE RANGE
+// =========================
+
+const filteredInvoices =
+
+  (invoices || []).filter((invoice) => {
+
+    const sequence =
+
+      getInvoiceSequence(
+        invoice.invoice_number
+      );
+
+    return (
+
+      sequence !== null &&
+
+      sequence >= Number(inv_from) &&
+
+      sequence <= Number(inv_to)
+
+    );
+
+  });
+
+
+console.log(
+  "FILTERED INVOICE RANGE:",
+  {
+    inv_from,
+    inv_to,
+    total_before: invoices?.length || 0,
+    total_after: filteredInvoices.length,
+    invoice_numbers:
+      filteredInvoices.map(
+        (invoice) => invoice.invoice_number
+      )
+  }
+);
+
+if (invoiceError) {
+
+  return res.json({
+
+    success: false,
+
+    error: invoiceError.message
+
+  });
+
+}
+
+if (!filteredInvoices || filteredInvoices.length === 0) {
+
+  return res.json({
+
+    success: true,
+
+    message: "No invoices found in selected range."
+
+  });
+
+}
+
+const exportResults = [];
+
+for (const invoice of filteredInvoices) {
+
+console.log(
+  "SELECTED INVOICE:",
+  invoice.id,
+  invoice.invoice_number
+);
+
+const roundOff = Number(
+  (
+    Number(invoice.grand_total) -
+    (
+      Number(invoice.subtotal) +
+      Number(invoice.cgst) +
+      Number(invoice.sgst) +
+      Number(invoice.igst)
+    )
+  ).toFixed(2)
+);
+
+const roundOffAmount = Math.abs(roundOff);
+
+const roundOffIsNegative = roundOff < 0;
+
+console.log("ROUND OFF:", roundOff);
+console.log("ROUND OFF AMOUNT:", roundOffAmount);
+console.log("ROUND OFF NEGATIVE:", roundOffIsNegative);
+
+const {
+
+  data: items,
+
+  error: itemError
+
+} = await supabase
+
+  .from("invoice_items")
+
+  .select("*")
+
+  .eq(
+
+    "invoice_id",
+
+    invoice.invoice_id
+
+  );
+
+if (itemError) {
+
+  return res.json({
+
+    success: false,
+
+    error: itemError.message
+
+  });
+
+}
+
+if (!items || items.length === 0) {
+
+  return res.json({
+
+    success: false,
+
+    error: "Invoice items not found."
+
+  });
+
+}
+
+console.log("TOTAL ITEMS:", items.length);
+
+console.log("ALL ITEMS:", items);
+
+console.log("INVOICE:", invoice);
+
+// =========================
+// RESOLVE SALES LEDGER
+// =========================
+
+const saleType =
+
+  Number(invoice.igst) > 0
+
+    ? "INTER"
+
+    : "INTRA";
+
+
+for (const item of items) {
+
+  const gstRate =
+
+    Number(item.gst_percent);
+
+    // =========================
+  // RESOLVE STOCK MAPPING
+  // HSN + UNIT BASIS
+  // =========================
+let stockKey = "";
+
+if (stockMappingMethod === "HSN_CODE") {
+
+  stockKey =
+    `STOCK|${String(item.hsn || "").trim()}|${String(item.unit || "").trim()}`;
+
+}
+else {
+
+  stockKey =
+    `STOCK|${String(item.item_name || "").trim()}`;
+
+}
+
+
+  const stockMapping =
+
+    billeyMapping.stock.find(
+
+      (row) =>
+
+        row.billey_key ===
+        stockKey
+
+    );
+
+
+  if (
+
+    !stockMapping ||
+
+    !stockMapping.tally_name
+
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        `Stock mapping not found for ${stockKey}`
+
+    });
+
+  }
+
+
+  item.stockName =
+
+    stockMapping.tally_name;
+
+
+  console.log(
+
+    "ITEM STOCK RESOLVED:",
+
+    {
+
+      invoice:
+        invoice.invoice_number,
+
+      hsn:
+        item.hsn,
+
+      unit:
+        item.unit,
+
+      key:
+        stockKey,
+
+      tally_name:
+        item.stockName
+
+    }
+
+  );
+
+
+
+  const salesLedgerKey =
+
+    `SALE|${saleType}|${gstRate}`;
+
+
+  const salesLedgerMapping =
+
+    billeyMapping.salesGL.find(
+
+      (row) =>
+
+        row.billey_key ===
+        salesLedgerKey
+
+    );
+
+
+  if (
+
+    !salesLedgerMapping ||
+
+    !salesLedgerMapping.tally_name
+
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        `Sales ledger mapping not found for ${salesLedgerKey}`
+
+    });
+
+  }
+
+  item.salesLedger =
+
+    salesLedgerMapping.tally_name;
+
+
+  console.log(
+
+    "ITEM SALES LEDGER RESOLVED:",
+
+    {
+
+      invoice:
+        invoice.invoice_number,
+
+      hsn:
+        item.hsn,
+
+      gstRate,
+
+      key:
+        salesLedgerKey,
+
+      tally_name:
+        item.salesLedger
+
+    }
+
+  );
+
+// =========================
+// RESOLVE ITEM TAX LEDGERS
+// =========================
+
+if (saleType === "INTRA") {
+
+  const halfRate =
+    gstRate / 2;
+
+
+  const cgstKey =
+    `TAX|CGST|${halfRate}`;
+
+  const sgstKey =
+    `TAX|SGST|${halfRate}`;
+
+
+  const cgstMapping =
+
+    billeyMapping.taxGL.find(
+
+      (row) =>
+        row.billey_key === cgstKey
+
+    );
+
+
+  const sgstMapping =
+
+    billeyMapping.taxGL.find(
+
+      (row) =>
+        row.billey_key === sgstKey
+
+    );
+
+
+  if (
+
+    !cgstMapping?.tally_name ||
+
+    !sgstMapping?.tally_name
+
+  ) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        `Tax ledger mapping not found for GST ${gstRate}%`
+
+    });
+
+  }
+
+  item.cgstLedger =
+    cgstMapping.tally_name;
+
+  item.sgstLedger =
+    sgstMapping.tally_name;
+
+}
+
+if (saleType === "INTER") {
+
+  const igstKey =
+    `TAX|IGST|${gstRate}`;
+
+
+  const igstMapping =
+
+    billeyMapping.taxGL.find(
+
+      (row) =>
+        row.billey_key === igstKey
+
+    );
+
+  if (!igstMapping?.tally_name) {
+
+    return res.json({
+
+      success: false,
+
+      error:
+        `Tax ledger mapping not found for ${igstKey}`
+
+    });
+
+  }
+
+  item.igstLedger =
+    igstMapping.tally_name;
+
+}
+
+}
+
+ const result = await createSale({
+
+  company: exportSettings.tally_company,
+  country: company.country,
+
+  //voucherDate: invoice.invoice_date.replaceAll("-", ""),
+voucherDate: "20260501",
+  voucherNumber: buildVoucherNumber(invoice),
+
+  partyName: invoice.customer_name,
+
+  billingAddress: invoice.billing_address,
+
+  shippingAddress: invoice.shipping_address,
+
+  state: invoice.state,
+
+shippingState: invoice.shipping_state,
+
+shippingStateCode: invoice.shipping_state_code,
+
+billingPincode: invoice.billing_pincode,
+
+shippingPincode: invoice.shipping_pincode,
+
+partyGstin: invoice.customer_gst,
+
+billingStateCode: invoice.state_code,
+
+placeOfSupply:
+  invoice.shipping_state || invoice.state,
+
+gstRegistrationType:
+  invoice.customer_gst
+    ? "Regular"
+    : "Unregistered",
+
+buyerName: invoice.customer_name,
+
+  items,
+  invoiceAmount: invoice.grand_total,
+
+  cgst: invoice.cgst,
+
+sgst: invoice.sgst,
+
+igst: invoice.igst,
+
+ roundOff: roundOffAmount,
+
+  roundOffIsNegative,
+
+  roundOffLedger:
+  exportSettings.round_off_ledger,
+
+  transporterName: invoice.transporter_name,
+
+vehicleNo: invoice.vehicle_no,
+
+grRRNo: invoice.gr_rr_no,
+
+ewayBillNo: invoice.eway_bill_no,
+
+dispatchDate: invoice.invoice_date.replaceAll("-", ""),
+
+lrDate: invoice.lr_date
+  ? invoice.lr_date.replaceAll("-", "")
+  : "",
+
+ewayDate: invoice.eway_date
+  ? invoice.eway_date.replaceAll("-", "")
+  : "",
+
+creditPeriod: invoice.credit_period,
+
+});
+
+const connectorResult =
+  await sendToConnector(
+
+    socket,
+
+    "exportSalesToTally",
+
+    {
+      xml: result
+    }
+
+  );
+
+console.log(
+  "SALES EXPORT CONNECTOR RESULT:",
+  invoice.invoice_number,
+  connectorResult
+);
+
+// =========================
+// VALIDATE TALLY RESPONSE
+// =========================
+
+const tallyResponse =
+  String(connectorResult || "");
+
+const getTallyValue = (tag) => {
+
+  const match = tallyResponse.match(
+    new RegExp(
+      `<${tag}>(.*?)</${tag}>`,
+      "i"
+    )
+  );
+
+  return match
+    ? Number(match[1])
+    : 0;
+
+};
+
+
+const created =
+  getTallyValue("CREATED");
+
+const altered =
+  getTallyValue("ALTERED");
+
+const errors =
+  getTallyValue("ERRORS");
+
+const exceptions =
+  getTallyValue("EXCEPTIONS");
+
+const ignored =
+  getTallyValue("IGNORED");
+
+const lastVchId =
+  getTallyValue("LASTVCHID");
+
+
+const isTallySuccess =
+
+  (
+    created === 1 ||
+    altered === 1
+  )
+
+  && errors === 0
+
+  && exceptions === 0
+
+  && ignored === 0
+
+  && lastVchId > 0;
+
+
+console.log(
+  "TALLY VALIDATION:",
+  {
+    invoice_number:
+      invoice.invoice_number,
+
+    created,
+
+    altered,
+
+    errors,
+
+    exceptions,
+
+    ignored,
+
+    lastVchId,
+
+    isTallySuccess
+  }
+);
+
+// =========================
+// UPDATE INVOICE TALLY STATUS
+// =========================
+
+if (isTallySuccess) {
+
+  const exportedAt =
+    new Date().toISOString();
+
+
+ const updateData = isCaOwner
+
+  ? {
+
+      tally_exported: true,
+
+      tally_exported_at:
+        exportedAt,
+
+      batch_posted_at:
+        exportedAt
+
+    }
+
+  : {
+
+      client_tally_exported: true,
+
+      client_tally_exported_at:
+        exportedAt,
+
+      batch_posted_at:
+        exportedAt
+
+    };
+
+
+const {
+  error: tallyUpdateError
+} = await supabase
+
+  .from("invoices")
+
+  .update(
+    updateData
+  )
+
+  .eq(
+    "invoice_id",
+    invoice.invoice_id
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    batchIdColumn,
+    batch_id
+  );
+
+  if (tallyUpdateError) {
+
+    throw new Error(
+
+      `Voucher created in Tally but invoice status update failed: ${tallyUpdateError.message}`
+
+    );
+
+  }
+
+
+  console.log(
+    "✅ INVOICE MARKED TALLY EXPORTED:",
+    invoice.invoice_number
+  );
+
+}
+
+
+
+exportResults.push({
+
+  invoice_id:
+    invoice.invoice_id,
+
+  invoice_number:
+    invoice.invoice_number,
+
+  voucher_number:
+    buildVoucherNumber(invoice),
+
+    success:
+    isTallySuccess,
+
+  result:
+    connectorResult
+
+});
+
+}
+
+   return res.json({
+
+  success: true,
+
+  total:
+    exportResults.length,
+
+  data:
+    exportResults
+
+});
+
+  } catch (err) {
+
+    return res.json({
+
+      success: false,
+
+      error: err.message
+
+    });
+
+  }
+
+});
+
+
+
+// =========================
+// BUILD BILLEY MAPPING
+// =========================
+
+async function buildBilleyMapping(
+  company_code,
+  batch_id = null,
+  tally_owner
+) {
+
+  if (!tally_owner) {
+  throw new Error(
+    "tally_owner is required"
+  );
+}
+
+  const isCaOwner =
+    String(tally_owner)
+      .trim()
+      .toUpperCase() === "CA";
+
+  const batchIdColumn =
+    isCaOwner
+      ? "batch_id"
+      : "client_batch_id";
+
+  const tallyExportedColumn =
+    isCaOwner
+      ? "tally_exported"
+      : "client_tally_exported";
+
+  const {
+  data: company,
+  error: companyError
+} = await supabase
+  .from("company")
+  .select(`
+    stock_mapping_method,
+    client_stock_mapping_method
+  `)
+  .eq("company_code", company_code)
+  .single();
+
+if (companyError) {
+  throw new Error(companyError.message);
+}
+
+const stockMappingMethod =
+  isCaOwner
+    ? (company?.stock_mapping_method || "HSN_CODE")
+    : (company?.client_stock_mapping_method || "HSN_CODE");
+
+console.log(
+  "STOCK MAPPING METHOD",
+  stockMappingMethod
+);
+
+  // =========================
+// GET PENDING INVOICE IDS
+// =========================
+
+let pendingInvoiceQuery = supabase
+
+  .from("invoices")
+
+  .select("invoice_id")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+  tallyExportedColumn,
+  false
+);
+
+
+if (batch_id) {
+
+  pendingInvoiceQuery =
+
+    pendingInvoiceQuery.eq(
+  batchIdColumn,
+  batch_id
+);
+
+}
+
+
+const {
+
+  data: pendingInvoices,
+
+  error: pendingError
+
+} = await pendingInvoiceQuery;
+
+if (pendingError) {
+
+  throw new Error(
+    pendingError.message
+  );
+
+}
+
+const invoice_ids =
+
+  (pendingInvoices || [])
+
+    .map(
+
+      (r) => r.invoice_id
+
+    );
+
+console.log(
+
+  "PENDING INVOICE IDS",
+
+  invoice_ids
+
+);
+
+if (
+
+  invoice_ids.length === 0
+
+) {
+
+  return {
+
+    stockMappingMethod,
+
+    salesGL: [],
+
+    taxGL: [],
+
+    units: [],
+
+    stock: [],
+
+    hsn: [],
+
+    debtors: []
+
+};
+
+}
+
+// =========================
+// GET GST DETAILS
+// =========================
+
+const {
+
+  data: gstRows,
+
+  error: gstError
+
+} = await supabase
+
+  .from("invoice_items")
+
+  .select(`
+    item_name,
+    hsn,
+    unit,
+    gst_percent,
+    cgst,
+    sgst,
+    igst
+`)
+
+  .in(
+
+    "invoice_id",
+
+    invoice_ids
+
+  );
+
+if (gstError) {
+
+  throw new Error(
+
+    gstError.message
+
+  );
+
+}
+
+console.log(
+
+  "GST ROWS",
+
+  gstRows
+
+);
+
+// =========================
+// BUILD STOCK MAPPING
+// =========================
+
+const stockMap = new Map();
+
+(gstRows || []).forEach((row) => {
+
+  const itemName =
+    String(row.item_name || "").trim();
+
+  const hsn =
+    String(row.hsn || "").trim();
+
+  const unit =
+    String(row.unit || "").trim();
+
+  const gstRate =
+    Number(row.gst_percent || 0);
+
+  let stockKey = "";
+  let stockName = "";
+
+  // =========================
+  // HSN MAPPING
+  // =========================
+
+  if (stockMappingMethod === "HSN_CODE") {
+
+    if (!hsn || !unit) return;
+
+    stockKey =
+      `STOCK|${hsn}|${unit}`;
+
+    stockName =
+      `${hsn}-${unit}`;
+
+  }
+
+  // =========================
+  // STOCK ITEM MAPPING
+  // =========================
+
+  else if (stockMappingMethod === "STOCK_ITEM") {
+
+    if (!itemName) return;
+
+    stockKey =
+      `STOCK|${itemName}`;
+
+    stockName =
+      itemName;
+
+  }
+
+  else {
+
+    return;
+
+  }
+
+  if (!stockMap.has(stockKey)) {
+
+    stockMap.set(
+
+      stockKey,
+
+      {
+
+        mapping_type:
+          "STOCK",
+
+        billey_key:
+          stockKey,
+
+        billey_name:
+          stockName,
+
+        hsn,
+
+        unit,
+
+        gstRate
+
+      }
+
+    );
+
+  }
+
+});
+
+const stock =
+
+  [...stockMap.values()];
+
+console.log(
+  "STOCK MAPPING",
+  stock
+);
+
+// =========================
+// GET EXISTING STOCK MAPPINGS
+// =========================
+
+const {
+
+  data: existingStockMappings,
+
+  error: stockMappingError
+
+} = await supabase
+
+  .from("tally_mapping")
+
+  .select("*")
+
+.eq(
+  "company_code",
+  company_code
+)
+
+.eq(
+  "tally_owner",
+  tally_owner
+)
+
+.eq(
+  "mapping_type",
+  "STOCK"
+);
+
+
+if (stockMappingError) {
+
+  throw new Error(
+    stockMappingError.message
+  );
+
+}
+
+
+console.log(
+  "EXISTING STOCK MAPPINGS",
+  existingStockMappings
+);
+
+
+// =========================
+// APPLY SAVED STOCK MAPPING
+// =========================
+
+const mappedStock =
+
+  stock.map((row) => {
+
+    const mapping =
+
+      (existingStockMappings || []).find(
+
+        (m) =>
+
+          m.billey_key ===
+          row.billey_key
+
+      );
+
+
+    return {
+
+      ...row,
+
+      tally_name:
+        mapping?.tally_name || ""
+
+    };
+
+  });
+
+
+console.log(
+  "MAPPED STOCK",
+  mappedStock
+);
+
+const units = [];
+// =========================
+// BUILD UNIT MAPPING
+// =========================
+/*
+const units =
+
+  unitList.map((unit) => ({
+
+    mapping_type: "UNIT",
+
+    billey_key: unit,
+
+    billey_name: unit
+
+  }));
+
+console.log(
+
+  "UNIT MAPPING",
+
+  units
+
+);
+*/
+
+// =========================
+// BUILD SALE GL
+// =========================
+
+const saleMap = new Map();
+
+(gstRows || []).forEach((row) => {
+
+  const gstRate = Number(row.gst_percent);
+
+  if (!gstRate) return;
+
+  if (Number(row.igst) > 0) {
+
+    saleMap.set(
+
+      `SALE|INTER|${gstRate}`,
+
+      {
+
+        mapping_type: "SALE_GL",
+
+        billey_key:
+
+          `SALE|INTER|${gstRate}`,
+
+        billey_name:
+
+          `IGST Sale ${gstRate}%`
+
+      }
+
+    );
+
+  }
+
+  else if (
+
+    Number(row.cgst) > 0 ||
+
+    Number(row.sgst) > 0
+
+  ) {
+
+    saleMap.set(
+
+      `SALE|INTRA|${gstRate}`,
+
+      {
+
+        mapping_type: "SALE_GL",
+
+        billey_key:
+
+          `SALE|INTRA|${gstRate}`,
+
+        billey_name:
+
+          `Local Sale ${gstRate}%`
+
+      }
+
+    );
+
+  }
+
+});
+
+const saleGL =
+
+  [...saleMap.values()];
+
+console.log(
+
+  "SALE GL",
+
+  saleGL
+
+);
+
+// =========================
+// GET EXISTING SALE GL MAPPINGS
+// =========================
+
+const {
+
+  data: existingMappings,
+
+  error: mappingError
+
+} = await supabase
+
+  .from("tally_mapping")
+
+  .select("*")
+
+.eq(
+  "company_code",
+  company_code
+)
+
+.eq(
+  "tally_owner",
+  tally_owner
+)
+
+.eq(
+  "mapping_type",
+  "SALE_GL"
+);
+
+if (mappingError) {
+
+  throw new Error(
+    mappingError.message
+  );
+
+}
+
+
+// =========================
+// APPLY SAVED SALE GL MAPPING
+// =========================
+
+const mappedSaleGL =
+
+  saleGL.map((row) => {
+
+    const mapping =
+
+      (existingMappings || []).find(
+
+        (m) =>
+
+          m.billey_key ===
+          row.billey_key
+
+      );
+
+    return {
+
+      ...row,
+
+      tally_name:
+        mapping?.tally_name || ""
+
+    };
+
+  });
+
+
+console.log(
+  "MAPPED SALE GL",
+  mappedSaleGL
+);
+
+// =========================
+// GET EXISTING TAX GL MAPPINGS
+// =========================
+
+const {
+
+  data: existingTaxMappings,
+
+  error: taxMappingError
+
+} = await supabase
+
+  .from("tally_mapping")
+
+  .select("*")
+
+  .eq(
+  "company_code",
+  company_code
+)
+
+.eq(
+  "tally_owner",
+  tally_owner
+)
+
+.eq(
+  "mapping_type",
+  "TAX_GL"
+);
+
+if (taxMappingError) {
+
+  throw new Error(
+    taxMappingError.message
+  );
+
+}
+
+
+console.log(
+  "EXISTING TAX GL MAPPINGS",
+  existingTaxMappings
+);
+
+
+// =========================
+// BUILD TAX GL
+// =========================
+
+const taxMap = new Map();
+
+
+(gstRows || []).forEach((row) => {
+
+  const gstRate =
+    Number(row.gst_percent);
+
+
+  if (!gstRate) return;
+
+
+  // =========================
+  // CGST + SGST
+  // =========================
+
+  if (
+
+    Number(row.cgst) > 0 ||
+
+    Number(row.sgst) > 0
+
+  ) {
+
+    const halfRate =
+      gstRate / 2;
+
+
+    taxMap.set(
+
+      `TAX|CGST|${halfRate}`,
+
+      {
+
+        mapping_type:
+          "TAX_GL",
+
+        billey_key:
+          `TAX|CGST|${halfRate}`,
+
+        billey_name:
+          `CGST ${halfRate}%`
+
+      }
+
+    );
+
+
+    taxMap.set(
+
+      `TAX|SGST|${halfRate}`,
+
+      {
+
+        mapping_type:
+          "TAX_GL",
+
+        billey_key:
+          `TAX|SGST|${halfRate}`,
+
+        billey_name:
+          `SGST ${halfRate}%`
+
+      }
+
+    );
+
+  }
+
+
+  // =========================
+  // IGST
+  // =========================
+
+  if (Number(row.igst) > 0) {
+
+    taxMap.set(
+
+      `TAX|IGST|${gstRate}`,
+
+      {
+
+        mapping_type:
+          "TAX_GL",
+
+        billey_key:
+          `TAX|IGST|${gstRate}`,
+
+        billey_name:
+          `IGST ${gstRate}%`
+
+      }
+
+    );
+
+  }
+
+});
+
+
+const taxGL =
+
+  [...taxMap.values()];
+
+
+console.log(
+  "TAX GL",
+  taxGL
+);
+
+// =========================
+// APPLY SAVED TAX GL MAPPING
+// =========================
+
+const mappedTaxGL =
+
+  taxGL.map((row) => {
+
+    const mapping =
+
+      (existingTaxMappings || []).find(
+
+        (m) =>
+
+          m.billey_key ===
+          row.billey_key
+
+      );
+
+
+    return {
+
+      ...row,
+
+      tally_name:
+        mapping?.tally_name || ""
+
+    };
+
+  });
+
+
+console.log(
+  "MAPPED TAX GL",
+  mappedTaxGL
+);
+
+// =========================
+// RETURN BILLEY MAPPING
+// =========================
+
+return {
+
+  stockMappingMethod,
+
+  salesGL: mappedSaleGL,
+
+  taxGL: mappedTaxGL,
+
+  units,
+
+  stock: mappedStock,
+
+  hsn: [],
+
+  debtors: []
+
+};
+
+}
+
+
+
+
+// =========================
+// GET BILLEY MAPPING DATA
+// =========================
+
+app.get(
+  "/getBilleyMappingData",
+  async (req, res) => {
+
+    try {
+
+// =========================
+// VALIDATION
+// =========================
+
+const company_code =
+  String(
+    req.query.company_code || ""
+  ).trim();
+
+  const is_ca =
+  String(
+    req.query.is_ca || "false"
+  ).toLowerCase() === "true";
+
+
+const tally_owner =
+  is_ca
+    ? "CA"
+    : "USER";
+
+
+const batchIdColumn =
+  is_ca
+    ? "batch_id"
+    : "client_batch_id";
+
+
+const tallyExportedColumn =
+  is_ca
+    ? "tally_exported"
+    : "client_tally_exported";
+
+
+if (!company_code) {
+
+  return res.json({
+
+    success:false,
+
+    error:"company_code missing"
+
+  });
+
+}
+
+
+// =========================
+// GET COMPANY SETTINGS
+// =========================
+
+const {
+  data: company,
+  error: companyError
+} = await supabase
+  .from("company")
+  .select(`
+    stock_mapping_method,
+    client_stock_mapping_method
+  `)
+  .eq("company_code", company_code)
+  .single();
+
+  console.log("COMPANY", company);
+console.log("COMPANY ERROR", companyError);
+
+if (companyError) {
+
+  return res.json({
+    success: false,
+    error: companyError.message
+  });
+
+}
+
+const stockMappingMethod = is_ca
+  ? (company?.stock_mapping_method || "HSN_CODE")
+  : (company?.client_stock_mapping_method || "HSN_CODE");
+
+console.log(
+  "STOCK MAPPING METHOD",
+  stockMappingMethod
+);
+
+// =========================
+// GET BATCH
+// =========================
+
+const {
+
+  data: batch,
+
+  error: batchError
+
+} = await supabase
+
+  .from("vw_batches_units")
+
+.select(`
+  batch_id,
+  company_code,
+  inv_from,
+  inv_to,
+  tally_owner
+`)
+
+  .eq(
+  "company_code",
+  company_code
+)
+
+.eq(
+  "tally_owner",
+  tally_owner
+)
+
+.eq(
+  "status",
+  "PENDING"
+)
+
+.order(
+  "sequence_no",
+  {
+    ascending:true
+  }
+)
+
+.limit(1)
+
+.single();
+
+console.log("BATCH", batch);
+console.log("BATCH ERROR", batchError);
+
+if (batchError) {
+
+  return res.json({
+
+    success: false,
+
+    error: batchError.message
+
+  });
+
+}
+
+if (!batch) {
+
+  return res.json({
+
+    success: false,
+
+    error: "No pending batch found"
+
+  });
+
+}
+
+const batch_id =
+  batch.batch_id;
+
+const inv_from =
+  batch.inv_from;
+
+const inv_to =
+  batch.inv_to;
+
+
+console.log(
+  "BATCH",
+  batch
+);
+
+// =========================
+// GET PENDING INVOICE IDS
+// =========================
+
+const {
+
+  data: pendingInvoices,
+
+  error: pendingError
+
+} = await supabase
+
+  .from("invoices")
+
+  .select(`
+    invoice_id,
+    invoice_number
+  `)
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    batchIdColumn,
+    batch_id
+  )
+
+  .eq(
+    tallyExportedColumn,
+    false
+  );
+
+if (pendingError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      pendingError.message
+
+  });
+
+}
+const invoice_ids =
+
+  (pendingInvoices || [])
+
+    .map(
+      (r) => r.invoice_id
+    );
+
+    console.log(
+
+  "FILTERED INVOICE IDS",
+
+  invoice_ids
+
+);
+
+console.log(
+
+  "PENDING INVOICE IDS",
+
+  invoice_ids
+
+);
+
+if (
+
+  invoice_ids.length === 0
+
+) {
+
+  return res.json({
+
+    success: true,
+
+    data: {
+
+      saleGL: [],
+
+      taxGL: [],
+
+      stock: [],
+
+      hsn: [],
+
+      debtors: []
+
+    }
+
+  });
+
+}
+
+// =========================
+// GET GST DETAILS
+// =========================
+
+const {
+
+  data: gstRows,
+
+  error: gstError
+
+} = await supabase
+
+  .from("invoice_items")
+
+  .select(`
+    gst_percent,
+    cgst,
+    sgst,
+    igst
+  `)
+
+  .in(
+
+    "invoice_id",
+
+    invoice_ids
+
+);
+
+      if (gstError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            gstError.message
+
+        });
+
+      }
+
+      
+
+ // =========================
+// BUILD SALE GL
+// =========================
+
+const saleMap = new Map();
+
+(gstRows || []).forEach((row) => {
+
+  const gstRate = Number(row.gst_percent);
+
+  if (!gstRate) return;
+
+  // =========================
+  // INTER STATE (IGST)
+  // =========================
+
+  if (Number(row.igst) > 0) {
+
+    saleMap.set(
+      `SALE|INTER|${gstRate}`,
+      {
+        mapping_type: "SALE_GL",
+        billey_key: `SALE|INTER|${gstRate}`,
+        billey_name: `IGST Sale ${gstRate}%`
+      }
+    );
+
+  }
+
+  // =========================
+  // INTRA STATE (CGST + SGST)
+  // =========================
+
+  else if (
+    Number(row.cgst) > 0 ||
+    Number(row.sgst) > 0
+  ) {
+
+    saleMap.set(
+      `SALE|INTRA|${gstRate}`,
+      {
+        mapping_type: "SALE_GL",
+        billey_key: `SALE|INTRA|${gstRate}`,
+        billey_name: `Local Sale ${gstRate}%`
+      }
+    );
+
+  }
+
+});
+
+const saleGL = [...saleMap.values()];
+
+console.log(
+  "SALE GL",
+  saleGL
+);
+      
+
+
+// =========================
+// BUILD TAX GL
+// =========================
+
+const taxMap = new Map();
+
+(gstRows || []).forEach((row) => {
+
+  const gstRate = Number(row.gst_percent);
+
+  if (!gstRate) return;
+
+  const halfGST = Number((gstRate / 2).toFixed(2));
+
+  if (Number(row.cgst) > 0) {
+    taxMap.set(
+      `TAX|CGST|${halfGST}`,
+      {
+        mapping_type: "TAX_GL",
+        billey_key: `TAX|CGST|${halfGST}`,
+        billey_name: `CGST ${halfGST}%`
+      }
+    );
+  }
+
+  if (Number(row.sgst) > 0) {
+    taxMap.set(
+      `TAX|SGST|${halfGST}`,
+      {
+        mapping_type: "TAX_GL",
+        billey_key: `TAX|SGST|${halfGST}`,
+        billey_name: `SGST ${halfGST}%`
+      }
+    );
+  }
+
+  if (Number(row.igst) > 0) {
+    taxMap.set(
+      `TAX|IGST|${gstRate}`,
+      {
+        mapping_type: "TAX_GL",
+        billey_key: `TAX|IGST|${gstRate}`,
+        billey_name: `IGST ${gstRate}%`
+      }
+    );
+  }
+
+});
+
+const taxGL = [...taxMap.values()];
+
+console.log("TAX GL", taxGL);
+
+// =========================
+// GET UNIQUE HSN
+// =========================
+
+const {
+  data: stockRows,
+  error: stockError
+} = await supabase
+  .from("invoice_items")
+  .select(`
+    item_name,
+    hsn,
+    unit,
+    gst_percent
+`)
+  .in("invoice_id", invoice_ids);
+
+if (stockError) {
+
+  return res.json({
+
+    success: false,
+
+    error: stockError.message
+
+  });
+
+}
+
+      const hsnList = [
+
+  ...new Set(
+
+    (stockRows || [])
+
+      .map((r) => String(r.hsn || "").trim())
+
+      .filter(Boolean)
+
+  )
+
+].sort();
+
+      console.log(
+        "HSN",
+        hsnList
+      );
+
+// =========================
+// GET UNIQUE UNITS
+// =========================
+
+const {
+
+  data: unitRows,
+
+  error: unitError
+
+} = await supabase
+
+  .from("invoice_items")
+
+  .select("unit")
+
+  .in(
+
+    "invoice_id",
+
+    invoice_ids
+
+  );
+
+if (unitError) {
+
+  return res.json({
+
+    success: false,
+
+    error: unitError.message
+
+  });
+
+}
+
+const unitList = [
+
+  ...new Set(
+
+    (unitRows || [])
+
+      .map((r) =>
+
+        String(r.unit || "").trim()
+
+      )
+
+      .filter(Boolean)
+
+  )
+
+].sort();
+
+console.log(
+
+  "UNITS",
+
+  unitList
+
+);
+
+// =========================
+// BUILD UNIT MAPPING
+// =========================
+
+const units = unitList.map((unit) => ({
+
+  mapping_type: "UNIT",
+
+  billey_key: unit,
+
+  billey_name: unit
+
+}));
+
+console.log(
+
+  "UNIT MAPPING",
+
+  units
+
+);
+
+
+// =========================
+// BUILD STOCK MAPPING
+// =========================
+
+const stockMap = new Map();
+
+(stockRows || []).forEach((row) => {
+
+  const itemName =
+    String(row.item_name || "").trim();
+
+  const hsn =
+    String(row.hsn || "").trim();
+
+  const unit =
+    String(row.unit || "").trim();
+
+  const gstRate =
+    Number(row.gst_percent || 0);
+
+  let stockKey = "";
+  let stockName = "";
+
+  // -------------------------
+  // HSN BASED
+  // -------------------------
+
+  if (stockMappingMethod === "HSN_CODE") {
+
+    if (!hsn || !unit) return;
+
+    stockKey = `STOCK|${hsn}|${unit}`;
+    stockName = `${hsn}-${unit}`;
+
+  }
+
+  // -------------------------
+  // STOCK ITEM BASED
+  // -------------------------
+
+  else if (stockMappingMethod === "STOCK_ITEM") {
+
+    if (!itemName) return;
+
+    stockKey = `STOCK|${itemName}`;
+    stockName = itemName;
+
+  }
+
+  if (!stockMap.has(stockKey)) {
+
+    stockMap.set(stockKey, {
+
+      mapping_type: "STOCK",
+
+      billey_key: stockKey,
+
+      billey_name: stockName,
+
+      hsn,
+
+      unit,
+
+      gstRate
+
+    });
+
+  }
+
+});
+
+const stock = [...stockMap.values()];
+
+console.log(
+  "STOCK MAPPING",
+  stock
+);
+      // =========================
+      // BUILD HSN MAPPING
+      // =========================
+
+      const hsn = hsnList.map((hsnCode) => ({
+
+        mapping_type: "HSN",
+
+        billey_key: hsnCode,
+
+        billey_name: hsnCode
+
+      }));
+
+      console.log(
+        "HSN MAPPING",
+        hsn
+      );
+
+// =========================
+// GET DEBTORS
+// =========================
+
+const {
+
+  data: debtorRows,
+
+  error: debtorError
+
+} = await supabase
+
+  .from("invoices")
+
+  .select(`
+    client_code,
+    customer_name
+  `)
+
+  .in(
+    "invoice_id",
+    invoice_ids
+  );
+
+      if (debtorError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            debtorError.message
+
+        });
+
+      }
+
+      console.log(
+        "DEBTORS",
+        debtorRows
+      );
+
+      // =========================
+      // BUILD DEBTOR MAPPING
+      // =========================
+
+     const debtorMap = new Map();
+
+(debtorRows || []).forEach((row) => {
+
+  if (!debtorMap.has(row.client_code)) {
+
+    debtorMap.set(
+
+      row.client_code,
+
+      {
+
+        mapping_type: "DEBTOR",
+
+        billey_key: row.client_code,
+
+        billey_name: row.customer_name
+
+      }
+
+    );
+
+  }
+
+});
+
+const debtors = [
+
+  ...debtorMap.values()
+
+];
+
+      console.log(
+        "DEBTOR MAPPING",
+        debtors
+      );
+
+
+      // =========================
+      // GET EXISTING MAPPINGS
+      // =========================
+
+const {
+
+  data: existingMappings,
+
+  error: mappingError
+
+} = await supabase
+
+  .from("tally_mapping")
+
+  .select("*")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "tally_owner",
+    tally_owner
+  );
+      if (mappingError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            mappingError.message
+
+        });
+
+      }
+
+      console.log(
+        "EXISTING MAPPINGS",
+        existingMappings
+      );
+
+// =========================
+// APPLY SAVED MAPPING
+// =========================
+
+function applyMapping(rows) {
+
+  return rows.map((row) => {
+
+    const mapping =
+
+      existingMappings.find(
+
+        (m) =>
+
+          m.mapping_type ===
+            row.mapping_type &&
+
+          m.billey_key ===
+            row.billey_key
+
+      );
+
+    return {
+
+  ...row,
+
+  tally_name:
+    mapping?.tally_name || "",
+
+  uqc_code:
+    mapping?.uqc_code || ""
+
+};
+
+  });
+
+}
+
+const mappedSaleGL =
+  applyMapping(saleGL);
+
+const mappedTaxGL =
+  applyMapping(taxGL);
+
+const mappedUnits =
+  applyMapping(units);
+
+const mappedStock =
+  applyMapping(stock);
+
+const mappedHSN =
+  applyMapping(hsn);
+
+const mappedDebtors =
+  applyMapping(debtors);
+
+// =========================
+// FINAL RESPONSE
+// =========================
+
+     return res.json({
+
+  success: true,
+
+ data: {
+
+  salesGL: mappedSaleGL,
+
+  taxGL: mappedTaxGL,
+
+  units: mappedUnits,
+
+  stock: mappedStock,
+
+  hsn: mappedHSN,
+
+  debtors: mappedDebtors
+
+}
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
+// SAVE TALLY MAPPING
+// =========================
+
+app.post(
+
+  "/saveTallyMapping",
+
+  async (req, res) => {
+
+    try {
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+     const {
+  company_code,
+  tally_owner,
+  mappings
+} = req.body;
+
+console.log(
+  "SAVE TALLY MAPPINGS",
+  JSON.stringify(mappings, null, 2)
+);
+
+     if (!company_code || !tally_owner) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      "company_code and tally_owner required"
+
+  });
+
+}
+
+      if (
+
+        !Array.isArray(mappings)
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error: "mappings missing"
+
+        });
+
+      }
+
+
+    // =========================
+// SAVE / UPDATE MAPPINGS
+// =========================
+
+const {
+
+  error: saveError
+
+} = await supabase
+
+  .from("tally_mapping")
+
+  .upsert(
+
+   mappings.map((row) => ({
+
+  company_code,
+
+  tally_owner,
+
+  mapping_type:
+    row.mapping_type,
+
+  billey_key:
+    row.billey_key,
+
+  billey_name:
+    row.billey_name,
+
+  tally_key:
+    row.tally_key || null,
+
+  tally_name:
+    row.tally_name,
+
+  uqc_code:
+    row.uqc_code || null,
+
+  updated_at:
+    new Date()
+
+})),
+
+    {
+
+      onConflict:
+  "company_code,tally_owner,mapping_type,billey_key"
+
+    }
+
+  );
+
+if (saveError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+      saveError.message
+
+  });
+
+}
+
+return res.json({
+
+  success: true
+
+});
+
+   }   catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error: err.message
+
+      });
+
+    }
+
+  }
+  
+
+);
+
+// =========================
+// GET TALLY MAPPING DATA
+// =========================
+
+app.get(
+  "/getTallyMappingData",
+  async (req, res) => {
+
+    try {
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+       // =========================
+      // GET TALLY COMPANY
+      // =========================
+
+      const {
+
+        data: company,
+
+        error: companyError
+
+      } = await supabase
+
+        .from("company")
+
+      .select(`
+  company_code,
+  ca_tally_company,
+  client_tally_company,
+  auto_create_stock,
+  client_auto_create_stock
+`)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .single();
+
+        console.log("COMPANY", company);
+console.log("COMPANY ERROR", companyError);
+
+      if (companyError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            companyError.message
+
+        });
+
+      }
+
+      console.log(
+        "COMPANY",
+        company
+      );
+
+      const is_ca =
+
+  String(
+
+    req.query.is_ca || "false"
+
+  ) === "true";
+
+const tallyCompany =
+
+  is_ca
+
+    ? company.ca_tally_company
+
+    : company.client_tally_company;
+
+
+  const socket = registry.get(company_code);
+
+  console.log("SOCKET FOUND :", !!socket);
+
+    console.log(
+
+  "IS CA:",
+
+  is_ca
+
+);
+
+console.log(
+
+  "TALLY COMPANY:",
+
+  tallyCompany
+
+);
+
+      // =========================
+      // CHECK TALLY COMPANY
+      // =========================
+
+   if (
+
+  !tallyCompany ||
+
+  !tallyCompany.trim()
+
+) {
+
+  return res.json({
+
+    success: false,
+
+    error: "Tally company not configured"
+
+  });
+
+}
+
+if (!socket) {
+
+  return res.json({
+    success: false,
+    error: "Connector offline"
+  });
+
+}
+
+const result = await sendToConnector(
+  socket,
+  "getTallyMappingData",
+  {
+    company: tallyCompany
+  }
+);
+
+console.log("CONNECTOR RESULT:", result);
+      
+
+return res.json(result);
+   //   return res.json({
+
+  //      success: true,
+
+  //      data: {
+
+   //       salesGL: [],
+
+   //       taxGL: [],
+
+    //      stock: [],
+
+   //       hsn: [],
+
+   //       debtors: []
+
+//}
+
+    //  });
+
+    }
+
+    catch (err) {
+
+  console.error(
+    "GET TALLY MAPPING ERROR"
+  );
+
+  console.error(err);
+
+  return res.json({
+
+    success: false,
+
+    error:
+      err.stack || err.message
+
+  });
+
+}
+
+  }
+
+);
+
+
+// =========================
+// GET TALLY SETTINGS
+// =========================
+
+app.get(
+  "/getTallySettings",
+
+  async (req, res) => {
+
+    console.log(
+      "GET TALLY SETTINGS HIT",
+      req.query
+    );
+
+    try {
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      const company_code =
+
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      const is_ca =
+  String(
+    req.query.is_ca || ""
+  ).trim().toLowerCase() === "true";
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // GET COMPANY
+      // =========================
+
+      const {
+
+        data: company,
+
+        error: companyError
+
+      } = await supabase
+
+        .from("company")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .single();
+
+      if (companyError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            companyError.message
+
+        });
+
+      }
+
+      console.log(
+        "COMPANY",
+        company
+      );
+
+      // =========================
+      // BUILD RESPONSE
+      // =========================
+
+    const settings =
+
+!is_ca
+
+? {
+
+    tally_company:
+      company.client_tally_company,
+
+    tally_mapping_completed:
+      company.client_tally_mapping_completed,
+
+    stock_mapping_method:
+      company.client_stock_mapping_method,
+
+    sales_ledger_strategy:
+      company.client_sales_ledger_strategy,
+
+    auto_create_debtor:
+      company.client_auto_create_debtor,
+
+    auto_create_stock:
+      company.client_auto_create_stock,
+
+    auto_create_hsn:
+      company.client_auto_create_hsn,
+
+    auto_create_sales_ledger:
+      company.client_auto_create_sales_ledger,
+
+    auto_create_tax_ledger:
+      company.client_auto_create_tax_ledger,
+      
+    auto_create_unit:
+  company.client_auto_create_unit,
+
+  voucher_number_mode:
+  company.client_voucher_number_mode,
+
+voucher_prefix:
+  company.client_voucher_prefix,
+
+voucher_digits:
+  company.client_voucher_digits,
+
+  round_off_ledger:
+  company.client_round_off_ledger,
+
+  }
+
+: {
+
+    tally_company:
+      company.ca_tally_company,
+
+    tally_mapping_completed:
+      company.tally_mapping_completed,
+
+    stock_mapping_method:
+      company.stock_mapping_method,
+
+    sales_ledger_strategy:
+      company.sales_ledger_strategy,
+
+    auto_create_debtor:
+      company.auto_create_debtor,
+
+    auto_create_stock:
+      company.auto_create_stock,
+
+    auto_create_hsn:
+      company.auto_create_hsn,
+
+    auto_create_sales_ledger:
+      company.auto_create_sales_ledger,
+
+    auto_create_tax_ledger:
+      company.auto_create_tax_ledger,
+
+    auto_create_unit:
+      company.auto_create_unit,
+
+      voucher_number_mode:
+  company.voucher_number_mode,
+
+voucher_prefix:
+  company.voucher_prefix,
+
+voucher_digits:
+  company.voucher_digits,
+      
+round_off_ledger:
+  company.round_off_ledger,   
+
+  };
+
+      console.log(
+        "TALLY SETTINGS",
+        settings
+      );
+
+      return res.json({
+
+        success: true,
+
+        data: settings
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
+// SAVE TALLY SETTINGS
+// =========================
+app.post(
+  "/saveTallySettings",
+
+  async (req, res) => {
+
+    try {
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      const {
+
+        company_code,
+
+        stock_mapping_method,
+
+        sales_ledger_strategy,
+
+        auto_create_debtor,
+
+        auto_create_stock,
+
+        auto_create_sales_ledger,
+
+        auto_create_tax_ledger,
+
+        auto_create_unit,
+
+        voucher_number_mode,
+
+        voucher_prefix,
+
+        voucher_digits,
+
+        round_off_ledger,
+
+      } = req.body || {};
+
+      const is_ca =
+        String(
+          req.body.is_ca || ""
+        )
+          .trim()
+          .toLowerCase() === "true";
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+      // =========================
+      // BUILD UPDATE OBJECT
+      // =========================
+
+      const updateObj = {
+
+        updatedat: new Date()
+
+      };
+
+      if (!is_ca) {
+
+        updateObj.client_stock_mapping_method =
+          stock_mapping_method;
+
+        updateObj.client_sales_ledger_strategy =
+          sales_ledger_strategy;
+
+        updateObj.client_auto_create_debtor =
+          auto_create_debtor;
+
+        updateObj.client_auto_create_stock =
+          auto_create_stock;
+
+        updateObj.client_auto_create_sales_ledger =
+          auto_create_sales_ledger;
+
+        updateObj.client_auto_create_tax_ledger =
+          auto_create_tax_ledger;
+
+        updateObj.client_auto_create_unit =
+          auto_create_unit;  
+
+        updateObj.client_tally_mapping_completed =
+          true;
+
+          updateObj.client_voucher_number_mode =
+            voucher_number_mode;
+
+          updateObj.client_voucher_prefix =
+            voucher_prefix;
+
+          updateObj.client_voucher_digits =
+            voucher_digits;
+
+            updateObj.client_round_off_ledger =
+  round_off_ledger;
+
+      } else {
+
+        updateObj.stock_mapping_method =
+          stock_mapping_method;
+
+        updateObj.sales_ledger_strategy =
+          sales_ledger_strategy;
+
+        updateObj.auto_create_debtor =
+          auto_create_debtor;
+
+        updateObj.auto_create_stock =
+          auto_create_stock;
+
+        updateObj.auto_create_sales_ledger =
+          auto_create_sales_ledger;
+
+        updateObj.auto_create_tax_ledger =
+          auto_create_tax_ledger;
+
+        updateObj.auto_create_unit =
+            auto_create_unit;  
+
+        updateObj.tally_mapping_completed =
+          true;
+
+          updateObj.voucher_number_mode =
+            voucher_number_mode;
+
+          updateObj.voucher_prefix =
+            voucher_prefix;
+
+          updateObj.voucher_digits =
+            voucher_digits;
+
+          updateObj.round_off_ledger =
+            round_off_ledger;
+
+      }
+
+      console.log("IS CA:", is_ca);
+      console.log("COMPANY:", company_code);
+      console.log("UPDATE OBJECT:", updateObj);
+
+      // =========================
+      // UPDATE COMPANY
+      // =========================
+
+      const {
+
+        error: updateError
+
+      } = await supabase
+
+        .from("company")
+
+        .update(updateObj)
+
+        .eq(
+
+          "company_code",
+
+          company_code
+
+        );
+
+      if (updateError) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            updateError.message
+
+        });
+
+      }
+
+      console.log(
+        "TALLY SETTINGS SAVED"
+      );
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Tally settings saved successfully."
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.error(err);
+
+      return res.json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+app.post(
+  "/createStocksInTally",
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company,
+
+        stocks
+
+      } = req.body;
+
+      const company_code =
+         String(req.body.company_code || "").trim();
+
+      const is_ca =
+  Boolean(req.body.is_ca);
+
+const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
+
+const {
+  data: companyData,
+  error: companyError
+} = await supabase
+
+  .from("company")
+
+  .select(
+    `company_code, ${connectorField}`
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .single();
+
+if (companyError) {
+
+  return res.json({
+    success: false,
+    error: companyError.message
+  });
+
+}
+
+const connector_id =
+  companyData?.[connectorField];
+
+console.log(
+  "STOCK CONNECTOR ID :",
+  connector_id
+);
+
+if (!connector_id) {
+
+  return res.json({
+    success: false,
+    error: "Connector not paired"
+  });
+
+}
+
+const socket =
+  registry.get(connector_id);
+
+console.log(
+  "SOCKET FOUND :",
+  !!socket
+);
+
+if (!socket) {
+
+  return res.json({
+    success: false,
+    error: "Connector offline"
+  });
+
+}
+
+const results = [];
+
+console.log("CREATE STOCK API BODY");
+
+console.dir(req.body, { depth: null });
+
+if (!company || !Array.isArray(stocks)) {
+
+return res.json({
+
+success: false,
+
+error: "Invalid request",
+
+});
+
+}
+
+for (const stock of stocks) {
+
+console.log("CREATING STOCK", {
+
+  company,
+
+  stockName: stock.stockName,
+
+  hsn: stock.hsn,
+
+  unit: stock.unit,
+
+  gstRate: stock.gstRate,
+
+});
+
+
+const xml =
+  await createStockItem({
+
+    company,
+
+    stockName:
+      stock.stockName,
+
+    hsn:
+      stock.hsn,
+
+    unit:
+      stock.unit,
+
+    gstRate:
+      stock.gstRate,
+
+  });
+
+console.log("XML TYPE :", typeof xml);
+console.log("XML START :", String(xml).substring(0, 80));
+
+const result =
+  await sendToConnector(
+
+    socket,
+
+    "createStocksInTally",
+
+    {
+      xml
+    }
+
+  );
+
+          
+
+console.log(
+  "createStockItem RESULT",
+  result
+);
+
+
+        results.push(result);
+
+      }
+
+      res.json({
+
+        success: true,
+
+        results,
+
+      });
+
+    } catch (err) {
+
+      console.error(err);
+
+      res.status(500).json({
+
+        success: false,
+
+        error: err.message,
+
+      });
+
+    }
+
+  }
+);
+
+// =========================
+// GET GST UQC MASTER
+// =========================
+
+app.get(
+  "/getGSTUQC",
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        data,
+
+        error
+
+      } = await supabase
+
+        .from("gst_uqc_master")
+
+        .select(`
+          uqc_code,
+          uqc_name,
+          tally_display
+        `)
+
+        .eq(
+          "is_active",
+          true
+        )
+
+        .order(
+          "display_order",
+          {
+            ascending: true
+          }
+        );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error: error.message
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        data
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error: err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+// =========================
+// CREATE SALES LEDGERS IN TALLY
+// =========================
+
+app.post(
+  "/createSalesLedgersInTally",
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company,
+
+        ledgers
+
+      } = req.body;
+
+
+    const company_code =
+  String(req.body.company_code || "").trim();
+
+   const is_ca =
+  Boolean(req.body.is_ca);
+
+const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
+
+const {
+  data: companyData,
+  error: companyError
+} = await supabase
+
+  .from("company")
+
+  .select(
+    `company_code, ${connectorField}`
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .single();
+
+if (companyError) {
+
+  return res.json({
+    success: false,
+    error: companyError.message
+  });
+
+}
+
+const connector_id =
+  companyData?.[connectorField];
+
+console.log(
+  "SALES LEDGER CONNECTOR ID :",
+  connector_id
+);
+
+if (!connector_id) {
+
+  return res.json({
+    success: false,
+    error: "Connector not paired"
+  });
+
+}
+
+const socket =
+  registry.get(connector_id);
+
+console.log(
+  "SOCKET FOUND :",
+  !!socket
+);
+
+if (!socket) {
+
+  return res.json({
+    success: false,
+    error: "Connector offline"
+  });
+
+}
+
+      if (
+        !company ||
+        !Array.isArray(ledgers)
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "Invalid request"
+
+        });
+
+      }
+
+      const results = [];
+
+      for (const ledger of ledgers) {
+
+        try {
+        console.log("LEDGER FROM FRONTEND", ledger);
+
+        console.log(
+          "LEDGER NAME:",
+          ledger.ledgerName
+        );
+
+          const xml =
+            await createSalesLedger({
+
+              company,
+
+              ledgerName:
+                ledger.ledgerName,
+
+            });
+
+          const result =
+            await sendToConnector(
+
+              socket,
+
+              "createSalesLedgersInTally",
+
+              {
+                xml
+              }
+
+            );
+
+              console.log(
+              "createSalesLedger RESULT",
+              result
+            );
+
+                    results.push({
+
+              ledger:
+                ledger.ledgerName,
+
+              success: true,
+
+              result
+
+            });
+
+        }
+
+        catch (err) {
+
+         results.push({
+
+          ledger:
+            ledger.ledgerName,
+
+          success: false,
+
+          error:
+            err.message
+
+        });
+
+        }
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        results
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.error(err);
+
+      return res.status(500).json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+// =========================
+// CREATE TAX LEDGERS IN TALLY
+// =========================
+
+app.post(
+  "/createTaxLedgersInTally",
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company,
+
+        ledgers
+
+      } = req.body;
+
+      const company_code =
+        String(req.body.company_code || "").trim();
+
+     const is_ca =
+  Boolean(req.body.is_ca);
+
+const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
+
+const {
+  data: companyData,
+  error: companyError
+} = await supabase
+
+  .from("company")
+
+  .select(
+    `company_code, ${connectorField}`
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .single();
+
+if (companyError) {
+
+  return res.json({
+    success: false,
+    error: companyError.message
+  });
+
+}
+
+const connector_id =
+  companyData?.[connectorField];
+
+console.log(
+  "TAX LEDGER CONNECTOR ID :",
+  connector_id
+);
+
+if (!connector_id) {
+
+  return res.json({
+    success: false,
+    error: "Connector not paired"
+  });
+
+}
+
+const socket =
+  registry.get(connector_id);
+
+console.log(
+  "SOCKET FOUND :",
+  !!socket
+);
+
+if (!socket) {
+
+  return res.json({
+    success: false,
+    error: "Connector offline"
+  });
+
+}
+
+      if (
+        !company ||
+        !Array.isArray(ledgers)
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error: "Invalid request"
+
+        });
+
+      }
+
+      const results = [];
+
+      for (const ledger of ledgers) {
+
+        try {
+
+          console.log(
+            "LEDGER FROM FRONTEND",
+            ledger
+          );
+
+          console.log(
+            "LEDGER NAME:",
+            ledger.ledgerName
+          );
+
+          const xml =
+            await createTaxLedger({
+
+              company,
+
+              ledgerName:
+                ledger.ledgerName,
+
+            });
+
+          const result =
+            await sendToConnector(
+
+              socket,
+
+              "createTaxLedgersInTally",
+
+              {
+                xml
+              }
+
+            );
+
+          console.log(
+            "createTaxLedger RESULT",
+            result
+          );
+
+          results.push({
+
+            ledger:
+              ledger.ledgerName,
+
+            success: true,
+
+            result
+
+          });
+
+        }
+
+        catch (err) {
+
+          results.push({
+
+            ledger:
+              ledger.ledgerName,
+
+            success: false,
+
+            error:
+              err.message
+
+          });
+
+        }
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        results
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.error(err);
+
+      return res.status(500).json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
+// CREATE DEBTORS IN TALLY
+// =========================
+
+app.post(
+  "/createDebtorsInTally",
+  async (req, res) => {
+
+    try {
+
+      const {
+        company,
+        ledgers
+      } = req.body;
+
+      const company_code =
+        String(req.body.company_code || "").trim();
+
+      const is_ca =
+  Boolean(req.body.is_ca);
+
+const connectorField =
+  is_ca
+    ? "ca_connector_id"
+    : "client_connector_id";
+
+const {
+  data: connectorCompany,
+  error: connectorError
+} = await supabase
+
+  .from("company")
+
+  .select(
+    `company_code, ${connectorField}`
+  )
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .single();
+
+if (connectorError) {
+
+  return res.json({
+    success: false,
+    error: connectorError.message
+  });
+
+}
+
+const connector_id =
+  connectorCompany?.[connectorField];
+
+console.log(
+  "DEBTOR CONNECTOR ID :",
+  connector_id
+);
+
+if (!connector_id) {
+
+  return res.json({
+    success: false,
+    error: "Connector not paired"
+  });
+
+}
+
+const socket =
+  registry.get(connector_id);
+
+console.log(
+  "SOCKET FOUND :",
+  !!socket
+);
+
+if (!socket) {
+
+  return res.json({
+    success: false,
+    error: "Connector offline"
+  });
+
+}
+
+      if (
+        !company ||
+        !Array.isArray(ledgers)
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error: "Invalid request"
+
+        });
+
+      }
+
+      const {
+  data: companyInfo,
+  error: companyError
+} = await supabase
+  .from("company")
+  .select(`
+    ca_tally_company,
+    country
+  `)
+  .eq("company_code", company_code)
+  .single();
+
+if (companyError || !companyInfo) {
+
+  return res.json({
+    success: false,
+    error: "Company not found"
+  });
+
+}
+
+      const results = [];
+
+      for (const ledger of ledgers) {
+
+        try {
+
+          console.log(
+            "DEBTOR FROM FRONTEND",
+            ledger
+          );
+
+          console.log(
+            "DEBTOR NAME:",
+            ledger.ledgerName
+          );
+
+
+          const {
+  data: client,
+  error: clientError
+} = await supabase
+  .from("client")
+  .select(`
+    company_code,
+    client_code,
+    client_name,
+    gstin,
+    billing_address,
+    bill_state,
+    bill_pincode,
+    mobile,
+    email,
+    contact_person,
+    credit_period,
+    opening_balance,
+    gst_registered
+  `)
+  .eq("company_code", company_code)
+  .eq("client_code", ledger.billey_key)
+  .single();
+
+if (clientError || !client) {
+  throw new Error("Client not found");
+}
+
+       const xml =
+  await createDebtorLedger({
+
+    company:
+      company,
+
+    name:
+      client.client_name,
+
+    gstin:
+      client.gstin,
+
+    address:
+      client.billing_address,
+
+    state:
+      client.bill_state,
+
+    pincode:
+      client.bill_pincode,
+
+    mobile:
+      client.mobile,
+
+    email:
+      client.email,
+
+    contactPerson:
+      client.contact_person,
+
+    creditPeriod:
+      client.credit_period,
+
+    openingBalance:
+      client.opening_balance,
+
+    gstRegistered:
+      client.gst_registered,
+
+    country:
+      companyInfo.country
+
+  });
+          const result =
+            await sendToConnector(
+
+              socket,
+
+              "createDebtorsInTally",
+
+              {
+                xml
+              }
+
+            );
+
+          console.log(
+            "createDebtor RESULT",
+            result
+          );
+
+          if (
+  result?.success === false
+) {
+
+  throw new Error(
+
+    result.error ||
+
+    "Debtor creation failed"
+
+  );
+
+}
+
+      
+          results.push({
+    ledger: ledger.ledgerName,
+    success: result.success,
+    result
+});
+
+        }
+
+        catch (err) {
+
+          results.push({
+
+            ledger:
+              ledger.ledgerName,
+
+            success: false,
+
+            error:
+              err.message
+
+          });
+
+        }
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        results
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.error(err);
+
+      return res.status(500).json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+// =========================
+// GET BATCH INVOICE RANGE
+// =========================
+
+app.post(
+
+  "/getBatchInvoiceRange",
+
+  async (req, res) => {
+
+    try {
+
+     const {
+
+  company_code,
+
+  posting_date,
+
+  tally_owner
+
+} = req.body;
+
+    if (
+
+  !company_code ||
+
+  !posting_date ||
+
+  !tally_owner
+
+) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+  "company_code, posting_date and tally_owner required"
+        });
+
+      }
+
+      const isCaOwner =
+
+  String(tally_owner)
+
+    .trim()
+
+    .toUpperCase() === "CA";
+
+
+const batchIdColumn =
+
+  isCaOwner
+
+    ? "batch_id"
+
+    : "client_batch_id";
+
+      // =========================
+// CALCULATE FINANCIAL YEAR
+// =========================
+
+const postingDateObj =
+  new Date(
+    `${posting_date}T00:00:00`
+  );
+
+const postingYear =
+  postingDateObj.getFullYear();
+
+const postingMonth =
+  postingDateObj.getMonth() + 1;
+
+const financialYearStartYear =
+
+  postingMonth >= 4
+
+    ? postingYear
+
+    : postingYear - 1;
+
+const financialYearStart =
+
+  `${financialYearStartYear}-04-01`;
+
+const financialYear =
+
+  `${financialYearStartYear}-${String(
+    financialYearStartYear + 1
+  ).slice(-2)}`;
+
+console.log(
+  "GET BATCH RANGE FINANCIAL YEAR:",
+  {
+    posting_date,
+    financialYearStart,
+    financialYear
+  }
+);
+
+      const {
+
+  data: invoices,
+
+  error: invoiceError
+
+} = await supabase
+
+  .from("invoices")
+
+  .select(`
+
+  id,
+
+  invoice_number,
+
+  invoice_date,
+
+  customer_name,
+
+  grand_total,
+
+  status
+
+`)
+
+  .eq(
+
+    "company_code",
+
+    company_code
+
+  )
+
+  .eq(
+
+    "doc_type",
+
+    "invoice"
+
+  )
+
+.is(
+
+  batchIdColumn,
+
+  null
+
+)
+
+.gte(
+
+  "invoice_date",
+
+  financialYearStart
+
+)
+
+.lte(
+
+  "invoice_date",
+
+  posting_date
+
+)
+
+  .order(
+
+    "invoice_date",
+
+    {
+
+      ascending: true
+
+    }
+
+  )
+
+  .order(
+
+    "id",
+
+    {
+
+      ascending: true
+
+    }
+
+  );
+
+if (invoiceError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      invoiceError.message
+
+  });
+
+}
+
+if (!invoices || invoices.length === 0) {
+
+  return res.json({
+
+    success: true,
+
+    invoiceFrom: null,
+
+    invoiceTo: null,
+
+    totalInvoices: 0,
+
+    invoices: []
+
+  });
+
+
+}
+
+const sortedInvoices =
+
+  [...invoices].sort(
+
+    (a, b) =>
+
+      getInvoiceSequence(
+        a.invoice_number
+      ) -
+
+      getInvoiceSequence(
+        b.invoice_number
+      )
+
+  );
+
+const invoiceFrom =
+
+  invoices.reduce(
+
+    (minInvoice, currentInvoice) =>
+
+      getInvoiceSequence(
+        currentInvoice.invoice_number
+      ) <
+      getInvoiceSequence(
+        minInvoice.invoice_number
+      )
+
+        ? currentInvoice
+
+        : minInvoice
+
+  );
+
+
+const invoiceTo =
+
+  invoices.reduce(
+
+    (maxInvoice, currentInvoice) =>
+
+      getInvoiceSequence(
+        currentInvoice.invoice_number
+      ) >
+      getInvoiceSequence(
+        maxInvoice.invoice_number
+      )
+
+        ? currentInvoice
+
+        : maxInvoice
+
+  );
+
+return res.json({
+
+  success: true,
+
+  invoiceFrom: {
+
+  id: invoiceFrom.id,
+
+  invoice_number:
+    invoiceFrom.invoice_number,
+
+  invoice_date:
+    invoiceFrom.invoice_date
+
+},
+
+invoiceTo: {
+
+  id: invoiceTo.id,
+
+  invoice_number:
+    invoiceTo.invoice_number,
+
+  invoice_date:
+    invoiceTo.invoice_date
+
+},
+
+totalInvoices:
+
+  sortedInvoices.length,
+
+invoices:
+
+  sortedInvoices
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+function getInvoiceSequence(
+
+  invoiceNumber
+
+) {
+
+  return Number(
+
+    invoiceNumber
+
+      .split("/")
+
+      .pop()
+
+  );
+
+}
+
+// =========================
+// CREATE SALES BATCH
+// =========================
+
+app.post(
+
+  "/createSalesBatch",
+
+  async (req, res) => {
+
+    try {
+
+      const {
+
+        company_code,
+
+        tally_owner,
+
+        posting_date
+
+      } = req.body;
+
+      if (
+
+        !company_code ||
+
+        !tally_owner ||
+
+        !posting_date
+
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+
+            "company_code, tally_owner and posting_date required"
+
+        });
+
+      }
+
+
+      const isCaOwner =
+
+  String(tally_owner)
+
+    .toUpperCase() === "CA";
+
+
+const batchIdColumn =
+
+  isCaOwner
+
+    ? "batch_id"
+
+    : "client_batch_id";
+
+
+
+      const {
+
+  data: openBatch,
+
+  error: batchError
+
+} = await supabase
+
+  .from("vw_batches_units")
+
+  .select(`
+
+    batch_id,
+
+    step_name,
+
+    status
+
+  `)
+
+  .eq(
+
+    "company_code",
+
+    company_code
+
+  )
+
+  .eq(
+
+    "tally_owner",
+
+    tally_owner
+
+  )
+
+  .neq(
+
+    "status",
+
+    "COMPLETED"
+
+  )
+
+  .order(
+
+    "sequence_no",
+
+    {
+
+      ascending: true
+
+    }
+
+  );
+
+
+  console.log(
+  "OPEN BATCH CHECK:",
+  {
+    company_code,
+    tally_owner,
+    openBatch,
+    batchError
+  }
+);
+
+
+  if (batchError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      batchError.message
+
+  });
+
+}
+
+if (
+
+  openBatch &&
+
+  openBatch.length > 0
+
+) {
+
+  return res.json({
+
+    success: false,
+
+    resume: true,
+
+    batch_id:
+
+      openBatch[0].batch_id,
+
+    message:
+
+      "An unfinished batch already exists. Please resume the current batch."
+
+  });
+
+}
+
+// =========================
+// CALCULATE FINANCIAL YEAR
+// =========================
+
+const postingDateObj =
+  new Date(
+    `${posting_date}T00:00:00`
+  );
+
+
+const postingYear =
+  postingDateObj.getFullYear();
+
+
+const postingMonth =
+  postingDateObj.getMonth() + 1;
+
+
+const financialYearStartYear =
+
+  postingMonth >= 4
+
+    ? postingYear
+
+    : postingYear - 1;
+
+
+const financialYearStart =
+
+  `${financialYearStartYear}-04-01`;
+
+
+const financialYear =
+
+  `${financialYearStartYear}-${String(
+    financialYearStartYear + 1
+  ).slice(-2)}`;
+
+console.log(
+  "🔥🔥🔥 NEW CREATE SALES BATCH CODE RUNNING 🔥🔥🔥"
+);
+
+console.log(
+  "BATCH FINANCIAL YEAR:",
+  {
+    posting_date,
+    financialYearStart,
+    financialYear
+  }
+);
+
+const {
+
+  data: invoices,
+
+  error: invoiceError
+
+} = await supabase
+
+  .from("invoices")
+
+  .select(`
+
+    id,
+
+    invoice_number,
+
+    status
+
+  `)
+
+  .eq(
+
+    "company_code",
+
+    company_code
+
+  )
+
+  .eq(
+
+    "doc_type",
+
+    "invoice"
+
+  )
+
+ .is(
+
+  batchIdColumn,
+
+  null
+
+)
+
+.gte(
+
+  "invoice_date",
+
+  financialYearStart
+
+)
+
+.lte(
+
+  "invoice_date",
+
+  posting_date
+
+)
+
+  .order(
+
+    "invoice_date",
+
+    {
+
+      ascending: true
+
+    }
+
+  )
+
+  .order(
+
+    "id",
+
+    {
+
+      ascending: true
+
+    }
+
+  );
+
+  if (invoiceError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      invoiceError.message
+
+  });
+
+}
+
+if (
+
+  !invoices ||
+
+  invoices.length === 0
+
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      "No invoices found."
+
+  });
+
+}
+
+const draftInvoices =
+
+  invoices.filter(
+
+    x => !x.status
+
+  );
+
+  if (
+
+  draftInvoices.length > 0
+
+) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      `${draftInvoices.length} invoice${draftInvoices.length > 1 ? "s are" : " is"} not posted yet. Please ask the client to post ${draftInvoices.length > 1 ? "them" : "it"} first.`
+
+  });
+
+}
+
+const today = new Date(posting_date);
+
+const dd =
+
+  String(
+
+    today.getDate()
+
+  ).padStart(2, "0");
+
+const mm =
+
+  String(
+
+    today.getMonth() + 1
+
+  ).padStart(2, "0");
+
+const yyyy =
+
+  today.getFullYear();
+
+const batchPrefix =
+
+  `${dd}${mm}${yyyy}`;
+
+  const {
+
+  data: existingBatch,
+
+  error: existingBatchError
+
+} = await supabase
+
+  .from("batches")
+
+  .select("batch_id")
+
+  .eq(
+
+  "company_code",
+
+  company_code
+
+)
+
+.eq(
+
+  "tally_owner",
+
+  tally_owner
+
+)
+
+  .like(
+
+    "batch_id",
+
+    `${batchPrefix}-%`
+
+  )
+
+  .order(
+
+    "batch_id",
+
+    {
+
+      ascending: false
+
+    }
+
+  )
+
+  .limit(1);
+
+
+  if (existingBatchError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      existingBatchError.message
+
+  });
+
+}
+
+let batchNo = 1;
+
+if (
+
+  existingBatch &&
+
+  existingBatch.length > 0
+
+) {
+
+  batchNo =
+
+    Number(
+
+      existingBatch[0]
+
+        .batch_id
+
+        .split("-")
+
+        .pop()
+
+    ) + 1;
+
+}
+
+const batchId =
+
+  `${batchPrefix}-${String(batchNo).padStart(2, "0")}`;
+
+  const invoiceSequences =
+
+  invoices.map(
+
+    x => getInvoiceSequence(
+      x.invoice_number
+    )
+
+  );
+
+const invoiceFrom =
+
+  Math.min(
+    ...invoiceSequences
+  );
+
+const invoiceTo =
+
+  Math.max(
+    ...invoiceSequences
+  );
+
+  
+  const batchSteps = [
+
+  "UNITS",
+
+  "STOCK",
+
+  "SALES_LEDGER",
+
+  "TAX_LEDGER",
+
+  "DEBTORS",
+
+  "SALES_EXPORT"
+
+].map(
+
+  (
+
+    step,
+
+    index
+
+  ) => ({
+
+    batch_id:
+
+      batchId,
+
+ batch_name:
+
+  batchId,
+
+    batch_type:
+
+      "SALES",
+
+    batch_date:
+
+      posting_date,
+
+    company_code,
+
+    tally_owner,
+
+    financial_year:
+  financialYear,
+
+    inv_from:
+
+      invoiceFrom,
+
+    inv_to:
+
+      invoiceTo,
+
+    sequence_no:
+
+      index + 1,
+
+    step_name:
+
+      step,
+
+    status:
+
+      "PENDING"
+
+  })
+
+);
+
+const {
+
+  error: insertBatchError
+
+} = await supabase
+
+  .from("batches")
+
+  .insert(
+
+    batchSteps
+
+  );
+
+  if (insertBatchError) {
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      insertBatchError.message
+
+  });
+
+}
+
+const invoiceIds =
+
+  invoices.map(
+
+    x => x.id
+
+  );
+
+const {
+
+  error: updateInvoiceError
+
+} = await supabase
+
+  .from("invoices")
+
+  .update({
+
+  [batchIdColumn]:
+
+    batchId
+
+})
+
+  .in(
+
+    "id",
+
+    invoiceIds
+
+  );
+
+if (updateInvoiceError) {
+
+  await supabase
+
+    .from("batches")
+
+   .delete()
+
+.eq("batch_id", batchId)
+
+.eq("company_code", company_code)
+
+.eq("tally_owner", tally_owner)
+
+  return res.json({
+
+    success: false,
+
+    error:
+
+      updateInvoiceError.message
+
+  });
+
+}
+
+return res.json({
+
+  success: true,
+
+  batch_id: batchId,
+
+  message:
+
+    "Sales batch created successfully."
+
+});
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error:
+
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
+// GET BATCH PROGRESS
+// =========================
+
+app.get(
+  "/getBatchProgress",
+  async (req, res) => {
+
+    try {
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      const tally_owner =
+        String(
+          req.query.tally_owner || "CA"
+        ).trim();
+        
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error: "company_code missing"
+
+        });
+
+      }
+
+
+      
+      // =========================
+      // GET CURRENT CA BATCH
+      // =========================
+
+      const {
+
+  data: latestBatchRows,
+
+  error: latestBatchError
+
+} = await supabase
+
+  .from("vw_batches_units")
+
+  .select("batch_id, created_at")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "tally_owner",
+    tally_owner
+  )
+
+  .order(
+    "created_at",
+    { ascending: false }
+  )
+
+  .limit(1);
+
+  if (latestBatchError) {
+
+  return res.json({
+
+    success: false,
+
+    error: latestBatchError.message
+
+  });
+
+}
+
+if (
+  !latestBatchRows ||
+  latestBatchRows.length === 0
+) {
+
+  return res.json({
+
+    success: true,
+
+    hasPendingBatch: false,
+
+    batch: null,
+
+    steps: [],
+
+    completedSteps: 0,
+
+    totalSteps: 0
+
+  });
+
+}
+const latestBatchId =
+  latestBatchRows[0].batch_id;
+
+
+     const {
+
+  data: rows,
+
+  error
+
+} = await supabase
+
+  .from("vw_batches_units")
+
+  .select("*")
+
+  .eq(
+    "company_code",
+    company_code
+  )
+
+  .eq(
+    "tally_owner",
+    tally_owner
+  )
+
+  .eq(
+    "batch_id",
+    latestBatchId
+  )
+
+  .order(
+    "sequence_no",
+    { ascending: true }
+  );
+
+      if (error) {
+
+        return res.json({
+
+          success: false,
+
+          error: error.message
+
+        });
+
+      }
+
+      // =========================
+      // NO ACTIVE BATCH
+      // =========================
+
+      if (!rows || rows.length === 0) {
+
+       return res.json({
+
+  success: true,
+
+  hasPendingBatch: false,
+
+  batch: null,
+
+  steps: [],
+
+  completedSteps: 0,
+
+  totalSteps: 0
+
+});
+      }
+
+      // =========================
+      // BATCH INFO
+      // =========================
+
+      const batch = {
+
+        batch_id:
+          rows[0].batch_id,
+
+        batch_name:
+          rows[0].batch_name,
+
+        batch_date:
+          rows[0].batch_date,
+
+        company_code:
+          rows[0].company_code,
+
+        tally_owner:
+          rows[0].tally_owner,
+
+        inv_from:
+          rows[0].inv_from,
+
+        inv_to:
+          rows[0].inv_to
+
+      };
+
+      // =========================
+      // STEP STATUS
+      // =========================
+
+      const steps =
+        rows.map((r) => ({
+
+          sequence_no:
+            r.sequence_no,
+
+          step_name:
+            r.step_name,
+
+          status:
+            r.status,
+
+          error_message:
+            r.error_message
+
+        }));
+
+
+const completedSteps =
+  steps.filter(
+    (x) => x.status === "COMPLETED"
+  ).length;
+
+const totalSteps =
+  steps.length;
+
+      // =========================
+      // FINAL RESPONSE
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        hasPendingBatch:
+  completedSteps < totalSteps,
+
+        batch,
+
+        steps,
+
+        completedSteps,
+
+        totalSteps,
+
+      });
+
+    }
+
+    catch (err) {
+
+      return res.json({
+
+        success: false,
+
+        error: err.message
+
+      });
+
+    }
+
+  }
+);
+
+
+
+// =========================
+// GET BATCH INVOICES
+// =========================
+
+app.get(
+  "/getBatchInvoices",
+  async (req, res) => {
+
+    try {
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      const batch_id =
+        String(
+          req.query.batch_id || ""
+        ).trim();
+
+      const tally_owner =
+        String(
+          req.query.tally_owner || "CA"
+        )
+          .trim()
+          .toUpperCase();
+
+          const isCaOwner =
+  tally_owner === "CA";
+
+
+const batchIdColumn =
+  isCaOwner
+    ? "batch_id"
+    : "client_batch_id";
+
+
+const tallyExportedColumn =
+  isCaOwner
+    ? "tally_exported"
+    : "client_tally_exported";
+
+
+const tallyExportedAtColumn =
+  isCaOwner
+    ? "tally_exported_at"
+    : "client_tally_exported_at";
+
+
+      if (
+        !company_code ||
+        !batch_id
+      ) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code and batch_id are required"
+
+        });
+
+      }
+
+
+      // =========================
+      // GET ALL BATCH INVOICES
+      // =========================
+
+      const {
+
+        data: allInvoices,
+
+        error
+
+      } = await supabase
+
+        .from("invoices")
+
+       .select(`
+
+          id,
+
+          invoice_id,
+
+          invoice_number,
+
+          invoice_date,
+
+          customer_name,
+
+          grand_total,
+
+          status,
+
+          tally_exported,
+
+          tally_exported_at,
+
+          batch_id,
+
+          client_tally_exported,
+
+          client_tally_exported_at,
+
+          client_batch_id
+
+        `)
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+      .eq(
+          batchIdColumn,
+          batch_id
+        )
+
+        .eq(
+          "doc_type",
+          "invoice"
+        )
+
+        .order(
+          "invoice_date",
+          {
+            ascending: true
+          }
+        )
+
+        .order(
+          "id",
+          {
+            ascending: true
+          }
+        );
+
+
+      if (error) {
+
+        console.error(
+          "GET BATCH INVOICES ERROR:",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+
+      // =========================
+      // SEPARATE PENDING INVOICES
+      // =========================
+
+      const pendingInvoices =
+
+  (allInvoices || []).filter(
+
+    (invoice) =>
+      invoice[tallyExportedColumn] !== true
+
+  );
+
+
+      const totalInvoices =
+        allInvoices?.length || 0;
+
+
+      const pendingCount =
+        pendingInvoices.length;
+
+
+      const exportedCount =
+        totalInvoices - pendingCount;
+
+
+      console.log(
+        "BATCH INVOICE STATUS:",
+        {
+          totalInvoices,
+          exportedCount,
+          pendingCount
+        }
+      );
+
+
+      // =========================
+      // FINAL RESPONSE
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        // Only these should be exported
+        invoices:
+          pendingInvoices,
+
+        totalInvoices,
+
+        exportedInvoices:
+          exportedCount,
+
+        pendingInvoices:
+          pendingCount
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.error(
+        "GET BATCH INVOICES ERROR:",
+        err
+      );
+
+
+      return res.status(500).json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+// =========================
+// GET BATCH HISTORY
+// =========================
+
+app.get(
+  "/getBatchHistory",
+
+  async (req, res) => {
+
+    try {
+
+      // =========================
+      // VALIDATION
+      // =========================
+
+      const company_code =
+        String(
+          req.query.company_code || ""
+        ).trim();
+
+      const tally_owner =
+        String(
+          req.query.tally_owner || "CA"
+        )
+          .trim()
+          .toUpperCase();
+
+
+      if (!company_code) {
+
+        return res.json({
+
+          success: false,
+
+          error:
+            "company_code missing"
+
+        });
+
+      }
+
+
+      // =========================
+      // GET ALL BATCH ROWS
+      // =========================
+
+      const {
+
+        data: rows,
+
+        error
+
+      } = await supabase
+
+        .from("vw_batches_units")
+
+        .select("*")
+
+        .eq(
+          "company_code",
+          company_code
+        )
+
+        .eq(
+          "tally_owner",
+          tally_owner
+        )
+
+        .order(
+          "created_at",
+          {
+            ascending: false
+          }
+        )
+
+        .order(
+          "sequence_no",
+          {
+            ascending: true
+          }
+        );
+
+
+      if (error) {
+
+        console.error(
+          "GET BATCH HISTORY ERROR:",
+          error
+        );
+
+        return res.json({
+
+          success: false,
+
+          error:
+            error.message
+
+        });
+
+      }
+
+
+      // =========================
+      // NO BATCHES
+      // =========================
+
+      if (
+        !rows ||
+        rows.length === 0
+      ) {
+
+        return res.json({
+
+          success: true,
+
+          batches: []
+
+        });
+
+      }
+
+
+      // =========================
+      // GROUP BY BATCH
+      // =========================
+
+      const batchMap =
+        new Map();
+
+
+      for (const row of rows) {
+
+        const key = [
+          row.company_code,
+          row.tally_owner,
+          row.batch_id
+        ].join("|");
+
+
+        if (!batchMap.has(key)) {
+
+          batchMap.set(
+            key,
+            {
+
+              batch_id:
+                row.batch_id,
+
+              batch_name:
+                row.batch_name,
+
+              batch_type:
+                row.batch_type,
+
+              batch_date:
+                row.batch_date,
+
+              company_code:
+                row.company_code,
+
+              tally_owner:
+                row.tally_owner,
+
+              inv_from:
+                row.inv_from,
+
+              inv_to:
+                row.inv_to,
+
+              created_at:
+                row.created_at,
+
+              steps: []
+
+            }
+          );
+
+        }
+
+
+        batchMap
+          .get(key)
+          .steps
+          .push({
+
+            sequence_no:
+              row.sequence_no,
+
+            step_name:
+              row.step_name,
+
+            status:
+              row.status,
+
+            error_message:
+              row.error_message
+
+          });
+
+      }
+
+
+      // =========================
+      // BUILD BATCH SUMMARIES
+      // =========================
+
+      const batches =
+
+        Array.from(
+          batchMap.values()
+        )
+
+          .map((batch) => {
+
+            const completedSteps =
+
+              batch.steps.filter(
+
+                (step) =>
+
+                  step.status ===
+                  "COMPLETED"
+
+              ).length;
+
+
+            const totalSteps =
+              batch.steps.length;
+
+
+            const status =
+
+              totalSteps > 0 &&
+
+              completedSteps ===
+                totalSteps
+
+                ? "COMPLETED"
+
+                : "IN_PROGRESS";
+
+
+            return {
+
+              ...batch,
+
+              completedSteps,
+
+              totalSteps,
+
+              status
+
+            };
+
+          })
+
+          .sort((a, b) =>
+
+            new Date(
+              b.created_at
+            ).getTime()
+
+            -
+
+            new Date(
+              a.created_at
+            ).getTime()
+
+          );
+
+
+      // =========================
+      // FINAL RESPONSE
+      // =========================
+
+      return res.json({
+
+        success: true,
+
+        batches
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.error(
+        "GET BATCH HISTORY ERROR:",
+        err
+      );
+
+
+      return res.status(500).json({
+
+        success: false,
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
+
+
+
+
+app.get("/getStockGodownBalance", async (req, res) => {
+
+    try {
+
+        const company_code =
+            String(
+                req.query.company_code || ""
+            ).trim();
+
+        const tally_owner =
+            String(
+                req.query.tally_owner || ""
+            ).trim();
+
+        const sync_batch_id =
+            String(
+                req.query.sync_batch_id || ""
+            ).trim();
+
+
+        if (!company_code) {
+
+            return res.json({
+                success: false,
+                error: "company_code missing"
+            });
+
+        }
+
+
+        if (!tally_owner) {
+
+            return res.json({
+                success: false,
+                error: "tally_owner missing"
+            });
+
+        }
+
+
+        const result =
+            await getStockGodownBalance({
+
+                company_code,
+
+                tally_owner,
+
+                sync_batch_id,
+                booksBeginningFrom: req.query.booksBeginningFrom
+
+            });
+
+
+        return res.json(
+            result
+        );
+
+    }
+
+    catch (err) {
+
+        console.error(
+            "GET STOCK GODOWN BALANCE ERROR:",
+            err
+        );
+
+
+        return res.status(500).json({
+
+            success: false,
+
+            error:
+                err.message
+
+        });
+
+    }
+
+});
+
+// ======================================================
+// RECONCILIATION CHECK
+// balance_difference_view must be checked.
+// If balance_difference_view returns 0 rows,
+// ledger balance reconciliation is COMPLETE.
+// ======================================================
+
+// =========================
+// GET TRIAL BALANCE
+// =========================
+
+app.get("/getTrialBalance", async (req, res) => {
+
+    try {
+
+        const company_code =
+            String(req.query.company_code || "").trim();
+
+        const tally_owner =
+            String(req.query.tally_owner || "").trim();
+
+        const asOnDate =
+            String(req.query.as_on_date || "").trim();
+
+        const sync_batch_id =
+            String(req.query.sync_batch_id || "").trim();
+
+        if (!company_code) {
+
+            return res.json({
+                success: false,
+                error: "company_code missing"
+            });
+
+        }
+
+        if (!tally_owner) {
+
+            return res.json({
+                success: false,
+                error: "tally_owner missing"
+            });
+
+        }
+
+        const result = await getTrialBalance({
+          company_code,
+          tally_owner,
+          asOnDate,
+          sync_batch_id
+        });
+
+        return res.json(result);
+
+    }
+
+    catch (err) {
+
+        return res.status(500).json({
+
+            success: false,
+
+            error: err.message
+
+        });
+
+    }
+
+});
+
+// =========================
+// GET MASTERS
+// =========================
+
+app.get("/getMasters", async (req, res) => {
+
+  let sync_batch_id;
+  let httpWorkerId;
+  let socket;
+  let batchCompletedSuccessfully = false;
+
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "")
+        .trim()
+        .toUpperCase();
+
+    const syncPeriod =
+    String(req.query.sync_period || VOUCHER_SYNC_PERIOD.DEFAULT)
+        .trim()
+        .toUpperCase();
+
+    const syncMode =
+    String(req.query.sync_mode || SYNC_MODE.PERIODIC)
+        .trim()
+        .toUpperCase();
+
+    if (
+    syncMode !== SYNC_MODE.FULL &&
+    syncMode !== SYNC_MODE.PERIODIC
+) {
+    return res.json({
+        success: false,
+        error: "Invalid sync_mode"
+    });
+}
+
+if (
+    syncMode === SYNC_MODE.PERIODIC &&
+    ![
+        VOUCHER_SYNC_PERIOD.WEEKLY,
+        VOUCHER_SYNC_PERIOD.THREE_MONTHS,
+        VOUCHER_SYNC_PERIOD.SIX_MONTHS,
+        VOUCHER_SYNC_PERIOD.CUSTOM
+    ].includes(syncPeriod)
+) {
+    return res.json({
+        success: false,
+        error: "Invalid sync_period for PERIODIC sync"
+    });
+}
+
+    console.log("================================");
+    console.log("GET MASTERS");
+    console.log("QUERY :", req.query);
+    console.log("COMPANY CODE :", company_code);
+    console.log("TALLY OWNER :", tally_owner);
+    console.log("REGISTERED :", registry.list());
+
+
+    if (!company_code) {
+
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+
+    }
+
+    if (
+      tally_owner !== "CA" &&
+      tally_owner !== "USER"
+    ) {
+
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+
+    }
+
+    // =========================
+    // GET COMPANY
+    // =========================
+
+    const {
+      data: companyData,
+      error: companyError
+    } = await supabase
+
+      .from("company")
+
+      .select("*")
+
+      .eq(
+        "company_code",
+        company_code
+      )
+
+      .single();
+
+    if (companyError || !companyData) {
+
+      return res.json({
+
+        success: false,
+
+        error: "Company not found"
+
+      });
+
+    }
+
+    // =========================
+    // TALLY COMPANY
+    // =========================
+
+    const company =
+
+      tally_owner === "CA"
+
+        ? companyData.ca_tally_company
+
+        : companyData.client_tally_company;
+
+        const companyGuid =
+  tally_owner === "CA"
+    ? companyData.ca_tally_company_guid
+    : companyData.client_tally_company_guid;
+
+    if (!company) {
+
+      return res.json({
+
+        success: false,
+
+        error: "Tally company not mapped"
+
+      });
+
+    }
+
+    if (!companyGuid) {
+
+      return res.json({
+        success: false,
+        error: "Tally company GUID not mapped"
+      });
+
+    }
+
+// =========================
+// LAST ALTER ID
+// =========================
+
+const {
+  data: lastVoucher,
+  error: lastVoucherError
+} = await supabase
+  .from("tally_vouchers")
+  .select("alterid")
+  .eq("company_code", company_code)
+  .eq("tally_owner", tally_owner)
+  .order("alterid", { ascending: false })
+  .limit(1)
+  .maybeSingle();
+
+if (lastVoucherError) {
+  throw lastVoucherError;
+}
+
+const lastAlterId = lastVoucher?.alterid ?? null;
+
+console.log(
+  "LAST ALTER ID :",
+  lastAlterId ?? "FULL SYNC"
+);
+
+
+const {
+  data: lastStock,
+  error: lastStockError
+} = await supabase
+  .from("tally_sync_stocks")
+  .select("alterid")
+  .eq("company_code", company_code)
+  .eq("tally_owner", tally_owner)
+  .order("alterid", { ascending: false })
+  .limit(1)
+  .maybeSingle();
+
+if (lastStockError) {
+  throw lastStockError;
+}
+
+const lastStockAlterId =
+  lastStock?.alterid ?? null;
+
+console.log(
+  "LAST STOCK ALTER ID :",
+  lastStockAlterId ?? "FULL SYNC"
+);
+
+
+const {
+  data: lastLedger,
+  error: lastLedgerError
+} = await supabase
+  .from("tally_sync_ledgers")
+  .select("alter_id")
+  .eq("company_code", company_code)
+  .eq("tally_owner", tally_owner)
+  .order("alter_id", { ascending: false })
+  .limit(1)
+  .maybeSingle();
+
+if (lastLedgerError) {
+  throw lastLedgerError;
+}
+
+const lastLedgerAlterId =
+  lastLedger?.alter_id ?? null;
+
+console.log(
+  "LAST LEDGER ALTER ID :",
+  lastLedgerAlterId ?? "FULL SYNC"
+);
+
+
+    // =========================
+    // CONNECTOR
+    // =========================
+
+   // =========================
+// CONNECTOR
+// =========================
+
+
+/*
+    if (
+  String(socket.companyGuid || "").trim().toLowerCase() !==
+  String(companyGuid).trim().toLowerCase()
+) {
+
+  console.error(
+    "❌ TALLY COMPANY GUID MISMATCH",
+    {
+      company_code,
+      tally_owner,
+      expectedGuid: companyGuid,
+      actualGuid: socket.companyGuid
+    }
+  );
+
+  return res.status(409).json({
+    success: false,
+    error: "Tally company identity mismatch"
+  });
+
+}
+*/
+// =========================
+// SYNC BATCH ID
+// =========================
+/*020926
+const workerBatchId = req.query.worker_batch_id;
+
+if (workerBatchId) {
+
+    sync_batch_id = workerBatchId;
+    httpWorkerId = null;
+
+} else {
+
+const requestId = crypto.randomUUID();
+
+const httpBatchClaim =
+
+    await BatchStatusManager.claimOrCreateHttpBatch({
+
+        company_code,
+
+        tally_owner,
+
+        request_id: requestId
+
+    });
+
+if (httpBatchClaim.claimed !== true) {
+
+    return res.status(409).json({
+
+        success: false,
+
+        error: "Sync batch is already being processed",
+
+        reason: httpBatchClaim.reason,
+
+        batch_id: httpBatchClaim.batch_id
+
+    });
+
+}
+
+sync_batch_id = httpBatchClaim.batch_id;
+httpWorkerId = httpBatchClaim.worker_id;
+}
+*/
+//const workerBatchId = req.query.worker_batch_id;
+
+const workerBatchId =
+    String(req.query.worker_batch_id || "").trim();
+
+
+// ==================================================
+// WORKER EXECUTION PATH
+// ==================================================
+if (workerBatchId) {
+
+    sync_batch_id = workerBatchId;
+    httpWorkerId = null;
+
+    const is_ca =
+        tally_owner === "CA";
+
+    const connectorField =
+        is_ca
+            ? "ca_connector_id"
+            : "client_connector_id";
+
+    const connector_id =
+        companyData?.[connectorField];
+
+    console.log(
+        "GET MASTERS CONNECTOR ID :",
+        connector_id
+    );
+
+    if (!connector_id) {
+
+        return res.status(503).json({
+            success: false,
+            error: "Connector not paired"
+        });
+
+    }
+
+    socket =
+        registry.get(connector_id);
+
+    console.log(
+        "SOCKET FOUND :",
+        !!socket
+    );
+
+    if (!socket) {
+
+        return res.status(503).json({
+            success: false,
+            error: "Connector offline"
+        });
+
+    }
+
+
+    /* 030926
+    if (
+        String(socket.companyGuid || "")
+            .trim()
+            .toLowerCase() !==
+        String(companyGuid)
+            .trim()
+            .toLowerCase()
+    ) {
+
+        console.error(
+            "❌ TALLY COMPANY GUID MISMATCH",
+            {
+                company_code,
+                tally_owner,
+                expectedGuid: companyGuid,
+                actualGuid: socket.companyGuid
+            }
+        );
+
+        return res.status(409).json({
+            success: false,
+            error: "Tally company identity mismatch"
+        });
+
+    }
+        */
+
+    const connectorCompanyGuids =
+    Array.isArray(socket.companyGuids)
+        ? socket.companyGuids
+        : [];
+
+const requestedCompanyGuid =
+    String(companyGuid)
+        .trim()
+        .toLowerCase();
+
+const guidMatched =
+    connectorCompanyGuids.some(
+        guid =>
+            String(guid)
+                .trim()
+                .toLowerCase() ===
+            requestedCompanyGuid
+    );
+
+if (!guidMatched) {
+
+    console.error(
+        "❌ TALLY COMPANY GUID MISMATCH",
+        {
+            company_code,
+            tally_owner,
+            expectedGuid: companyGuid,
+            connectorGuids: connectorCompanyGuids
+        }
+    );
+
+    return res.status(409).json({
+        success: false,
+        error: "Tally company identity mismatch"
+    });
+
+}
+
+} 
+
+
+
+// ==================================================
+// NEW SYNC REQUEST → CREATE + QUEUE
+// ==================================================
+
+else {
+
+    const requestId =
+        crypto.randomUUID();
+
+    const httpBatchClaim =
+        await BatchStatusManager.claimOrCreateHttpBatch({
+
+            company_code,
+
+            tally_owner,
+
+            request_id: requestId,
+            sync_mode: syncMode,
+
+            sync_period: syncPeriod
+
+        });
+
+
+    // ----------------------------------------------
+    // Existing active batch
+    // ----------------------------------------------
+
+    if (httpBatchClaim.claimed !== true) {
+
+        return res.status(409).json({
+
+            success: false,
+
+            error:
+                "Sync batch is already being processed",
+
+            reason:
+                httpBatchClaim.reason,
+
+            batch_id:
+                httpBatchClaim.batch_id
+
+        });
+
+    }
+
+
+    sync_batch_id =
+        httpBatchClaim.batch_id;
+
+
+    // ----------------------------------------------
+    // LOAD NEW PENDING BATCH
+    // ----------------------------------------------
+
+    const newBatch =
+        await BatchStatusManager.loadBatch({
+
+            batch_id:
+                sync_batch_id
+
+        });
+
+
+    // ----------------------------------------------
+    // DISPATCH TO BULLMQ
+    // ----------------------------------------------
+
+    const dispatchResult =
+        await dispatchBatch(
+            newBatch
+        );
+
+
+    console.log(
+        "SYNC BATCH DISPATCHED:",
+        {
+            batch_id:
+                sync_batch_id,
+
+            worker:
+                dispatchResult.worker.worker_name,
+
+            queue:
+                dispatchResult.worker.queue_name
+        }
+    );
+
+
+    // ----------------------------------------------
+    // IMPORTANT:
+    // HTTP REQUEST ENDS HERE.
+    //
+    // Worker will call:
+    // /getMasters?worker_batch_id=...
+    // ----------------------------------------------
+
+    return res.json({
+
+        success: true,
+
+        queued: true,
+
+        batch_id:
+            sync_batch_id,
+
+        status:
+            "QUEUED",
+
+        worker:
+            dispatchResult.worker.worker_name
+
+    });
+
+}
+
+const failHttpBatch = async (error) => {
+    await BatchStatusManager.markFailed({
+        batch_id: sync_batch_id,
+        error
+    });
+
+    if (httpWorkerId) {
+
+    await BatchStatusManager.releaseHttpBatch({
+        batch_id: sync_batch_id,
+        worker_id: httpWorkerId
+    });
+
+}
+};
+
+const runningBatch =
+
+    await BatchStatusManager.loadBatch({
+
+        batch_id: sync_batch_id
+
+    });
+
+
+const sync =
+
+    await SyncController.start({
+
+        runningBatch
+
+    });
+
+const resumePoint =
+
+      sync.startEntity;
+
+console.log(
+
+    "SYNC MODE:",
+
+    sync.mode,
+
+    "| START ENTITY:",
+
+    sync.startEntity
+
+);
+
+console.log(
+
+    "RESUME FROM:",
+
+    resumePoint
+
+);
+
+
+syncDebug({
+
+    stage:"START",
+
+    sync_batch_id,
+
+    resumePoint,
+
+    company_code,
+
+    tally_owner
+
+});
+
+
+let groupResult = null;
+let groupReconciliation = null;
+let groupActionResult = null;
+
+let stockGroupResult = null;
+let stockGroupReconciliation = null;
+let stockGroupActionResult = null;
+
+let ledgerResult = null;
+
+let godownResult = null;
+let godownReconciliation = null;
+let godownActionResult = null;
+
+let unitResult = null;
+let unitReconciliation = null;
+let unitActionResult = null;
+
+let costCentreResult = null;
+let costCentreReconciliation = null;
+let costCentreActionResult = null;
+
+let stockResult = null;
+let stockReconciliation = null;
+let stockActionResult = null;
+
+let voucherResult = null;
+
+let voucherGuidResult = null;
+let groupGuidResult = null;
+let ledgerGuidResult = null;
+let stockGroupGuidResult = null;
+let stockGuidResult = null;
+let unitGuidResult = null;
+let godownGuidResult = null;
+let costCentreGuidResult = null;
+  
+await updateSyncProgress({
+    supabase,
+    batchId: sync_batch_id,
+    stage: "MASTERS",
+    progress: 0,
+    action: "FETCHING_MASTERS"
+});
+
+const result = await sendChunkedToConnector(
+    socket,
+    "getMasters",
+    {
+        company,
+        lastAlterId,
+        lastStockAlterId,
+        lastLedgerAlterId,
+        syncMode,
+        batchId: sync_batch_id,
+    }
+);
+
+console.log("===== TALLY MASTER COUNTS =====");
+console.log({
+    groups: result.summary?.groups,
+    ledgers: result.summary?.ledgers,
+    stockGroups: result.summary?.stockGroups,
+    stocks: result.summary?.stocks,
+    godowns: result.summary?.godowns,
+    costCentres: result.summary?.costCentres,
+    units: result.summary?.units
+});
+console.log("================================");
+
+await supabase
+    .from("sync_batches")
+    .update({
+        tally_groups_count: result.summary?.groups || 0,
+        tally_ledgers_count: result.summary?.ledgers || 0,
+        tally_stock_groups_count: result.summary?.stockGroups || 0,
+        tally_stocks_count: result.summary?.allStocks || 0,
+        tally_godowns_count: result.summary?.godowns || 0,
+        tally_cost_centres_count: result.summary?.costCentres || 0,
+        tally_units_count: result.summary?.units || 0
+    })
+    .eq("batch_id", sync_batch_id);
+
+const masterHandlers = {
+
+    GROUP: () =>
+        result.groups || [],
+
+    STOCK_GROUP: () =>
+        result.stockGroups || [],
+
+    LEDGER: () =>
+        result.ledgers || [],
+
+    STOCK: () =>
+        result.stocks || [],
+
+    UNIT: () =>
+        result.units || [],
+
+    GODOWN: () =>
+        result.godowns || [],
+
+    COST_CENTRE: () =>
+        result.costCentres || [],
+
+    VOUCHER: () =>
+        result.vouchers || []
+
+};
+
+const masterCollections = {
+
+    GROUP:
+        result.groups || [],
+
+    STOCK_GROUP:
+        result.stockGroups || [],
+
+    LEDGER:
+        result.ledgers || [],
+
+    STOCK:
+        result.stocks || [],
+
+    UNIT:
+        result.units || [],
+
+    GODOWN:
+        result.godowns || [],
+
+    COST_CENTRE:
+        result.costCentres || []
+
+};
+
+
+if (!result.success) {
+
+  await failHttpBatch(result);
+return res.json(result);
+
+}
+
+console.log("================================");
+console.log("RESUME POINT :", resumePoint);
+console.log("================================");
+// =========================
+// GUID SNAPSHOT START
+// =========================
+
+if (
+
+    sync.remainingEntities.some(
+
+        entity => [
+
+            "GROUP",
+            "LEDGER",
+            "STOCK_GROUP",
+            "STOCK",
+            "UNIT",
+            "GODOWN",
+            "COST_CENTRE",
+            "VOUCHER"
+
+        ].includes(entity)
+
+    )
+
+) {
+/*
+  const hasPreviousCompletedSync =
+    await BatchStatusManager.hasCompletedSync({
+        company_code,
+        tally_owner,
+        exclude_batch_id: sync_batch_id
+    });
+*/
+
+ const toDate =
+    new Date()
+        .toISOString()
+        .slice(0, 10)
+        .replace(/-/g, "");
+
+/*
+if (!hasPreviousCompletedSync) {
+
+    // FIRST SYNC
+    fromDate =
+        result.summary?.booksBeginningFrom;
+
+} else {
+
+    // PERIODIC SYNC
+    switch (syncPeriod) {
+
+        case VOUCHER_SYNC_PERIOD.WEEKLY: {
+
+            const date =
+                new Date();
+
+            date.setDate(
+                date.getDate() - 7
+            );
+
+            fromDate =
+                date.toISOString()
+                    .slice(0, 10)
+                    .replace(/-/g, "");
+
+            break;
+        }
+
+        case VOUCHER_SYNC_PERIOD.THREE_MONTHS: {
+
+            const date =
+                new Date();
+
+            date.setMonth(
+                date.getMonth() - 3
+            );
+
+            fromDate =
+                date.toISOString()
+                    .slice(0, 10)
+                    .replace(/-/g, "");
+
+            break;
+        }
+
+        case VOUCHER_SYNC_PERIOD.SIX_MONTHS: {
+
+            const date =
+                new Date();
+
+            date.setMonth(
+                date.getMonth() - 6
+            );
+
+            fromDate =
+                date.toISOString()
+                    .slice(0, 10)
+                    .replace(/-/g, "");
+
+            break;
+        }
+
+        default:
+
+            fromDate =
+                result.summary?.booksBeginningFrom;
+
+    }
+
+}
+
+*/
+
+let fromDate;
+
+if (syncMode === SYNC_MODE.FULL) {
+
+    fromDate =
+        result.summary?.booksBeginningFrom;
+
+} else {
+
+    switch (syncPeriod) {
+
+        case VOUCHER_SYNC_PERIOD.WEEKLY: {
+
+            const date = new Date();
+
+            date.setDate(
+                date.getDate() - 7
+            );
+
+            fromDate =
+                date.toISOString()
+                    .slice(0, 10)
+                    .replace(/-/g, "");
+
+            break;
+        }
+
+        case VOUCHER_SYNC_PERIOD.THREE_MONTHS: {
+
+            const date = new Date();
+
+            date.setMonth(
+                date.getMonth() - 3
+            );
+
+            fromDate =
+                date.toISOString()
+                    .slice(0, 10)
+                    .replace(/-/g, "");
+
+            break;
+        }
+
+        case VOUCHER_SYNC_PERIOD.SIX_MONTHS: {
+
+            const date = new Date();
+
+            date.setMonth(
+                date.getMonth() - 6
+            );
+
+            fromDate =
+                date.toISOString()
+                    .slice(0, 10)
+                    .replace(/-/g, "");
+
+            break;
+        }
+
+        case VOUCHER_SYNC_PERIOD.CUSTOM:
+
+            // custom fromDate logic will be handled
+            // from the requested custom date range
+            fromDate =
+                req.query.from_date;
+
+            break;
+
+        default:
+
+            throw new Error(
+                `Invalid sync period: ${syncPeriod}`
+            );
+    }
+
+}
+
+voucherGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersVoucherGuids",
+        {
+            company,
+
+            fromDate,
+
+            toDate,
+
+            snapshot:true,
+
+            booksBeginningFrom:
+                result.summary?.booksBeginningFrom,
+
+           lastAlterId,
+
+            sync_batch_id,
+
+            batchId: sync_batch_id,
+
+            syncMode,
+
+            syncPeriod,
+
+            company_code,
+
+            tally_owner,
+
+            module:"VOUCHER",
+
+            entity_type:"VOUCHER"
+        }
+    );
+
+    groupGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersGroupGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            syncMode,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"MASTER",
+
+            entity_type:"GROUP"
+        }
+    );
+
+
+console.log(
+    "GROUP GUID SNAPSHOT :",
+    groupGuidResult
+);
+
+ledgerGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersLedgerGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            syncMode,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"MASTER",
+
+            entity_type:"LEDGER"
+        }
+    );
+
+
+console.log(
+    "LEDGER GUID SNAPSHOT :",
+    ledgerGuidResult
+);
+
+
+stockGroupGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersStockGroupGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            syncMode,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"MASTER",
+
+            entity_type:"STOCK_GROUP"
+        }
+    );
+
+
+console.log(
+    "STOCK GROUP GUID SNAPSHOT :",
+    stockGroupGuidResult
+);
+
+
+stockGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersStockGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            syncMode,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"MASTER",
+
+            entity_type:"STOCK"
+        }
+    );
+
+
+console.log(
+    "STOCK GUID SNAPSHOT :",
+    stockGuidResult
+);
+
+
+unitGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersUnitGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            syncMode,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"MASTER",
+
+            entity_type:"UNIT"
+        }
+    );
+
+
+console.log(
+    "UNIT GUID SNAPSHOT :",
+    unitGuidResult
+);
+
+
+godownGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersGodownGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            syncMode,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"MASTER",
+
+            entity_type:"GODOWN"
+        }
+    );
+
+
+console.log(
+    "GODOWN GUID SNAPSHOT :",
+    godownGuidResult
+);
+
+
+costCentreGuidResult =
+    await sendChunkedToConnector(
+        socket,
+        "getMastersCostCentreGuids",
+        {
+            company,
+
+            snapshot:true,
+
+            syncMode,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module:"MASTER",
+
+            entity_type:"COST_CENTRE"
+        }
+    );
+
+
+console.log(
+    "COST CENTRE GUID SNAPSHOT :",
+    costCentreGuidResult
+);
+
+}
+
+if (
+
+    sync.remainingEntities.some(
+
+        entity => [
+
+            "GROUP",
+            "LEDGER",
+            "STOCK_GROUP",
+            "STOCK",
+            "UNIT",
+            "GODOWN",
+            "COST_CENTRE",
+            "VOUCHER"
+
+        ].includes(entity)
+
+    )
+
+) {
+if (!voucherGuidResult.success) {
+    await failHttpBatch(voucherGuidResult);
+    return res.json(voucherGuidResult);
+}
+
+if (!groupGuidResult.success) {
+    await failHttpBatch(groupGuidResult);
+    return res.json(groupGuidResult);
+}
+
+
+if (!ledgerGuidResult.success) {
+    await failHttpBatch(ledgerGuidResult);
+    return res.json(ledgerGuidResult);
+}
+
+if (!stockGroupGuidResult.success) {
+    await failHttpBatch(stockGroupGuidResult);
+    return res.json(stockGroupGuidResult);
+}
+
+if (!stockGuidResult.success) {
+    await failHttpBatch(stockGuidResult);
+    return res.json(stockGuidResult);
+}
+
+if (!unitGuidResult.success) {
+    await failHttpBatch(unitGuidResult);
+    return res.json(unitGuidResult);
+}
+
+if (!godownGuidResult.success) {
+    await failHttpBatch(godownGuidResult);
+    return res.json(godownGuidResult);
+}
+
+if (!costCentreGuidResult.success) {
+    await failHttpBatch(costCentreGuidResult);
+    return res.json(costCentreGuidResult);
+}
+
+}
+
+
+
+
+fs.appendFileSync(
+"./logs/server-guid-debug.jsonl",
+JSON.stringify({
+
+ company_code,
+
+ tally_owner,
+
+ voucherGuid:
+    voucherGuidResult?.totalItems || 0,
+
+ groupGuid:
+   groupGuidResult?.totalItems || 0,
+
+ ledgerGuid:
+    ledgerGuidResult?.totalItems || 0,
+
+ stockGroupGuid:
+    stockGroupGuidResult?.totalItems || 0,
+
+ stockGuid:
+    stockGuidResult?.totalItems || 0,
+
+ unitGuid:
+    unitGuidResult?.totalItems || 0,
+
+ godownGuid:
+    godownGuidResult?.totalItems || 0,
+
+ costCentreGuid:
+    costCentreGuidResult?.totalItems || 0
+
+}) + "\n"
+);
+
+// =========================
+// VALIDATE GROUPS
+// =========================
+/* remove 01.08.26 evening
+const groupValidation =
+    await validateMasters({
+
+        table: "tally_sync_groups",
+
+        company_code,
+
+        tally_owner,
+
+        rows: result.groups || []
+
+    });
+
+
+console.log(
+    "GROUP VALIDATION :",
+    groupValidation
+);
+
+*/
+
+if (
+
+    sync.remainingEntities.includes(
+
+        "GROUP"
+
+    )
+
+) {
+
+  /*
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"GROUP",
+
+    action:"PROCESSING"
+
+});
+*/
+
+syncDebug({
+
+    stage:"GROUP_PROCESSING",
+
+    sync_batch_id
+
+});
+
+
+// =========================
+// SAVE GROUPS
+// =========================
+/*
+groupResult = await saveGroups({
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    groups: result.groups || []
+
+});
+*/
+
+groupResult = await BatchManager.run({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTER",
+
+    entity: "GROUP",
+
+    table: "tally_sync_groups",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows:
+
+      masterCollections.GROUP
+
+});
+
+console.log(
+    "GROUP SAVE :",
+    groupResult
+);
+
+
+// =========================
+// GROUP RECONCILIATION
+// =========================
+/*
+groupReconciliation =
+    await ReconciliationManager.reconcile({
+
+        table: "tally_sync_groups",
+
+        module: "MASTER",
+
+        entity_type: "GROUP",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+
+
+console.log(
+    "GROUP RECONCILIATION :",
+    groupReconciliation
+);
+*/
+
+groupReconciliation =
+    groupResult.reconciliation;
+
+console.log(
+    "GROUP RECONCILIATION :",
+    groupReconciliation
+);
+
+// =========================
+// GROUP ACTIONS
+// =========================
+/*
+  groupActionResult =
+  await applyMasterActions({
+
+    table:"tally_sync_groups",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    reconciliationResult:
+        groupReconciliation
+
+});
+
+
+console.log(
+    "GROUP ACTION RESULT :",
+    groupActionResult
+);
+
+
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"GROUP",
+
+    action:"COMPLETED"
+
+});
+
+*/
+
+syncDebug({
+
+    stage:"GROUP_COMPLETED",
+
+    sync_batch_id
+
+});
+
+}
+
+if (
+
+    sync.remainingEntities.includes(
+
+        "STOCK_GROUP"
+
+    )
+
+) {
+
+  /*
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"STOCK_GROUP",
+
+    action:"PROCESSING"
+
+});
+
+*/
+
+masterFlowDebug({
+    stage:"STOCK_GROUP_PROCESSING",
+    sync_batch_id
+});
+
+// =========================
+// SAVE STOCK GROUPS
+// =========================
+
+/*
+stockGroupResult = await saveStockGroups({
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    stockGroups:
+        result.stockGroups || []
+
+});
+*/
+
+stockGroupResult = await BatchManager.run({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTER",
+
+    entity: "STOCK_GROUP",
+
+    table: "tally_sync_stock_groups",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows:
+
+     masterCollections.STOCK_GROUP
+
+});
+
+
+console.log(
+    "STOCK GROUP SAVE :",
+    stockGroupResult
+);
+
+// =========================
+// STOCK GROUP RECONCILIATION
+// =========================
+/*
+stockGroupReconciliation =
+    await reconcileMasters({
+
+        table: "tally_sync_stock_groups",
+
+        entity_type: "STOCK_GROUP",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+*/
+
+stockGroupReconciliation =
+    stockGroupResult.reconciliation;
+
+
+console.log(
+    "STOCK GROUP RECONCILIATION :",
+    stockGroupReconciliation
+);
+
+
+// =========================
+// STOCK GROUP ACTIONS
+// =========================
+/*
+stockGroupActionResult =
+    await applyMasterActions({
+
+        table: "tally_sync_stock_groups",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id,
+
+        reconciliationResult:
+            stockGroupReconciliation
+
+    });
+
+console.log(
+    "STOCK GROUP ACTION RESULT :",
+    stockGroupActionResult
+);
+
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"STOCK_GROUP",
+
+    action:"COMPLETED"
+
+});
+*/
+
+masterFlowDebug({
+    stage:"STOCK_GROUP_COMPLETED",
+    sync_batch_id
+});
+
+  }
+
+if (
+
+    sync.remainingEntities.includes(
+
+        "LEDGER"
+
+    )
+
+) {
+
+  /* 05.08.26
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"LEDGER",
+
+    action:"PROCESSING"
+
+});
+*/
+
+masterFlowDebug({
+    stage:"LEDGER_PROCESSING",
+    sync_batch_id
+});
+
+// =========================
+// SAVE LEDGERS
+// =========================
+/*
+ledgerResult = await saveLedgers({
+  company_code,
+  tally_owner,
+   sync_batch_id,
+  ledgers: result.ledgers || []
+});
+*/
+
+
+console.log("================================");
+console.log("LEDGER BEFORE BATCH");
+console.log("result.ledgers :", result.ledgers?.length);
+console.log("masterCollections.LEDGER :", masterCollections.LEDGER?.length);
+console.log("================================");
+
+ledgerResult = await BatchManager.run({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTER",
+
+    entity: "LEDGER",
+
+    table: "tally_sync_ledgers",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows:
+
+      masterCollections.LEDGER
+
+});
+
+
+console.log("================================");
+console.log("LEDGER AFTER BATCH");
+console.dir(ledgerResult, { depth: null });
+console.log("================================");
+
+console.log("LEDGER SAVE :", ledgerResult);
+
+
+// =========================
+// LEDGER RECONCILIATION
+// =========================
+/*
+ledgerReconciliation =
+  await ReconciliationManager.reconcile({
+
+      table:"tally_sync_ledgers",
+
+      module:"MASTER",
+
+      entity_type:"LEDGER",
+
+      company_code,
+
+      tally_owner,
+
+      sync_batch_id
+
+  });
+
+ 
+ await reconcileMasters({
+
+        table: "tally_sync_ledgers",
+
+        entity_type: "LEDGER",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+    */
+
+ledgerReconciliation =
+    ledgerResult.reconciliation;
+
+
+console.log(
+    "LEDGER RECONCILIATION :",
+    ledgerReconciliation
+);
+
+
+// =========================
+// LEDGER ACTIONS
+// =========================
+/*
+ledgerActionResult =
+    await applyMasterActions({
+
+        table: "tally_sync_ledgers",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id,
+
+        reconciliationResult:
+            ledgerReconciliation
+
+    });
+
+console.log(
+    "LEDGER ACTION RESULT :",
+    ledgerActionResult
+);
+
+
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"LEDGER",
+
+    action:"COMPLETED"
+
+});
+*/
+
+masterFlowDebug({
+    stage:"LEDGER_COMPLETED",
+    sync_batch_id
+});
+
+// =========================
+// MISSING LEDGER BY GUID
+// =========================
+
+if(ledgerReconciliation?.missingGuids?.length){
+
+  const missingResult =
+    await sendChunkedToConnector(
+        socket,
+        "ledgerByGuid",
+        {
+            company,
+            sync_batch_id,
+            tally_owner,
+
+            requestItems:
+                ledgerReconciliation.missingGuids.map(
+                    item => item.guid
+                )
+        }
+    );
+
+
+    if(!missingResult.success){
+    await failHttpBatch(missingResult);
+    return res.json(missingResult);
+}
+
+    await saveLedgers({
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id,
+
+        ledgers:
+            missingResult.ledgers || []
+
+    });
+
+    const ledgerReconciliationAfterMissing =
+
+      await ReconciliationManager.reconcile({
+
+          table:"tally_sync_ledgers",
+
+          module:"MASTER",
+
+          entity_type:"LEDGER",
+
+          company_code,
+
+          tally_owner,
+
+          sync_batch_id
+
+      });
+
+/*
+    await reconcileMasters({
+
+        table:"tally_sync_ledgers",
+
+        entity_type:"LEDGER",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+*/
+/*
+await applyMasterActions({
+
+    table:"tally_sync_ledgers",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    reconciliationResult:
+        ledgerReconciliationAfterMissing
+
+});
+*/
+}
+}
+
+
+console.log(
+  "GET MASTERS RESULT:",
+  result.summary
+);
+
+if (
+
+    sync.remainingEntities.includes(
+
+        "GODOWN"
+
+    )
+
+) {
+/* 05.08.26
+
+  await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"GODOWN",
+
+    action:"PROCESSING"
+
+});
+*/
+
+masterFlowDebug({
+    stage:"GODOWN_PROCESSING",
+    sync_batch_id
+});
+// =========================
+// SAVE GODOWNS
+// =========================
+/*
+godownResult = await saveGodowns({
+  company_code,
+  tally_owner,
+   sync_batch_id,
+  godowns: result.godowns || []
+});
+*/
+
+godownResult = await BatchManager.run({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTER",
+
+    entity: "GODOWN",
+
+    table: "tally_sync_godowns",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows:
+
+      masterCollections.GODOWN
+
+});
+
+
+
+console.log("GODOWN SAVE :", godownResult);
+
+
+// =========================
+// GODOWN RECONCILIATION
+// =========================
+/*
+godownReconciliation =
+
+    await ReconciliationManager.reconcile({
+
+        table:"tally_sync_godowns",
+
+        module:"MASTER",
+
+        entity_type:"GODOWN",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+
+
+    await reconcileMasters({
+
+        table: "tally_sync_godowns",
+
+        entity_type: "GODOWN",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+
+    */
+
+godownReconciliation =
+    godownResult.reconciliation;
+
+console.log(
+    "GODOWN RECONCILIATION :",
+    godownReconciliation
+);
+
+
+// =========================
+// GODOWN ACTIONS
+// =========================
+/*
+godownActionResult =
+    await applyMasterActions({
+
+        table: "tally_sync_godowns",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id,
+
+        reconciliationResult:
+            godownReconciliation
+
+    });
+
+console.log(
+    "GODOWN ACTION RESULT :",
+    godownActionResult
+);
+
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"GODOWN",
+
+    action:"COMPLETED"
+
+});
+
+*/
+
+
+masterFlowDebug({
+    stage:"GODOWN_COMPLETED",
+    sync_batch_id
+});
+
+}
+
+
+if (
+
+    sync.remainingEntities.includes(
+
+        "UNIT"
+
+    )
+
+) {
+
+/* 05.08.26
+  await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"UNIT",
+
+    action:"PROCESSING"
+
+});
+*/
+
+masterFlowDebug({
+    stage:"UNIT_PROCESSING",
+    sync_batch_id
+});
+
+// =========================
+// SAVE UNITS
+// =========================
+/*
+unitResult = await saveUnits({
+    company_code,
+    tally_owner,
+     sync_batch_id,
+    units: result.units || []
+});
+*/
+
+unitResult = await BatchManager.run({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTER",
+
+    entity: "UNIT",
+
+    table: "tally_sync_units",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+   rows:
+
+      masterCollections.UNIT
+
+});
+
+console.log("UNIT SAVE :", unitResult);
+
+
+// =========================
+// UNIT RECONCILIATION
+// =========================
+/*
+unitReconciliation =
+
+      await ReconciliationManager.reconcile({
+
+        table:"tally_sync_units",
+
+        module:"MASTER",
+
+        entity_type:"UNIT",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+
+
+    await reconcileMasters({
+
+        table: "tally_sync_units",
+
+        entity_type: "UNIT",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+*/
+
+unitReconciliation =
+    unitResult.reconciliation;
+
+
+
+console.log(
+    "UNIT RECONCILIATION :",
+    unitReconciliation
+);
+
+
+// =========================
+// UNIT ACTIONS
+// =========================
+/*
+unitActionResult =
+    await applyMasterActions({
+
+        table: "tally_sync_units",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id,
+
+        reconciliationResult:
+            unitReconciliation
+
+    });
+
+console.log(
+    "UNIT ACTION RESULT :",
+    unitActionResult
+);
+
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"UNIT",
+
+    action:"COMPLETED"
+
+});
+*/
+
+masterFlowDebug({
+    stage:"UNIT_COMPLETED",
+    sync_batch_id
+});
+
+}
+
+if (
+
+    sync.remainingEntities.includes(
+
+        "COST_CENTRE"
+
+    )
+
+) {
+
+  /*
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"COST_CENTRE",
+
+    action:"PROCESSING"
+
+});
+*/
+
+masterFlowDebug({
+    stage:"COST_CENTRE_PROCESSING",
+    sync_batch_id
+});
+
+// =========================
+// SAVE COST CENTRES
+// =========================
+/*
+costCentreResult = await saveCostCentres({
+  company_code,
+  tally_owner,
+   sync_batch_id,
+  costCentres: result.costCentres || []
+});
+*/
+
+costCentreResult = await BatchManager.run({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTER",
+
+    entity: "COST_CENTRE",
+
+    table: "tally_sync_cost_centres",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows:
+
+      masterCollections.COST_CENTRE
+
+});
+
+console.log("COST CENTRE SAVE :", costCentreResult);
+
+// =========================
+// COST CENTRE RECONCILIATION
+// =========================
+/*
+costCentreReconciliation =
+
+    await ReconciliationManager.reconcile({
+
+      table:"tally_sync_cost_centres",
+
+      module:"MASTER",
+
+      entity_type:"COST_CENTRE",
+
+      company_code,
+
+      tally_owner,
+
+      sync_batch_id
+
+  });
+
+    await reconcileMasters({
+
+        table: "tally_sync_cost_centres",
+
+        entity_type: "COST_CENTRE",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+*/
+costCentreReconciliation =
+    costCentreResult.reconciliation;
+
+console.log(
+    "COST CENTRE RECONCILIATION :",
+    costCentreReconciliation
+);
+
+
+// =========================
+// COST CENTRE ACTIONS
+// =========================
+/*
+costCentreActionResult =
+    await applyMasterActions({
+
+        table: "tally_sync_cost_centres",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id,
+
+        reconciliationResult:
+            costCentreReconciliation
+
+    });
+
+console.log(
+    "COST CENTRE ACTION RESULT :",
+    costCentreActionResult
+);
+
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"COST_CENTRE",
+
+    action:"COMPLETED"
+
+});
+*/
+
+masterFlowDebug({
+    stage:"COST_CENTRE_COMPLETED",
+    sync_batch_id
+});
+
+}
+
+
+if (
+
+    sync.remainingEntities.includes(
+
+        "STOCK"
+
+    )
+
+) {
+
+  /*
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"STOCK",
+
+    action:"PROCESSING"
+
+});
+*/
+
+masterFlowDebug({
+    stage:"STOCK_PROCESSING",
+    sync_batch_id
+});
+// =========================
+// SAVE STOCKS
+// =========================
+/*
+stockResult = await saveStocks({
+    company_code,
+    tally_owner,
+     sync_batch_id,
+    stocks: result.stocks || []
+});
+*/
+stockResult = await BatchManager.run({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTER",
+
+    entity: "STOCK",
+
+    table: "tally_sync_stocks",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    rows:
+
+      masterCollections.STOCK
+
+});
+
+
+console.log("STOCK SAVE :", stockResult);
+
+/*
+stockReconciliation =
+
+  await ReconciliationManager.reconcile({
+
+      table:"tally_sync_stocks",
+
+      module:"MASTER",
+
+      entity_type:"STOCK",
+
+      company_code,
+
+      tally_owner,
+
+      sync_batch_id
+
+  });
+
+
+    await reconcileMasters({
+
+        table: "tally_sync_stocks",
+
+        entity_type: "STOCK",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+*/
+
+stockReconciliation =
+    stockResult.reconciliation;
+
+
+console.log(
+    "STOCK RECONCILIATION :",
+    stockReconciliation
+);
+
+/*
+stockActionResult =
+    await applyMasterActions({
+
+        table: "tally_sync_stocks",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id,
+
+        reconciliationResult:
+            stockReconciliation
+
+    });
+
+console.log(
+    "STOCK ACTION RESULT :",
+    stockActionResult
+);
+
+await updateMasterStatus({
+
+    sync_batch_id,
+
+    module:"STOCK",
+
+    action:"COMPLETED"
+
+});
+
+*/
+
+masterFlowDebug({
+
+    stage:"STOCK_COMPLETED",
+
+    sync_batch_id
+
+});
+
+
+if(stockReconciliation?.missingGuids?.length){
+
+   const missingResult =
+    await sendChunkedToConnector(
+        socket,
+        "stockByGuid",
+        {
+            company,
+            sync_batch_id,
+            tally_owner,
+
+            requestItems:
+                stockReconciliation.missingGuids.map(
+                    item => item.guid
+                )
+        }
+    );
+
+    if(!missingResult.success){
+    await failHttpBatch(missingResult);
+    return res.json(missingResult);
+}
+
+    await saveStocks({
+        company_code,
+        tally_owner,
+        sync_batch_id,
+        stocks:
+            missingResult.stocks || []
+    });
+
+    const stockReconciliationAfterMissing =
+     await ReconciliationManager.reconcile({
+
+        table:"tally_sync_stocks",
+
+        module:"MASTER",
+
+        entity_type:"STOCK",
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+
+/*
+await applyMasterActions({
+
+    table:"tally_sync_stocks",
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id,
+
+    reconciliationResult:
+        stockReconciliationAfterMissing
+
+});
+*/
+
+}
+}
+
+if (
+
+    sync.remainingEntities.includes(
+
+        "VOUCHER"
+
+    )
+
+) {
+  
+await BatchStatusManager.updateModule({
+
+    batch_id: sync_batch_id,
+
+    module: "VOUCHER",
+
+    action: "PROCESSING"
+
+});
+
+masterFlowDebug({
+
+    stage:"VOUCHER_PROCESSING",
+
+    sync_batch_id
+
+});
+
+console.log("=== VOUCHER GUID BEFORE SAVE ===", {
+    count: voucherGuidResult?.items?.length || 0,
+    targetGuidPresent:
+        (voucherGuidResult?.items || []).some(
+            x =>
+                (typeof x === "string" ? x : x?.guid) ===
+                "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6e"
+        )
+});
+
+// ========================================
+// DETECT CHANGED VOUCHERS - SINGLE DB QUERY
+// ========================================
+
+const discoveredVoucherItems =
+    voucherGuidResult?.items || [];
+
+const { data: existingVoucherRows, error: existingVoucherError } =
+    await supabase
+        .from("tally_vouchers")
+        .select("guid, alterid")
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner);
+
+if (existingVoucherError) {
+    throw existingVoucherError;
+}
+
+const existingVoucherMap = new Map(
+    (existingVoucherRows || []).map(row => [
+        row.guid?.trim(),
+        Number(row.alterid || 0)
+    ])
+);
+
+const changedVoucherGuidRows =
+    discoveredVoucherItems
+        .map(item => ({
+            guid:
+                typeof item === "string"
+                    ? item
+                    : item?.guid,
+
+            alterid:
+                typeof item === "string"
+                    ? null
+                    : item?.alterId ??
+                      item?.alterid
+        }))
+        .filter(item => item.guid)
+        .filter(item => {
+            const dbAlterId =
+                existingVoucherMap.get(item.guid.trim());
+
+            return (
+                dbAlterId !== undefined &&
+                item.alterid != null &&
+                Number(item.alterid) > dbAlterId
+            );
+        });
+
+console.log(
+    "=== CHANGED VOUCHERS BEFORE FULL FETCH ==="
+);
+
+console.dir(
+    changedVoucherGuidRows,
+    { depth: null }
+);
+
+console.log(
+    "CHANGED VOUCHER COUNT:",
+    changedVoucherGuidRows.length
+);
+
+
+// 270826 start
+
+// TEMP DEBUG — NEW GUID CHECK
+const targetGuid =
+    "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b79";
+
+const targetItem =
+    discoveredVoucherItems.find(item =>
+        (
+            typeof item === "string"
+                ? item
+                : item?.guid
+        )?.trim() === targetGuid
+    );
+
+const targetDbAlterId =
+    existingVoucherMap.get(targetGuid);
+
+fs.appendFileSync(
+    "./logs/DEBUG-NEW-VOUCHER-CHECK.jsonl",
+    JSON.stringify({
+        targetGuid,
+
+        foundInSnapshotGuidList:
+            !!targetItem,
+
+        snapshotAlterId:
+            typeof targetItem === "string"
+                ? null
+                : targetItem?.alterId ??
+                  targetItem?.alterid,
+
+        foundInDB:
+            targetDbAlterId !== undefined,
+
+        dbAlterId:
+            targetDbAlterId ?? null,
+
+        includedInChangedVoucherGuidRows:
+            changedVoucherGuidRows.some(
+                item =>
+                    item.guid?.trim() === targetGuid
+            ),
+
+        timestamp:
+            new Date().toISOString()
+    }) + "\n"
+);
+
+// 270826 end
+// =========================
+// SAVE VOUCHERS
+// =========================
+const childRepairVoucherCache = [
+    ...(result.vouchers || [])
+];
+
+voucherResult = await saveVouchers({
+    company_code,
+    tally_owner,
+    sync_batch_id,
+    syncMode,
+    vouchers: result.vouchers || [],
+    allVoucherGuids:
+      voucherGuidResult?.items || [],
+
+    executionMode: "ALTER_RECOVERY"
+});
+
+console.log("=== VOUCHER RESULT AFTER SAVE ===");
+console.dir(voucherResult, { depth: null });
+console.log("STATUS :", voucherResult?.status);
+console.log(
+    "MISSING GUIDS :",
+    voucherResult?.missingVoucherGuids
+);
+
+
+console.log("================================");
+const recoveryVoucherGuids = [
+    ...(voucherResult?.missingVoucherGuids || []),
+    ...(voucherResult?.changedVoucherGuids || [])
+];
+
+const uniqueRecoveryVoucherGuids = [
+    ...new Set(recoveryVoucherGuids)
+];
+
+
+console.log(
+    "CHANGED VOUCHER GUIDS :",
+    voucherResult?.changedVoucherGuids
+);
+
+console.log(
+    "RECOVERY GUID COUNT :",
+    uniqueRecoveryVoucherGuids.length
+);
+if (
+    voucherResult.status === "WAITING_FOR_MISSING_VOUCHERS" &&
+    uniqueRecoveryVoucherGuids.length > 0
+) {
+
+const recoveredVoucherGuids =
+    uniqueRecoveryVoucherGuids;
+fs.appendFileSync(
+    "./logs/voucher-by-guid-source-debug.jsonl",
+      JSON.stringify({
+        stage: "BEFORE_VOUCHER_BY_GUID",
+        sync_batch_id,
+        company_code,
+        tally_owner,
+
+        voucherResultStatus:
+            voucherResult?.status,
+
+        allDiscoveredVoucherGuids:
+            voucherGuidResult?.items?.length || 0,
+
+        missingVoucherGuids:
+            voucherResult?.missingVoucherGuids?.length || 0,
+
+        recoveredVoucherGuids:
+            recoveredVoucherGuids?.length || 0,
+
+        firstRecoveredGuids:
+            recoveredVoucherGuids?.slice(0, 10) || [],
+
+        lastRecoveredGuids:
+            recoveredVoucherGuids?.slice(-10) || []
+    }) + "\n"
+);
+
+  fs.appendFileSync(
+    "./logs/voucher-guid-debug.jsonl",
+    JSON.stringify({
+        stage: "BEFORE_VOUCHER_BY_GUID_REQUEST",
+        company,
+        totalMissing:
+        voucherResult?.missingVoucherGuids?.length || 0,
+        missingVoucherGuids: voucherResult.missingVoucherGuids
+    }) + "\n"
+    );
+
+
+   const missingResult =
+    await sendChunkedToConnector(
+        socket,
+        "voucherByGuid",
+        {
+            company,
+
+            sync_batch_id,
+
+            company_code,
+
+            tally_owner,
+
+            module: "VOUCHER",
+
+            entity_type: "VOUCHER",
+
+            snapshot: true,
+
+            syncMode,
+
+            booksBeginningFrom:
+                result.summary?.booksBeginningFrom,
+
+       //     toDate,
+
+            requestItems:
+               recoveredVoucherGuids
+        }
+    );
+
+    fs.appendFileSync(
+    "./logs/voucher-by-guid-source-debug.jsonl",
+    JSON.stringify({
+        stage: "SENDING_VOUCHER_BY_GUID",
+        sync_batch_id,
+
+        requestItemsCount:
+            recoveredVoucherGuids?.length || 0,
+
+        requestItemsFirst10:
+            recoveredVoucherGuids?.slice(0, 10) || [],
+
+        requestItemsLast10:
+            recoveredVoucherGuids?.slice(-10) || []
+    }) + "\n"
+);
+        fs.appendFileSync(
+          "./logs/voucher-guid-debug.jsonl",
+          JSON.stringify({
+            stage: "AFTER_VOUCHER_BY_GUID_RESPONSE",
+            success: missingResult.success,
+            keys: Object.keys(missingResult || {}),
+            voucherCount: missingResult.items?.length || 0
+        }) + "\n"
+       );
+
+       const requestedGuidSet = new Set(
+    recoveredVoucherGuids
+        .map(g =>
+            typeof g === "string"
+                ? g.trim()
+                : g?.guid?.trim()
+        )
+        .filter(Boolean)
+);
+
+const returnedGuidSet = new Set(
+    (missingResult.items || [])
+        .map(v =>
+            (
+                v?.header?.guid ||
+                v?.guid
+            )?.trim()
+        )
+        .filter(Boolean)
+);
+
+const stillMissingAfterRecovery = [
+    ...requestedGuidSet
+].filter(
+    guid => !returnedGuidSet.has(guid)
+);
+
+fs.writeFileSync(
+    `./logs/VOUCHER-RECOVERY-CHECK-${sync_batch_id}.json`,
+    JSON.stringify({
+        requestedCount: requestedGuidSet.size,
+        returnedCount: returnedGuidSet.size,
+        stillMissingCount:
+            stillMissingAfterRecovery.length,
+
+        targetRequested:
+            requestedGuidSet.has(
+                "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6e"
+            ),
+
+        targetReturned:
+            returnedGuidSet.has(
+                "b06ee43a-c023-4bfc-b8d9-3fd85283e679-00002b6e"
+            ),
+
+        stillMissing:
+            stillMissingAfterRecovery
+    }, null, 2)
+);
+
+    if (!missingResult.success) {
+
+    await failHttpBatch(missingResult);
+    return res.json(missingResult);
+
+}
+
+const allFetchedVouchers = [
+    ...(result.vouchers || []),
+    ...(missingResult.items || [])
+];
+
+childRepairVoucherCache.push(
+    ...(missingResult.items || [])
+);
+
+console.log("===== BEFORE SECOND SAVE VOUCHERS =====", {
+    vouchers: allFetchedVouchers.length,
+    first: allFetchedVouchers[0]?.header?.guid,
+    last: allFetchedVouchers[allFetchedVouchers.length - 1]?.header?.guid,
+    firstItemKeys:
+    Object.keys(allFetchedVouchers[0] || {}),
+    firstItem:
+        allFetchedVouchers[0]
+});
+
+    voucherResult = await saveVouchers({
+      company_code,
+      tally_owner,
+      sync_batch_id,
+      syncMode,
+      vouchers: allFetchedVouchers,
+      //vouchers: missingResult.items || [],
+      allVoucherGuids:
+        voucherGuidResult?.items || [],
+       executionMode:
+    "ALTER_RECOVERY" 
+  });
+
+  }
+
+
+console.log("VOUCHER SAVE :", voucherResult);
+
+fs.writeFileSync(
+    `./logs/VOUCHER-SECOND-SAVE-${sync_batch_id}.json`,
+    JSON.stringify({
+        batch_id: sync_batch_id,
+
+        voucherResult: {
+            status: voucherResult?.status,
+
+            missingCount:
+                voucherResult?.missingVoucherGuids?.length || 0,
+
+            missingGuids:
+                voucherResult?.missingVoucherGuids || []
+        }
+    }, null, 2)
+);
+
+// =========================
+// PARENT VOUCHER RECONCILIATION GATE
+// =========================
+
+const {
+    data: parentReconciliationRows,
+    error: parentReconciliationError
+} = await supabase
+    .from("voucher_reconciliation_view")
+    .select("guid, status")
+    .eq("company_code", company_code)
+    .eq("tally_owner", tally_owner);
+
+if (parentReconciliationError) {
+
+    throw new Error(
+        `Voucher reconciliation check failed: ${
+            parentReconciliationError.message
+        }`
+    );
+
+}
+
+const parentMissingRows =
+    (parentReconciliationRows || [])
+        .filter(
+            row => row.status === "MISSING"
+        );
+
+const parentExtraRows =
+    (parentReconciliationRows || [])
+        .filter(
+            row => row.status === "EXTRA"
+        );
+
+console.log(
+    "===================================="
+);
+
+console.log(
+    "PARENT VOUCHER RECONCILIATION"
+);
+
+console.log(
+    "MISSING:",
+    parentMissingRows.length
+);
+
+console.log(
+    "EXTRA:",
+    parentExtraRows.length
+);
+
+console.log(
+    "===================================="
+);
+
+if (
+    parentMissingRows.length > 0 ||
+    parentExtraRows.length > 0
+) {
+
+    throw new Error(
+        `Parent voucher reconciliation not clean. ` +
+        `MISSING: ${parentMissingRows.length}, ` +
+        `EXTRA: ${parentExtraRows.length}`
+    );
+
+}
+
+await BatchStatusManager.updateModule({
+
+    batch_id: sync_batch_id,
+
+    module: "VOUCHER",
+
+    action: "COMPLETED"
+
+});
+
+
+
+masterFlowDebug({
+
+    stage:"VOUCHER_COMPLETED",
+
+    sync_batch_id
+
+});
+
+
+
+// =========================
+// PHASE-2 CHILD RECONCILIATION
+// =========================
+
+let childReconciliationResult =
+    await runChildVoucherReconciliation({
+
+        company_code,
+
+        tally_owner,
+
+        sync_batch_id
+
+    });
+
+console.log(
+    "CHILD RECONCILIATION INITIAL RESULT:",
+    childReconciliationResult
+);
+
+fs.writeFileSync(
+    `./logs/CHILD-REPAIR-PLAN-${sync_batch_id}.json`,
+    JSON.stringify(
+        childReconciliationResult?.repairPlan || [],
+        null,
+        2
+    )
+);
+
+fs.writeFileSync(
+    `./logs/CHILD-RECON-GATE-${sync_batch_id}.json`,
+    JSON.stringify({
+        stage: "INITIAL_CHILD_RECONCILIATION",
+
+        sync_batch_id,
+
+        completed:
+            childReconciliationResult?.completed,
+
+        totalMissing:
+            childReconciliationResult?.totalMissing,
+
+        totalExtra:
+            childReconciliationResult?.totalExtra,
+
+        totalAmountMismatch:
+            childReconciliationResult?.totalAmountMismatch,
+
+        totalStockMismatch:
+            childReconciliationResult?.totalStockMismatch,
+
+        missingTables:
+            Object.keys(
+                childReconciliationResult?.missingByChildTable || {}
+            ),
+
+        amountMismatchTables:
+            Object.keys(
+                childReconciliationResult?.amountMismatchByChildTable || {}
+            ),
+
+        extraTables:
+            Object.keys(
+                childReconciliationResult?.extraByChildTable || {}
+            ),
+
+        stockMismatchTables:
+            Object.keys(
+                childReconciliationResult?.stockMismatchByChildTable || {}
+            ),
+
+        stockMismatchRows:
+            childReconciliationResult?.stockMismatchByChildTable || {}
+
+    }, null, 2)
+);
+
+// =========================================
+// CHILD REPAIR LOOP
+// =========================================
+
+const MAX_CHILD_REPAIR_ROUNDS = 10;
+
+let childRepairRound = 0;
+
+if (
+    !childReconciliationResult.completed
+) {
+
+    childRepairRound++;
+
+    console.log(
+        "===================================="
+    );
+
+    console.log(
+        "CHILD REPAIR ROUND:",
+        childRepairRound,
+        "/",
+        MAX_CHILD_REPAIR_ROUNDS
+    );
+
+    console.log(
+        "===================================="
+    );
+
+
+    const missingByChildTable =
+        childReconciliationResult.missingByChildTable || {};
+
+    
+
+    const amountMismatchByChildTable =
+        childReconciliationResult.amountMismatchByChildTable || {};
+
+    const stockMismatchByChildTable =
+    childReconciliationResult.stockMismatchByChildTable || {};
+
+    // 27.08.26
+    // GENERIC REPAIR PLAN
+
+    // =========================================
+    // COLLECT UNIQUE MISSING VOUCHER GUIDS
+    // =========================================
+
+    const childMissingVoucherGuids = [
+        ...new Set(
+
+            Object.values(
+                missingByChildTable
+            )
+            .flat()
+            .map(row =>
+                (
+                    row.voucher_guid ||
+                    row.guid
+                )?.trim()
+            )
+            .filter(Boolean)
+
+        )
+    ];
+
+    const childMismatchVoucherGuids = [
+    ...new Set(
+        Object.values(
+            amountMismatchByChildTable
+        )
+        .flat()
+        .map(row =>
+            (
+                row.voucher_guid ||
+                row.guid
+            )?.trim()
+        )
+        .filter(Boolean)
+    )
+];
+
+const stockMismatchVoucherGuids = [
+    ...new Set(
+        Object.values(
+            stockMismatchByChildTable
+        )
+        .flat()
+        .map(row =>
+            (
+                row.voucher_guid ||
+                row.guid
+            )?.trim()
+        )
+        .filter(Boolean)
+    )
+];
+
+const inventoryCountMismatchVoucherGuids = [
+    ...new Set(
+        Object.values(
+            childReconciliationResult.inventoryCountMismatchByChildTable || {}
+        )
+        .flat()
+        .map(row =>
+            (
+                row.voucher_guid ||
+                row.guid
+            )?.trim()
+        )
+        .filter(Boolean)
+    )
+];
+
+
+
+    console.log(
+        "CHILD MISSING VOUCHER GUIDS:",
+        childMissingVoucherGuids.length
+    );
+
+
+// =========================================
+// STOCK VOUCHER ROW COUNT RECONCILIATION
+// =========================================
+/*
+const {
+    data: stockVoucherRecoRows,
+    error: stockVoucherRecoError
+} = await supabase
+    .from("stock_voucher_rows_reco")
+    .select("guid")
+    .eq("company_code", company_code)
+    .eq("tally_owner", tally_owner);
+
+if (stockVoucherRecoError) {
+    throw new Error(
+        `Stock voucher reconciliation failed: ${
+            stockVoucherRecoError.message
+        }`
+    );
+}
+
+const stockVoucherRepairGuids = [
+    ...new Set(
+        (stockVoucherRecoRows || [])
+            .map(row => row.guid?.trim())
+            .filter(Boolean)
+    )
+];
+
+console.log(
+    "STOCK VOUCHER COUNT MISMATCH GUIDS:",
+    stockVoucherRepairGuids.length
+);
+
+console.log(
+    "STOCK VOUCHER REPAIR GUIDS:",
+    stockVoucherRepairGuids
+);
+*/
+
+    // =========================================
+    // FETCH MISSING VOUCHERS
+    // =========================================
+
+ const cachedVoucherMap = new Map(
+    childRepairVoucherCache.map(voucher => {
+
+        const guid =
+            (
+                voucher?.header?.guid ||
+                voucher?.guid
+            )?.trim();
+
+        return [
+            guid,
+            voucher
+        ];
+
+    }).filter(
+        ([guid]) => Boolean(guid)
+    )
+);
+
+/*
+for (
+    const [childTable, repairs]
+    of Object.entries(repairByTable)
+) {
+
+    if (!repairs?.length) {
+        continue;
+    }
+
+    const repairVoucherGuids = [
+        ...new Set(
+            repairs
+                .map(repair => repair.guid)
+                .filter(Boolean)
+        )
+    ];
+
+    const extraGuids =
+    repairs
+        .filter(repair => repair.action === "DELETE")
+        .map(repair => repair.guid)
+        .filter(Boolean);
+
+    const fetchedVouchers =
+        repairVoucherGuids
+            .map(guid =>
+                cachedVoucherMap.get(guid)
+            )
+            .filter(Boolean);
+
+    console.log(
+        "GENERIC CHILD REPAIR:",
+        childTable,
+        "| GUIDS:",
+        repairVoucherGuids.length,
+        "| VOUCHERS:",
+        fetchedVouchers.length
+    );
+
+    if (
+    !fetchedVouchers.length &&
+    extraGuids.length === 0
+) {
+    continue;
+}
+
+    const childRepairResult =
+        await saveVouchers({
+
+            company_code,
+            tally_owner,
+            sync_batch_id,
+            syncMode,
+
+            vouchers:
+                fetchedVouchers,
+
+            orphanGuids:
+                extraGuids,
+
+            repairVoucherGuids:
+                repairVoucherGuids,
+
+            allVoucherGuids:
+                voucherGuidResult?.items || [],
+
+            executionMode:
+                "CHILD_RECONCILIATION",
+
+            childRepairTables: [
+                childTable
+            ]
+
+        });
+
+    console.log(
+        "GENERIC CHILD REPAIR RESULT:",
+        {
+            childTable,
+            status:
+                childRepairResult?.status,
+            success:
+                childRepairResult?.success
+        }
+    );
+}
+*/
+
+
+
+if (
+    childMissingVoucherGuids.length > 0 ||
+    childMismatchVoucherGuids.length > 0 ||
+    stockMismatchVoucherGuids.length > 0 ||
+    inventoryCountMismatchVoucherGuids.length > 0
+) {
+
+    const cachedMissingVouchers =
+        childMissingVoucherGuids
+            .map(guid =>
+                cachedVoucherMap.get(guid)
+            )
+            .filter(Boolean);
+
+    const uncachedMissingVoucherGuids = [
+        ...new Set([
+            ...childMissingVoucherGuids,
+            ...childMismatchVoucherGuids,
+            ...stockMismatchVoucherGuids,
+            ...inventoryCountMismatchVoucherGuids
+        ])
+    ].filter(
+        guid =>
+            !cachedVoucherMap.has(guid)
+    );
+
+let childMissingResult = {
+    success: true,
+    items: []
+};
+
+    if (uncachedMissingVoucherGuids.length > 0) {
+
+    childMissingResult =
+        await sendChunkedToConnector(
+
+            socket,
+
+            "voucherByGuid",
+
+            {
+
+                company,
+
+                sync_batch_id,
+
+                company_code,
+
+                tally_owner,
+
+                module: "VOUCHER",
+
+                entity_type: "VOUCHER",
+
+                snapshot: true,
+
+                syncMode,
+
+                booksBeginningFrom:
+                    result.summary?.booksBeginningFrom,
+
+                requestItems:
+                    uncachedMissingVoucherGuids
+
+            }
+
+        );
+
+
+    if (!childMissingResult.success) {
+
+        await failHttpBatch(
+            childMissingResult
+        );
+
+        return res.json(
+            childMissingResult
+        );
+
+    }
+
+
+    childRepairVoucherCache.push(
+        ...(childMissingResult.items || [])
+    );
+
+    
+    for (const voucher of childMissingResult.items || []) {
+
+        const guid =
+            (
+                voucher?.header?.guid ||
+                voucher?.guid
+            )?.trim();
+
+        if (guid) {
+
+            cachedVoucherMap.set(
+                guid,
+                voucher
+            );
+
+        }
+
+    }
+   
+   
+   
+
+}
+
+
+// =========================================
+// EXECUTE GENERIC REPAIR PLAN
+// =========================================
+const genericRepairPlan =
+    childReconciliationResult.repairPlan || [];
+
+const repairByTable = {};
+
+for (const repair of genericRepairPlan) {
+
+    if (!repair?.targetTable) {
+        continue;
+    }
+
+    if (!repairByTable[repair.targetTable]) {
+        repairByTable[repair.targetTable] = [];
+    }
+
+    repairByTable[repair.targetTable].push(repair);
+}
+
+for (
+    const [childTable, repairs]
+    of Object.entries(repairByTable)
+) {
+
+    if (!repairs?.length) {
+        continue;
+    }
+
+    const repairsByAction = {};
+
+    for (const repair of repairs) {
+
+        const action =
+            String(repair.action || "")
+                .trim()
+                .toUpperCase();
+
+        if (!action) {
+            continue;
+        }
+
+        if (!repairsByAction[action]) {
+            repairsByAction[action] = [];
+        }
+
+        repairsByAction[action].push(repair);
+    }
+
+    for (
+        const [repairAction, actionRepairs]
+        of Object.entries(repairsByAction)
+    ) {
+
+        const repairVoucherGuids = [
+            ...new Set(
+                actionRepairs
+                    .map(
+                        repair =>
+                            repair.guid?.trim()
+                    )
+                    .filter(Boolean)
+            )
+        ];
+
+        if (!repairVoucherGuids.length) {
+            continue;
+        }
+
+        const extraGuids =
+            repairAction === "DELETE"
+                ? repairVoucherGuids
+                : [];
+
+        const fetchedVouchers =
+            repairVoucherGuids
+                .map(guid =>
+                    cachedVoucherMap.get(guid)
+                )
+                .filter(Boolean);
+
+        if (
+            repairAction !== "DELETE" &&
+            !fetchedVouchers.length
+        ) {
+            continue;
+        }
+
+        const childRepairResult =
+            await saveVouchers({
+
+                company_code,
+                tally_owner,
+                sync_batch_id,
+                syncMode,
+
+                repairAction,
+
+                vouchers:
+                    fetchedVouchers,
+
+                orphanGuids: {
+                    [childTable]:
+                        extraGuids
+                },
+
+                repairVoucherGuids,
+
+                allVoucherGuids:
+                    voucherGuidResult?.items || [],
+
+                executionMode:
+                    "CHILD_RECONCILIATION",
+
+                childRepairTables: [
+                    childTable
+                ]
+
+            });
+
+        console.log(
+            "GENERIC CHILD REPAIR RESULT:",
+            {
+                childTable,
+                repairAction,
+                planGuidCount:
+                    repairVoucherGuids.length,
+                deleteGuidCount:
+                    extraGuids.length,
+                status:
+                    childRepairResult?.status,
+                success:
+                    childRepairResult?.success
+            }
+        );
+
+        if (!childRepairResult?.success) {
+
+            await failHttpBatch(
+                childRepairResult
+            );
+
+            return res.json(
+                childRepairResult
+            );
+        }
+    }
+}
+    console.log(
+        "CHILD REPAIR CACHE:",
+        {
+            requested:
+                childMissingVoucherGuids.length,
+
+            cached:
+                cachedMissingVouchers.length,
+
+            uncached:
+                uncachedMissingVoucherGuids.length
+        }
+    );
+
+
+        // =========================================
+        // REPAIR EACH CHILD TABLE SEPARATELY
+        // =========================================
+
+        // 27.08.26 OLD TABLE-WISE MISSING REPAIR LOOP
+// Replaced by generic repairPlan flow.
+// Kept temporarily for rollback/reference.
+
+        for (
+            const [childTable, rows]
+            of Object.entries(
+                missingByChildTable
+            )
+        ) {
+
+
+        }
+
+    }
+
+
+        // =========================================
+    // AMOUNT MISMATCH CHILD REPAIR
+    // =========================================
+
+    for (
+        const [childTable, rows]
+        of Object.entries(
+            amountMismatchByChildTable
+        )
+    ) {
+// 27.08.26 OLD AMOUNT MISMATCH TABLE-WISE REPAIR
+// Replaced by generic repairPlan flow.
+// Kept temporarily for rollback/reference.
+/*
+        if (!rows?.length) {
+            continue;
+        }
+
+        const repairVoucherGuids = [
+            ...new Set(
+                rows
+                    .map(row =>
+                        (
+                            row.voucher_guid ||
+                            row.guid
+                        )?.trim()
+                    )
+                    .filter(Boolean)
+            )
+        ];
+
+        const fetchedVouchers =
+            repairVoucherGuids
+                .map(guid =>
+                    childRepairVoucherCache.find(voucher => {
+
+                        const voucherGuid =
+                            (
+                                voucher?.header?.guid ||
+                                voucher?.guid
+                            )?.trim();
+
+                        return voucherGuid === guid;
+
+                    })
+                )
+                .filter(Boolean);
+
+        console.log(
+            "AMOUNT MISMATCH REPAIR:",
+            childTable,
+            "| GUIDS:",
+            repairVoucherGuids.length,
+            "| VOUCHERS:",
+            fetchedVouchers.length
+        );
+
+        if (!fetchedVouchers.length) {
+            continue;
+        }
+
+        const childRepairResult =
+            await saveVouchers({
+
+                company_code,
+                tally_owner,
+                sync_batch_id,
+                syncMode,
+
+                vouchers:
+                    fetchedVouchers,
+                
+                repairVoucherGuids:
+                   repairVoucherGuids,
+
+                allVoucherGuids:
+                    voucherGuidResult?.items || [],
+
+                executionMode:
+                    "CHILD_RECONCILIATION",
+
+                childRepairTables: [
+                    childTable
+                ]
+            });
+
+        console.log(
+            "AMOUNT MISMATCH REPAIR RESULT:",
+            childRepairResult
+        );
+*/
+    }
+
+    // =========================================
+// STOCK ROW COUNT MISMATCH REPAIR
+// =========================================
+
+for (
+    const [childTable, rows]
+    of Object.entries(
+        stockMismatchByChildTable
+    )
+) {
+/*
+// 27.08.26 OLD STOCK MISMATCH TABLE-WISE REPAIR
+// Replaced by generic repairPlan flow.
+// Kept temporarily for rollback/reference.
+
+    if (!rows?.length) {
+        continue;
+    }
+
+    const repairVoucherGuids = [
+        ...new Set(
+            rows
+                .map(row =>
+                    (
+                        row.voucher_guid ||
+                        row.guid
+                    )?.trim()
+                )
+                .filter(Boolean)
+        )
+    ];
+
+    const fetchedVouchers =
+        repairVoucherGuids
+            .map(guid =>
+                childRepairVoucherCache.find(
+                    voucher => {
+
+                        const voucherGuid =
+                            (
+                                voucher?.header?.guid ||
+                                voucher?.guid
+                            )?.trim();
+
+                        return voucherGuid === guid;
+
+                    }
+                )
+            )
+            .filter(Boolean);
+
+    console.log(
+        "STOCK ROW COUNT REPAIR:",
+        childTable,
+        "| GUIDS:",
+        repairVoucherGuids.length,
+        "| VOUCHERS:",
+        fetchedVouchers.length
+    );
+
+    if (!fetchedVouchers.length) {
+        continue;
+    }
+
+    const stockRepairResult =
+        await saveVouchers({
+
+            company_code,
+            tally_owner,
+            sync_batch_id,
+            syncMode,
+
+            vouchers:
+                fetchedVouchers,
+
+            repairVoucherGuids:
+                repairVoucherGuids,
+
+            allVoucherGuids:
+                voucherGuidResult?.items || [],
+
+            executionMode:
+                "CHILD_RECONCILIATION",
+
+            childRepairTables: [
+                childTable
+            ]
+
+        });
+
+    console.log(
+        "STOCK ROW COUNT REPAIR RESULT:",
+        {
+            childTable,
+            status:
+                stockRepairResult?.status,
+            success:
+                stockRepairResult?.success,
+            result:
+                stockRepairResult
+        }
+    );
+*/
+}
+    
+
+    // =========================================
+    // RE-CHECK AFTER THIS REPAIR ROUND
+    // =========================================
+/*
+    childReconciliationResult =
+        await runChildVoucherReconciliation({
+
+            company_code,
+
+            tally_owner,
+
+            sync_batch_id
+
+        });
+
+
+    console.log(
+        "CHILD RECONCILIATION AFTER ROUND:",
+        childRepairRound,
+
+        childReconciliationResult
+    );
+*/
+}
+
+
+// =========================================
+// FINAL RESULT
+// =========================================
+/*
+if (
+    !childReconciliationResult.completed
+) {
+
+    throw new Error(
+        `Child voucher reconciliation is still not clean after ${childRepairRound} repair rounds`
+    );
+
+}
+*/
+
+console.log(
+    "CHILD VOUCHER RECONCILIATION COMPLETED IN ROUND:",
+    childRepairRound
+);
+
+// =========================
+// CHILD VOUCHER STATUS COMPLETE
+// =========================
+
+const childVoucherStatusResult =
+    await BatchStatusManager.updateModule({
+
+        batch_id: sync_batch_id,
+
+        module: "VOUCHER",
+        entity: "VOUCHER",
+        action: "COMPLETED"
+
+    });
+
+console.log(
+    "CHILD VOUCHER STATUS :",
+    childVoucherStatusResult
+);
+
+
+
+
+}
+
+
+
+
+// =========================
+// MASTER STATUS COMPLETE
+// =========================
+
+const masterStatusResult =
+   await BatchStatusManager.updateModule({
+
+    batch_id: sync_batch_id,
+
+    module: "MASTERS",
+
+    action: "COMPLETED"
+
+});
+
+masterFlowDebug({
+
+    stage:"MASTERS_COMPLETED",
+
+    sync_batch_id
+
+});
+
+console.log(
+    "MASTER STATUS :",
+    masterStatusResult
+);
+
+// =========================
+// FINAL BATCH COMPLETION
+// =========================
+
+const batchCompleted =
+    await BatchStatusManager.markCompleted({
+
+        batch_id: sync_batch_id
+
+    });
+
+console.log(
+    "BATCH COMPLETED :",
+    batchCompleted
+);
+
+// ==================================================
+// POST-SYNC RECONCILIATION
+// ==================================================
+
+const ledgerReconResponse =
+    await fetch(
+        `${req.protocol}://${req.get("host")}` +
+        `/getTrialBalance` +
+        `?company_code=${encodeURIComponent(company_code)}` +
+        `&tally_owner=${encodeURIComponent(tally_owner)}` +
+        `&sync_batch_id=${encodeURIComponent(sync_batch_id)}`
+    );
+
+const ledgerReconResult =
+    await ledgerReconResponse.json();
+
+/*
+const stockReconResponse =
+    await fetch(
+        `${req.protocol}://${req.get("host")}` +
+        `/getStockGodownBalance` +
+        `?company_code=${encodeURIComponent(company_code)}` +
+        `&tally_owner=${encodeURIComponent(tally_owner)}` +
+        `&sync_batch_id=${encodeURIComponent(sync_batch_id)}`
+    );
+*/
+
+const stockReconResponse = await fetch(
+    `${req.protocol}://${req.get("host")}/getStockGodownBalance?company_code=${company_code}&tally_owner=${tally_owner}&sync_batch_id=${sync_batch_id}&booksBeginningFrom=${encodeURIComponent(result?.summary?.booksBeginningFrom || "")}`
+);
+
+const stockReconResult =
+    await stockReconResponse.json();
+
+
+console.log(
+    "POST-SYNC RECONCILIATION:",
+    {
+        ledger: ledgerReconResult,
+        stock: stockReconResult
+    }
+);
+
+// ==================================================
+// CLOSE BATCH AFTER RECONCILIATION
+// ==================================================
+
+const {
+    data: finalBatch,
+    error: finalBatchError
+} = await supabase
+    .from("sync_batches")
+    .select(
+        "ledger_reconciliation_completed, stock_reconciliation_completed"
+    )
+    .eq(
+        "batch_id",
+        sync_batch_id
+    )
+    .single();
+
+if (finalBatchError) {
+    throw finalBatchError;
+}
+
+const ledgerPassed =
+    finalBatch?.ledger_reconciliation_completed === true;
+
+const stockPassed =
+    finalBatch?.stock_reconciliation_completed === true;
+
+if (
+    ledgerPassed &&
+    stockPassed
+) {
+
+   await supabase
+    .from("sync_batches")
+    .update({
+        batch_status: "CLOSED",
+        batch_closed: true,
+        sync_progress: {
+            stage: "COMPLETED",
+            progress: 100,
+            updated_at: new Date().toISOString(),
+            phase_progress: null
+        }
+    })
+    .eq(
+        "batch_id",
+        sync_batch_id
+    );
+
+    console.log(
+        "BATCH CLOSED: RECONCILIATION PASS"
+    );
+
+} else {
+
+    console.log(
+        "BATCH NOT CLOSED: RECONCILIATION FAILED",
+        {
+            ledgerPassed,
+            stockPassed
+        }
+    );
+
+}
+
+
+/* 280826
+batchCompletedSuccessfully = true;
+
+await BatchStatusManager.releaseHttpBatch({
+
+    batch_id: sync_batch_id,
+
+    worker_id: httpWorkerId
+
+});
+*/
+
+batchCompletedSuccessfully = true;
+
+if (httpWorkerId) {
+
+    await BatchStatusManager.releaseHttpBatch({
+
+        batch_id: sync_batch_id,
+
+        worker_id: httpWorkerId
+
+    });
+
+}
+
+const cleanupResult =
+await CleanupManager.cleanup({
+
+    company_code,
+
+    tally_owner,
+
+    sync_batch_id
+
+});
+
+
+console.log(
+    "MASTER CLEANUP RESULT :",
+    cleanupResult
+);
+
+return res.json({
+  ...result,
+db: {
+    groups: groupResult,
+    groupReconciliation: groupReconciliation,
+   // groupAction: groupActionResult,
+    ledgers: ledgerResult,
+    
+    godowns: godownResult,
+    godownReconciliation: godownReconciliation,
+  //  godownAction: godownActionResult,
+
+     stockGroups: stockGroupResult,
+    stockGroupReconciliation: stockGroupReconciliation,
+   // stockGroupAction: stockGroupActionResult,
+
+
+    stocks: stockResult,
+    stockReconciliation: stockReconciliation,
+    //stockAction: stockActionResult,
+    costCentres: costCentreResult,
+    costCentreReconciliation: costCentreReconciliation,
+    //costCentreAction: costCentreActionResult,
+
+    units: unitResult,
+    unitReconciliation: unitReconciliation,
+    //unitAction: unitActionResult,
+    
+    vouchers: voucherResult,
+
+}
+});
+
+}catch (err) {
+
+    console.error(err);
+
+    const isTallyOffline =
+      err?.message === "TALLY_OFFLINE" ||
+      err?.message?.includes("TALLY_OFFLINE");
+
+    if (
+      sync_batch_id &&
+      !batchCompletedSuccessfully
+    ) {
+
+      try {
+
+        if (isTallyOffline) {
+
+          await BatchStatusManager.markWaitingConnector({
+            batch_id: sync_batch_id
+          });
+
+          console.log(
+            "🔌 TALLY OFFLINE — BATCH WAITING:",
+            sync_batch_id
+          );
+
+        } else {
+
+          await BatchStatusManager.markFailed({
+            batch_id: sync_batch_id,
+            error: err
+          });
+
+        }
+
+        if (httpWorkerId) {
+
+          await BatchStatusManager.releaseHttpBatch({
+            batch_id: sync_batch_id,
+            worker_id: httpWorkerId
+          });
+
+        }
+
+      } catch (failureUpdateError) {
+
+        console.error(
+          "Failed to finalize sync batch:",
+          failureUpdateError
+        );
+
+      }
+
+    }
+
+    return res.status(
+      isTallyOffline ? 503 : 500
+    ).json({
+
+      success: false,
+
+      error:
+        isTallyOffline
+          ? "TALLY_OFFLINE"
+          : (
+              err.response?.data ||
+              err.message
+            )
+
+    });
+
+}
+
+});
+
+// ============================================================
+// BALANCE SHEET SUMMARY API
+// ============================================================
+app.get("/getBalanceSheetSummary", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const fy_start_date =
+      String(req.query.fy_start_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const valuation_method =
+      String(req.query.valuation_method || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!fy_start_date) {
+      return res.json({
+        success: false,
+        error: "fy_start_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    if (!valuation_method) {
+      return res.json({
+        success: false,
+        error: "valuation_method missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_balance_sheet_summary",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_fy_start_date: fy_start_date,
+        p_as_of_date: as_of_date,
+        p_valuation_method: valuation_method
+      }
+    );
+
+    if (error) {
+      console.error(
+        "BALANCE SHEET SUMMARY RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "BALANCE SHEET SUMMARY API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// BALANCE SHEET DRILLDOWN API
+// ============================================================
+app.get("/getBalanceSheetDrilldown", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const node_type =
+      String(req.query.node_type || "").trim().toUpperCase();
+
+    const node_guid =
+      String(req.query.node_guid || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!node_type) {
+      return res.json({
+        success: false,
+        error: "node_type missing"
+      });
+    }
+
+    if (!node_guid) {
+      return res.json({
+        success: false,
+        error: "node_guid missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_balance_sheet_drilldown",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_node_type: node_type,
+        p_node_guid: node_guid,
+        p_as_of_date: as_of_date
+      }
+    );
+
+    if (error) {
+      console.error(
+        "BALANCE SHEET DRILLDOWN RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "BALANCE SHEET DRILLDOWN API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ============================================================
+// BALANCE SHEET LEDGER SUMMARY API
+// ============================================================
+app.get("/getBalanceSheetLedgerSummary", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    const fy_start_date =
+      String(req.query.fy_start_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    if (!fy_start_date) {
+      return res.json({
+        success: false,
+        error: "fy_start_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_balance_sheet_ledger_summary",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_ledger_guid: ledger_guid,
+        p_fy_start_date: fy_start_date,
+        p_as_of_date: as_of_date
+      }
+    );
+
+    if (error) {
+      console.error(
+        "BALANCE SHEET LEDGER SUMMARY RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "BALANCE SHEET LEDGER SUMMARY API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// BALANCE SHEET LEDGER MONTH DETAIL API
+// ============================================================
+app.get("/getBalanceSheetLedgerMonthDetail", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    const fy_start_date =
+      String(req.query.fy_start_date || "").trim();
+
+    const month_start =
+      String(req.query.month_start || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    if (!fy_start_date) {
+      return res.json({
+        success: false,
+        error: "fy_start_date missing"
+      });
+    }
+
+    if (!month_start) {
+      return res.json({
+        success: false,
+        error: "month_start missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_balance_sheet_ledger_month_detail",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_ledger_guid: ledger_guid,
+        p_fy_start_date: fy_start_date,
+        p_month_start: month_start,
+        p_as_of_date: as_of_date
+      }
+    );
+
+    if (error) {
+      console.error(
+        "BALANCE SHEET LEDGER MONTH DETAIL RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "BALANCE SHEET LEDGER MONTH DETAIL API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ============================================================
+// PROFIT & LOSS LEDGER SUMMARY API
+// ============================================================
+app.get("/getProfitLossLedgerSummary", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    const fy_start_date =
+      String(req.query.fy_start_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    if (!fy_start_date) {
+      return res.json({
+        success: false,
+        error: "fy_start_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_profit_loss_ledger_summary",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_ledger_guid: ledger_guid,
+        p_fy_start_date: fy_start_date,
+        p_as_of_date: as_of_date
+      }
+    );
+
+    if (error) {
+      console.error(
+        "PROFIT & LOSS LEDGER SUMMARY RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "PROFIT & LOSS LEDGER SUMMARY API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// PROFIT & LOSS LEDGER MONTH DETAIL API
+// ============================================================
+app.get("/getProfitLossLedgerMonthDetail", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const ledger_guid =
+      String(req.query.ledger_guid || "").trim();
+
+    const fy_start_date =
+      String(req.query.fy_start_date || "").trim();
+
+    const month_start =
+      String(req.query.month_start || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    if (!fy_start_date) {
+      return res.json({
+        success: false,
+        error: "fy_start_date missing"
+      });
+    }
+
+    if (!month_start) {
+      return res.json({
+        success: false,
+        error: "month_start missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_profit_loss_ledger_month_detail",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_ledger_guid: ledger_guid,
+        p_fy_start_date: fy_start_date,
+        p_month_start: month_start,
+        p_as_of_date: as_of_date
+      }
+    );
+
+    if (error) {
+      console.error(
+        "PROFIT & LOSS LEDGER MONTH DETAIL RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "PROFIT & LOSS LEDGER MONTH DETAIL API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ============================================================
+// PROFIT & LOSS SUMMARY API
+// ============================================================
+app.get("/getProfitLossSummary", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const fy_start_date =
+      String(req.query.fy_start_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    const valuation_method =
+      String(req.query.valuation_method || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!fy_start_date) {
+      return res.json({
+        success: false,
+        error: "fy_start_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    if (!valuation_method) {
+      return res.json({
+        success: false,
+        error: "valuation_method missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_profit_loss_summary",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_from_date: fy_start_date,
+        p_to_date: as_of_date,
+        p_as_of_date: as_of_date,
+        p_valuation_method: valuation_method
+      }
+    );
+
+    if (error) {
+      console.error(
+        "PROFIT & LOSS SUMMARY RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "PROFIT & LOSS SUMMARY API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ============================================================
+// PROFIT & LOSS DRILLDOWN API
+// ============================================================
+app.get("/getProfitLossDrilldown", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const node_type =
+      String(req.query.node_type || "").trim().toUpperCase();
+
+    const node_guid =
+      String(req.query.node_guid || "").trim();
+
+    const fy_start_date =
+      String(req.query.fy_start_date || "").trim();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!node_type) {
+      return res.json({
+        success: false,
+        error: "node_type missing"
+      });
+    }
+
+   if (node_type !== "ROOT" && !node_guid) {
+  return res.json({
+    success: false,
+    error: "node_guid missing"
+  });
+}
+
+    if (!fy_start_date) {
+      return res.json({
+        success: false,
+        error: "fy_start_date missing"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+   const { data, error } = await supabase.rpc(
+  "get_profit_loss_drilldown",
+  {
+    p_company_code: company_code,
+    p_tally_owner: tally_owner,
+    p_node_type: node_type,
+    p_node_guid: node_guid,
+    p_from_date: fy_start_date,
+    p_to_date: as_of_date
+  }
+);
+
+    if (error) {
+      console.error(
+        "PROFIT & LOSS DRILLDOWN RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "PROFIT & LOSS DRILLDOWN API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// =========================
+// TEST SAVE GROUPS
+// =========================
+
+app.post("/testSaveGroups", async (req, res) => {
+
+    try {
+
+        const result = await saveGroups(req.body);
+
+        return res.json({
+            success: true,
+            ...result
+        });
+
+    } catch (err) {
+
+        console.error(err);
+
+        return res.status(500).json({
+
+            success: false,
+            error: err.message
+
+        });
+
+    }
+
+});
+
+ // ============================================================
+// CASH FLOW API
+// ============================================================
+app.get("/getCashFlow", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const from_date =
+      String(req.query.from_date || "").trim();
+
+    const to_date =
+      String(req.query.to_date || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!from_date) {
+      return res.json({
+        success: false,
+        error: "from_date missing"
+      });
+    }
+
+    if (!to_date) {
+      return res.json({
+        success: false,
+        error: "to_date missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_cash_flow_core",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_from_date: from_date,
+        p_to_date: to_date
+      }
+    );
+
+    if (error) {
+      console.error(
+        "CASH FLOW RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "CASH FLOW API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// FUND FLOW API
+// ============================================================
+app.get("/getFundFlow", async (req, res) => {
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    const as_of_date =
+      String(req.query.as_of_date || "").trim();
+
+    // -----------------------------
+    // VALIDATION
+    // -----------------------------
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!as_of_date) {
+      return res.json({
+        success: false,
+        error: "as_of_date missing"
+      });
+    }
+
+    // -----------------------------
+    // RPC
+    // -----------------------------
+
+    const { data, error } = await supabase.rpc(
+      "get_fund_flow_core",
+      {
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_as_of_date: as_of_date
+      }
+    );
+
+    if (error) {
+      console.error(
+        "FUND FLOW RPC ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ============================================================
+// FUND FLOW CONFIGURATION APIs
+// ============================================================
+
+
+// ============================================================
+// 1. GET LEDGER CONFIG
+// ============================================================
+app.get("/getFundFlowLedgerConfig", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("fund_flow_ledger_config")
+      .select("*")
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .order("id", { ascending: true });
+
+    if (error) {
+      console.error("FUND FLOW LEDGER CONFIG GET ERROR:", error);
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    // =========================
+    // LOAD LEDGER NAMES
+    // =========================
+
+    const ledgerGuids = (data || [])
+      .map(row => row.ledger_guid)
+      .filter(Boolean);
+
+    let ledgerMap = new Map();
+
+    if (ledgerGuids.length > 0) {
+
+      const { data: ledgers, error: ledgerError } =
+        await supabase
+          .from("tally_sync_ledgers")
+          .select("guid,name")
+          .eq("company_code", company_code)
+          .eq("tally_owner", tally_owner)
+          .in("guid", ledgerGuids);
+
+      if (ledgerError) {
+        console.error(
+          "FUND FLOW LEDGER MASTER LOOKUP ERROR:",
+          ledgerError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: ledgerError.message
+        });
+      }
+
+      ledgerMap = new Map(
+        (ledgers || []).map(ledger => [
+          ledger.guid,
+          ledger.name
+        ])
+      );
+    }
+
+    // =========================
+    // ADD LEDGER NAME
+    // =========================
+
+    const enrichedData = (data || []).map(row => ({
+      ...row,
+      ledger_name:
+        ledgerMap.get(row.ledger_guid) || null
+    }));
+
+    return res.json({
+      success: true,
+      data: enrichedData
+    });
+
+  } catch (err) {
+
+    console.error("FUND FLOW LEDGER CONFIG GET API ERROR:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ============================================================
+// 2. SAVE LEDGER CONFIG
+// ============================================================
+app.post("/saveFundFlowLedgerConfig", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    const tally_owner =
+      String(req.body.tally_owner || "").trim().toUpperCase();
+
+    const id =
+      req.body.id ? Number(req.body.id) : null;
+
+    const ledger_guid =
+      String(req.body.ledger_guid || "").trim();
+
+    const fixed_installments_enabled =
+      Boolean(req.body.fixed_installments_enabled);
+
+    const installment_count =
+      req.body.installment_count === null ||
+      req.body.installment_count === undefined ||
+      req.body.installment_count === ""
+        ? null
+        : Number(req.body.installment_count);
+
+    const default_credit_period_days =
+      req.body.default_credit_period_days === null ||
+      req.body.default_credit_period_days === undefined ||
+      req.body.default_credit_period_days === ""
+        ? null
+        : Number(req.body.default_credit_period_days);
+
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    if (
+      fixed_installments_enabled &&
+      (!installment_count || installment_count < 1)
+    ) {
+      return res.json({
+        success: false,
+        error: "installment_count must be greater than 0"
+      });
+    }
+
+
+    const payload = {
+      company_code,
+      tally_owner,
+      ledger_guid,
+      fixed_installments_enabled,
+      installment_count,
+      default_credit_period_days,
+      updated_at: new Date().toISOString()
+    };
+
+
+    let data;
+    let error;
+
+
+    // -----------------------------
+    // UPDATE
+    // -----------------------------
+    if (id) {
+
+      const result = await supabase
+        .from("fund_flow_ledger_config")
+        .update(payload)
+        .eq("id", id)
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .select()
+        .single();
+
+      data = result.data;
+      error = result.error;
+
+    }
+
+    // -----------------------------
+    // INSERT
+    // -----------------------------
+    else {
+
+      const result = await supabase
+        .from("fund_flow_ledger_config")
+        .insert({
+          ...payload,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      data = result.data;
+      error = result.error;
+    }
+
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW LEDGER CONFIG SAVE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW LEDGER CONFIG SAVE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 3. DELETE LEDGER CONFIG
+// ============================================================
+app.delete("/deleteFundFlowLedgerConfig", async (req, res) => {
+
+  try {
+
+    const id = Number(req.body.id);
+
+    if (!id) {
+      return res.json({
+        success: false,
+        error: "id missing"
+      });
+    }
+
+    const { error } = await supabase
+      .from("fund_flow_ledger_config")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW LEDGER CONFIG DELETE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW LEDGER CONFIG DELETE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 4. GET FINANCING CONFIG
+// ============================================================
+app.get("/getFundFlowFinancingConfig", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("fund_flow_financing_config")
+      .select("*")
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .order("id", { ascending: true });
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW FINANCING CONFIG GET ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    // =========================
+    // LOAD LEDGER NAMES
+    // =========================
+
+    const ledgerGuids = (data || [])
+      .map(row => row.ledger_guid)
+      .filter(Boolean);
+
+    let ledgerMap = new Map();
+
+    if (ledgerGuids.length > 0) {
+
+      const { data: ledgers, error: ledgerError } =
+        await supabase
+          .from("tally_sync_ledgers")
+          .select("guid,name")
+          .eq("company_code", company_code)
+          .eq("tally_owner", tally_owner)
+          .in("guid", ledgerGuids);
+
+      if (ledgerError) {
+
+        console.error(
+          "FUND FLOW FINANCING LEDGER MASTER LOOKUP ERROR:",
+          ledgerError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: ledgerError.message
+        });
+      }
+
+      ledgerMap = new Map(
+        (ledgers || []).map(ledger => [
+          ledger.guid,
+          ledger.name
+        ])
+      );
+    }
+
+
+    // =========================
+    // ADD LEDGER NAME
+    // =========================
+
+    const enrichedData = (data || []).map(row => ({
+      ...row,
+      ledger_name:
+        ledgerMap.get(row.ledger_guid) || null
+    }));
+
+
+    return res.json({
+      success: true,
+      data: enrichedData
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW FINANCING CONFIG GET API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 5. SAVE FINANCING CONFIG
+// ============================================================
+app.post("/saveFundFlowFinancingConfig", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    const tally_owner =
+      String(req.body.tally_owner || "").trim().toUpperCase();
+
+    const id =
+      req.body.id ? Number(req.body.id) : null;
+
+    const ledger_guid =
+      String(req.body.ledger_guid || "").trim();
+
+    const finance_amount =
+      Number(req.body.finance_amount);
+
+    const first_repayment_date =
+      String(req.body.first_repayment_date || "").trim();
+
+    const installment_count =
+      Number(req.body.installment_count);
+
+    const installment_amount =
+      Number(req.body.installment_amount);
+
+    const frequency_type =
+      String(req.body.frequency_type || "MONTHLY").trim().toUpperCase();
+
+    const frequency_value =
+      req.body.frequency_value === undefined ||
+      req.body.frequency_value === null ||
+      req.body.frequency_value === ""
+        ? 1
+        : Number(req.body.frequency_value);
+
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!ledger_guid) {
+      return res.json({
+        success: false,
+        error: "ledger_guid missing"
+      });
+    }
+
+    if (!Number.isFinite(finance_amount) || finance_amount <= 0) {
+      return res.json({
+        success: false,
+        error: "Invalid finance_amount"
+      });
+    }
+
+    if (!first_repayment_date) {
+      return res.json({
+        success: false,
+        error: "first_repayment_date missing"
+      });
+    }
+
+    if (!Number.isInteger(installment_count) || installment_count < 1) {
+      return res.json({
+        success: false,
+        error: "Invalid installment_count"
+      });
+    }
+
+    if (
+      !Number.isFinite(installment_amount) ||
+      installment_amount <= 0
+    ) {
+      return res.json({
+        success: false,
+        error: "Invalid installment_amount"
+      });
+    }
+
+    if (!Number.isInteger(frequency_value) || frequency_value < 1) {
+      return res.json({
+        success: false,
+        error: "Invalid frequency_value"
+      });
+    }
+
+
+    const payload = {
+      company_code,
+      tally_owner,
+      ledger_guid,
+      finance_amount,
+      first_repayment_date,
+      installment_count,
+      installment_amount,
+      frequency_type,
+      frequency_value,
+      updated_at: new Date().toISOString()
+    };
+
+
+    let data;
+    let error;
+
+
+    // -----------------------------
+    // UPDATE
+    // -----------------------------
+    if (id) {
+
+      const result = await supabase
+        .from("fund_flow_financing_config")
+        .update(payload)
+        .eq("id", id)
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .select()
+        .single();
+
+      data = result.data;
+      error = result.error;
+
+    }
+
+    // -----------------------------
+    // INSERT
+    // -----------------------------
+    else {
+
+      const result = await supabase
+        .from("fund_flow_financing_config")
+        .insert({
+          ...payload,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      data = result.data;
+      error = result.error;
+    }
+
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW FINANCING CONFIG SAVE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW FINANCING CONFIG SAVE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 6. DELETE FINANCING CONFIG
+// ============================================================
+app.delete("/deleteFundFlowFinancingConfig", async (req, res) => {
+
+  try {
+
+    const id = Number(req.body.id);
+
+    if (!id) {
+      return res.json({
+        success: false,
+        error: "id missing"
+      });
+    }
+
+    const { error } = await supabase
+      .from("fund_flow_financing_config")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW FINANCING CONFIG DELETE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW FINANCING CONFIG DELETE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 7. GET RECURRING EXPENSE CONFIG
+// ============================================================
+app.get("/getFundFlowRecurringExpense", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("fund_flow_recurring_expense")
+      .select("*")
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .order("id", { ascending: true });
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW RECURRING EXPENSE GET ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW RECURRING EXPENSE GET API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 8. SAVE RECURRING EXPENSE CONFIG
+// ============================================================
+app.post("/saveFundFlowRecurringExpense", async (req, res) => {
+
+  try {
+
+    const company_code =
+      String(req.body.company_code || "").trim();
+
+    const tally_owner =
+      String(req.body.tally_owner || "").trim().toUpperCase();
+
+    const id =
+      req.body.id ? Number(req.body.id) : null;
+
+    const expense_ledger_guid =
+      String(req.body.expense_ledger_guid || "").trim();
+
+    const expense_ledger_name =
+      String(req.body.expense_ledger_name || "").trim();
+
+    const party_ledger_guid =
+      String(req.body.party_ledger_guid || "").trim();
+
+    const party_ledger_name =
+      String(req.body.party_ledger_name || "").trim();
+
+    const monthly_amount =
+      Number(req.body.monthly_amount);
+
+    const start_date =
+      String(req.body.start_date || "").trim();
+
+    const end_date =
+      req.body.end_date
+        ? String(req.body.end_date).trim()
+        : null;
+
+    const frequency_type =
+      String(req.body.frequency_type || "MONTHLY")
+        .trim()
+        .toUpperCase();
+
+    const is_active =
+      req.body.is_active === undefined
+        ? true
+        : Boolean(req.body.is_active);
+
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!expense_ledger_guid) {
+      return res.json({
+        success: false,
+        error: "expense_ledger_guid missing"
+      });
+    }
+
+    if (!expense_ledger_name) {
+      return res.json({
+        success: false,
+        error: "expense_ledger_name missing"
+      });
+    }
+
+    if (!party_ledger_guid) {
+      return res.json({
+        success: false,
+        error: "party_ledger_guid missing"
+      });
+    }
+
+    if (!party_ledger_name) {
+      return res.json({
+        success: false,
+        error: "party_ledger_name missing"
+      });
+    }
+
+    if (!Number.isFinite(monthly_amount) || monthly_amount <= 0) {
+      return res.json({
+        success: false,
+        error: "Invalid monthly_amount"
+      });
+    }
+
+    if (!start_date) {
+      return res.json({
+        success: false,
+        error: "start_date missing"
+      });
+    }
+
+
+    const payload = {
+      company_code,
+      tally_owner,
+      expense_ledger_guid,
+      expense_ledger_name,
+      party_ledger_guid,
+      party_ledger_name,
+      monthly_amount,
+      start_date,
+      end_date,
+      frequency_type,
+      is_active,
+      updated_at: new Date().toISOString()
+    };
+
+
+    let data;
+    let error;
+
+
+    // -----------------------------
+    // UPDATE
+    // -----------------------------
+    if (id) {
+
+      const result = await supabase
+        .from("fund_flow_recurring_expense")
+        .update(payload)
+        .eq("id", id)
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .select()
+        .single();
+
+      data = result.data;
+      error = result.error;
+
+    }
+
+    // -----------------------------
+    // INSERT
+    // -----------------------------
+    else {
+
+      const result = await supabase
+        .from("fund_flow_recurring_expense")
+        .insert({
+          ...payload,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      data = result.data;
+      error = result.error;
+    }
+
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW RECURRING EXPENSE SAVE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+
+    return res.json({
+      success: true,
+      data
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW RECURRING EXPENSE SAVE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
+// ============================================================
+// 9. DELETE RECURRING EXPENSE CONFIG
+// ============================================================
+app.delete("/deleteFundFlowRecurringExpense", async (req, res) => {
+
+  try {
+
+    const id = Number(req.body.id);
+
+    if (!id) {
+      return res.json({
+        success: false,
+        error: "id missing"
+      });
+    }
+
+    const { error } = await supabase
+      .from("fund_flow_recurring_expense")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+
+      console.error(
+        "FUND FLOW RECURRING EXPENSE DELETE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true
+    });
+
+  } catch (err) {
+
+    console.error(
+      "FUND FLOW RECURRING EXPENSE DELETE API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+app.get("/getFundFlowRecurringExpenseLedgers", async (req, res) => {
+  try {
+    const company_code = String(req.query.company_code || "").trim();
+    const tally_owner = String(req.query.tally_owner || "").trim().toUpperCase();
+    const party_ledger = String(req.query.party_ledger || "").trim();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    if (!party_ledger) {
+      return res.json({
+        success: false,
+        error: "party_ledger missing"
+      });
+    }
+
+        // ==========================================
+    // 1. FIND VOUCHERS FOR SELECTED PARTY
+    // ==========================================
+
+    const normalizePartyName = (value) =>
+      String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+
+    const { data: vouchers, error: voucherError } = await supabase
+      .from("tally_vouchers")
+      .select("guid, party_ledger")
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .not("party_ledger", "is", null);
+
+    if (voucherError) {
+      console.error(
+        "FUND FLOW RECURRING EXPENSE VOUCHER LOOKUP ERROR:",
+        voucherError
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: voucherError.message
+      });
+    }
+
+    const selectedParty = normalizePartyName(party_ledger);
+
+    // First try exact normalized match
+    let matchedVouchers = (vouchers || []).filter(
+      row =>
+        normalizePartyName(row.party_ledger) === selectedParty
+    );
+
+    // ==========================================
+    // FALLBACK: GENERIC FUZZY PARTY MATCH
+    // ==========================================
+    if (matchedVouchers.length === 0) {
+
+      const damerauLevenshteinDistance = (a, b) => {
+
+        const matrix = Array.from(
+          { length: b.length + 1 },
+          () => Array(a.length + 1).fill(0)
+        );
+
+        for (let i = 0; i <= b.length; i++) {
+          matrix[i][0] = i;
+        }
+
+        for (let j = 0; j <= a.length; j++) {
+          matrix[0][j] = j;
+        }
+
+        for (let i = 1; i <= b.length; i++) {
+
+          for (let j = 1; j <= a.length; j++) {
+
+            const cost =
+              a[j - 1] === b[i - 1]
+                ? 0
+                : 1;
+
+            matrix[i][j] = Math.min(
+              matrix[i - 1][j] + 1,
+              matrix[i][j - 1] + 1,
+              matrix[i - 1][j - 1] + cost
+            );
+
+            // Adjacent character transposition
+            if (
+              i > 1 &&
+              j > 1 &&
+              a[j - 1] === b[i - 2] &&
+              a[j - 2] === b[i - 1]
+            ) {
+              matrix[i][j] = Math.min(
+                matrix[i][j],
+                matrix[i - 2][j - 2] + cost
+              );
+            }
+
+          }
+        }
+
+        return matrix[b.length][a.length];
+      };
+
+      const similarity = (a, b) => {
+
+        if (!a || !b) {
+          return 0;
+        }
+
+        const distance =
+          damerauLevenshteinDistance(a, b);
+
+        return 1 -
+          distance /
+          Math.max(a.length, b.length);
+      };
+
+      matchedVouchers = (vouchers || []).filter(row => {
+
+        const voucherParty =
+          normalizePartyName(row.party_ledger);
+
+        if (!voucherParty) {
+          return false;
+        }
+
+        return similarity(
+          selectedParty,
+          voucherParty
+        ) >= 0.85;
+
+      });
+    }
+
+    const voucherGuids = matchedVouchers
+      .map(v => v.guid)
+      .filter(Boolean);
+
+    if (voucherGuids.length === 0) {
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
+    // ==========================================
+    // 2. FIND LEDGERS USED IN THOSE VOUCHERS
+    // ==========================================
+
+    const { data: voucherLedgers, error: voucherLedgerError } =
+      await supabase
+        .from("tally_voucher_ledgers")
+        .select("ledger_guid, ledger_name, voucher_guid")
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .in("voucher_guid", voucherGuids);
+
+    if (voucherLedgerError) {
+      console.error(
+        "FUND FLOW RECURRING EXPENSE LEDGER LOOKUP ERROR:",
+        voucherLedgerError
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: voucherLedgerError.message
+      });
+    }
+
+    const ledgerGuids = [
+      ...new Set(
+        (voucherLedgers || [])
+          .map(row => row.ledger_guid)
+          .filter(Boolean)
+      )
+    ];
+
+    if (ledgerGuids.length === 0) {
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
+    // ==========================================
+    // 3. GET LEDGER MASTER + PARENT
+    // ==========================================
+
+    const { data: ledgerMasters, error: ledgerMasterError } =
+      await supabase
+        .from("tally_sync_ledgers")
+        .select("guid, name, parent")
+        .eq("company_code", company_code)
+        .eq("tally_owner", tally_owner)
+        .in("guid", ledgerGuids);
+
+    if (ledgerMasterError) {
+      console.error(
+        "FUND FLOW RECURRING EXPENSE LEDGER MASTER ERROR:",
+        ledgerMasterError
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: ledgerMasterError.message
+      });
+    }
+
+    // ==========================================
+    // 4. ONLY DIRECT / INDIRECT EXPENSES
+    // ==========================================
+
+    const allowedExpenseLedgers = new Set(
+      (ledgerMasters || [])
+        .filter(
+          ledger =>
+            ledger.parent === "Direct Expenses" ||
+            ledger.parent === "Indirect Expenses"
+        )
+        .map(ledger => ledger.guid)
+    );
+
+    // ==========================================
+    // 5. FINAL UNIQUE EXPENSE LEDGER LIST
+    // ==========================================
+
+    const result = [
+      ...new Map(
+        (voucherLedgers || [])
+          .filter(row => allowedExpenseLedgers.has(row.ledger_guid))
+          .map(row => [
+            row.ledger_guid,
+            {
+              ledger_guid: row.ledger_guid,
+              ledger_name:
+                (ledgerMasters || []).find(
+                  ledger => ledger.guid === row.ledger_guid
+                )?.name || row.ledger_name
+            }
+          ])
+      ).values()
+    ].sort((a, b) =>
+      String(a.ledger_name || "").localeCompare(
+        String(b.ledger_name || "")
+      )
+    );
+
+    return res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (err) {
+    console.error(
+      "FUND FLOW RECURRING EXPENSE LEDGERS API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+app.get("/getFundFlowRecurringExpenseParties", async (req, res) => {
+  try {
+    const company_code =
+      String(req.query.company_code || "").trim();
+
+    const tally_owner =
+      String(req.query.tally_owner || "").trim().toUpperCase();
+
+    if (!company_code) {
+      return res.json({
+        success: false,
+        error: "company_code missing"
+      });
+    }
+
+    if (tally_owner !== "CA" && tally_owner !== "USER") {
+      return res.json({
+        success: false,
+        error: "Invalid tally_owner"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("tally_sync_ledgers")
+      .select("guid, name, parent")
+      .eq("company_code", company_code)
+      .eq("tally_owner", tally_owner)
+      .in("parent", [
+        "Sundry Creditors",
+        "Sundry Debtors"
+      ])
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error(
+        "FUND FLOW RECURRING PARTY LEDGER ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    const result = (data || []).map(row => ({
+      ledger_guid: row.guid,
+      ledger_name: row.name
+    }));
+
+    return res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (err) {
+    console.error(
+      "FUND FLOW RECURRING PARTY LEDGER API ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// ============================================================
+// LOCAL CACHE - STATUS
+// ============================================================
+
+app.get("/local-cache/status", async (req, res) => {
+
+    try {
+
+        const company_code =
+            String(
+                req.query.company_code || ""
+            ).trim();
+
+        const tally_owner =
+            String(
+                req.query.tally_owner || ""
+            )
+                .trim()
+                .toUpperCase();
+
+        if (!company_code) {
+
+            return res.status(400).json({
+                success: false,
+                error: "company_code missing"
+            });
+
+        }
+
+        if (
+            tally_owner !== "CA" &&
+            tally_owner !== "USER"
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                error: "Invalid tally_owner"
+            });
+
+        }
+
+        const status =
+            await localCacheSyncService
+                .getCacheStatus({
+                    company_code,
+                    tally_owner
+                });
+
+        return res.json({
+            success: true,
+            ...status
+        });
+
+    } catch (err) {
+
+        console.error(
+            "LOCAL CACHE STATUS ERROR:",
+            err
+        );
+
+        return res.status(500).json({
+            success: false,
+            error:
+                err.message ||
+                "Unable to get local cache status"
+        });
+
+    }
+
+});
+
+// =====================================================
+// LOCAL CACHE - DATA
+// =====================================================
+
+app.get("/local-cache/data", async (req, res) => {
+    try {
+
+        const company_code =
+            String(req.query.company_code || "").trim();
+
+        const tally_owner =
+            String(req.query.tally_owner || "")
+                .trim()
+                .toUpperCase();
+
+        const tableKey =
+            String(req.query.tableKey || "").trim();
+
+        const page =
+            Number(req.query.page || 0);
+
+        const chunkSize =
+            Number(req.query.chunkSize || 500);
+
+        if (!company_code) {
+            return res.status(400).json({
+                success: false,
+                error: "company_code is required"
+            });
+        }
+
+        if (!tally_owner) {
+            return res.status(400).json({
+                success: false,
+                error: "tally_owner is required"
+            });
+        }
+
+        if (!tableKey) {
+            return res.status(400).json({
+                success: false,
+                error: "tableKey is required"
+            });
+        }
+
+        const data =
+            await localCacheSyncService.getInitialCacheData({
+                company_code,
+                tally_owner,
+                tableKey,
+                page,
+                chunkSize
+            });
+
+        return res.json({
+            success: true,
+            data
+        });
+
+    } catch (err) {
+
+        console.error(
+            "LOCAL CACHE DATA API ERROR:",
+            err
+        );
+
+        return res.status(500).json({
+            success: false,
+            error: err.message
+        });
+    }
+});
+
+// =====================================================
+// LOCAL CACHE - VOUCHER CHILDREN
+// =====================================================
+
+app.get("/local-cache/voucher-children", async (req, res) => {
+    try {
+        const company_code =
+            String(req.query.company_code || "").trim();
+
+        const tally_owner =
+            String(req.query.tally_owner || "")
+                .trim()
+                .toUpperCase();
+
+        const tableKey =
+            String(req.query.tableKey || "").trim();
+
+        const voucher_guids =
+            String(req.query.voucher_guids || "")
+                .split(",")
+                .map((guid) => guid.trim())
+                .filter(Boolean);
+
+        if (!company_code) {
+            return res.status(400).json({
+                success: false,
+                error: "company_code is required"
+            });
+        }
+
+        if (!tally_owner) {
+            return res.status(400).json({
+                success: false,
+                error: "tally_owner is required"
+            });
+        }
+
+        if (!tableKey) {
+            return res.status(400).json({
+                success: false,
+                error: "tableKey is required"
+            });
+        }
+
+        if (voucher_guids.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: "voucher_guids is required"
+            });
+        }
+
+        const data =
+            await localCacheSyncService.getVoucherChildren({
+                company_code,
+                tally_owner,
+                tableKey,
+                voucher_guids
+            });
+
+        return res.json({
+            success: true,
+            table: tableKey,
+            voucher_count: voucher_guids.length,
+            row_count: data.length,
+            rows: data
+        });
+
+    } catch (err) {
+        console.error(
+            "LOCAL CACHE VOUCHER CHILDREN API ERROR:",
+            err
+        );
+
+        return res.status(500).json({
+            success: false,
+            error: err.message
+        });
+    }
+});
+
+
+app.get("/local-cache/count", async (req, res) => {
+  try {
+    const {
+      company_code,
+      tally_owner,
+      tableKey
+    } = req.query;
+
+    if (!company_code || !tally_owner || !tableKey) {
+      return res.status(400).json({
+        success: false,
+        error: "company_code, tally_owner and tableKey are required"
+      });
+    }
+
+    const count =
+      await localCacheSyncService.getTableCount({
+        company_code,
+        tally_owner,
+        tableKey
+      });
+
+    return res.json({
+      success: true,
+      table: tableKey,
+      count
+    });
+
+  } catch (error) {
+    console.error("LOCAL CACHE COUNT ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+server.listen(
+  process.env.SECOND_API_PORT,
+  () => {
+    console.log(
+      `Second API running on port ${process.env.SECOND_API_PORT}`
+    );
+  }
+);
