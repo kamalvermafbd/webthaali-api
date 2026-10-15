@@ -3780,6 +3780,68 @@ app.post("/pairConnector", async (req, res) => {
   const is_ca =
     Boolean(req.body.is_ca);
 
+    if (!company_code || !tally_company_guid) {
+
+      return res.json({
+        success: false,
+        error: "company_code or tally_company_guid missing"
+      });
+
+    }
+    const tally_owner = is_ca ? "CA" : "USER";
+
+    // Existing Tally company GUID check
+    const { data: existingTally, error: existingTallyError } =
+      await supabase
+        .from("company")
+        .select(
+          is_ca
+            ? "ca_tally_company_guid"
+            : "client_tally_company_guid"
+        )
+        .eq("company_code", company_code)
+        .single();
+
+    if (existingTallyError) {
+      return res.json({
+        success: false,
+        error: existingTallyError.message
+      });
+    }
+
+    const existingGuid = is_ca
+      ? existingTally?.ca_tally_company_guid
+      : existingTally?.client_tally_company_guid;
+
+    // Same company re-pairing is allowed.
+    // Different company is blocked if sync data exists.
+    if (
+      existingGuid &&
+      existingGuid !== tally_company_guid
+    ) {
+      const { data: lockData, error: lockError } =
+        await supabase.rpc("is_tally_company_locked", {
+          p_company_code: company_code,
+          p_tally_owner: tally_owner
+        });
+
+      if (lockError) {
+        return res.json({
+          success: false,
+          error: "Unable to verify company-change lock."
+        });
+      }
+
+      if (lockData === true) {
+        return res.json({
+          success: false,
+          error:
+            "Tally company change is locked because sync data already exists."
+        });
+      }
+    }
+
+
   const connectorField =
   is_ca
     ? "ca_connector_id"
@@ -3814,14 +3876,7 @@ if (companyError) {
 
 }
 
-    if (!company_code || !tally_company_guid) {
-
-      return res.json({
-        success: false,
-        error: "company_code or tally_company_guid missing"
-      });
-
-    }
+  
 
     console.log(
       "PAIR REQUEST COMPANY CODE :",
@@ -31014,6 +31069,8 @@ if (
   }
 
 );
+
+
 // =========================
 // SAVE TALLY COMPANY
 // =========================
@@ -31068,6 +31125,49 @@ app.post(
   });
 
 }
+
+
+const tally_owner = is_ca ? "CA" : "USER";
+
+const { data: currentCompany, error: currentCompanyError } =
+  await supabase
+    .from("company")
+    .select(is_ca ? "ca_tally_company_guid" : "client_tally_company_guid")
+    .eq("company_code", company_code)
+    .single();
+
+if (currentCompanyError) {
+  return res.json({ success: false, error: currentCompanyError.message });
+}
+
+const existingGuid = is_ca
+  ? currentCompany?.ca_tally_company_guid
+  : currentCompany?.client_tally_company_guid;
+
+if (existingGuid !== tally_company_guid) {
+  const { data: lockData, error: lockError } = await supabase.rpc(
+    "is_tally_company_locked",
+    {
+      p_company_code: company_code,
+      p_tally_owner: tally_owner
+    }
+  );
+
+  if (lockError) {
+    return res.json({
+      success: false,
+      error: "Unable to verify company-change lock."
+    });
+  }
+
+  if (lockData === true) {
+    return res.json({
+      success: false,
+      error: "Tally company change is locked because sync data already exists."
+    });
+  }
+}
+
 
 /*
 const companyInfo = await importCompany({
