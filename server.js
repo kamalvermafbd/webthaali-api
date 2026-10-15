@@ -30991,6 +30991,11 @@ if (
           company_code,
           businessname,
           ca_tally_company,
+           ca_tally_company_guid,
+  client_tally_company,
+  client_tally_company_guid,
+  ca_connector_id,
+  client_connector_id,
           partner_id
         `)
 
@@ -31023,24 +31028,30 @@ if (
         });
 
       }
+const result =
+  (data || []).map((row) => ({
+    company_code: row.company_code,
+    businessname: row.businessname,
+    partner_id: row.partner_id,
 
-      const result =
+    ca_tally_company:
+      row.ca_tally_company || "",
 
-        (data || []).map((row) => ({
+    ca_tally_company_guid:
+      row.ca_tally_company_guid || "",
 
-          company_code:
-            row.company_code,
+    client_tally_company:
+      row.client_tally_company || "",
 
-          businessname:
-            row.businessname,
+    client_tally_company_guid:
+      row.client_tally_company_guid || "",
 
-          partner_id:
-            row.partner_id,
+    ca_connector_id:
+      row.ca_connector_id || "",
 
-          ca_tally_company:
-            row.ca_tally_company || ""
-
-        }));
+    client_connector_id:
+      row.client_connector_id || ""
+  }));
 
       return res.json({
 
