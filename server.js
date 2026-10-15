@@ -3815,10 +3815,9 @@ app.post("/pairConnector", async (req, res) => {
 
     // Same company re-pairing is allowed.
     // Different company is blocked if sync data exists.
-    if (
-      existingGuid &&
-      existingGuid !== tally_company_guid
-    ) {
+  
+if (existingGuid !== tally_company_guid) {
+
       const { data: lockData, error: lockError } =
         await supabase.rpc("is_tally_company_locked", {
           p_company_code: company_code,
