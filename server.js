@@ -9699,6 +9699,18 @@ app.get(
   client_tally_mapping_completed:
     data.client_tally_mapping_completed,
 
+    client_tally_company_guid:
+  data.client_tally_company_guid || "",
+
+ca_tally_company_guid:
+  data.ca_tally_company_guid || "",
+
+client_connector_id:
+  data.client_connector_id || "",
+
+ca_connector_id:
+  data.ca_connector_id || "",
+
   // =====================
   // COUNTRY
   // =====================
@@ -31341,6 +31353,72 @@ if (!companyInfo?.booksBeginningFrom) {
   }
 
 );
+
+
+// =========================
+// CHECK TALLY COMPANY LOCK
+// =========================
+
+app.get(
+  "/checkTallyCompanyLock",
+  async (req, res) => {
+    try {
+      const companyCode = String(
+        req.query.company_code || ""
+      ).trim();
+
+      const isCa =
+        String(req.query.is_ca || "false").toLowerCase() === "true";
+
+      if (!companyCode) {
+        return res.status(400).json({
+          success: false,
+          error: "company_code missing",
+        });
+      }
+
+      const tallyOwner = isCa ? "CA" : "USER";
+
+      const { data, error } = await supabase.rpc(
+        "is_tally_company_locked",
+        {
+          p_company_code: companyCode,
+          p_tally_owner: tallyOwner,
+        }
+      );
+
+      if (error) {
+        console.error(
+          "checkTallyCompanyLock RPC error:",
+          error
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: error.message,
+        });
+      }
+
+      return res.json({
+        success: true,
+        company_code: companyCode,
+        tally_owner: tallyOwner,
+        is_locked: data === true,
+      });
+    } catch (err) {
+      console.error(
+        "checkTallyCompanyLock error:",
+        err
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: err.message,
+      });
+    }
+  }
+);
+
 
 // =========================
 // GET TALLY COMPANIES
