@@ -44,7 +44,7 @@ async function runJob(job, serverUrl) {
                     try {
 
                         const syncServerUrl =
-                          process.env.BILLEY_SYNC_API_URL || serverUrl;
+    process.env.BILLEY_SYNC_API_URL || "https://sync-api.billey.in";
 
                         response = await fetch(
                        //     `${serverUrl}/getMasters` +
