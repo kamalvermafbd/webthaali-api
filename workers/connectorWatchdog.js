@@ -872,7 +872,14 @@ async function monitorSyncBatchStatus({ supabase }) {
                 worker_status,
                 sync_progress,
                 error_message,
-                last_activity_at
+                last_activity_at,
+                tally_owner,
+                worker_id,
+                current_stage,
+                current_module,
+                current_action,
+                heartbeat_at,
+                started_at
             `)
             .order("last_activity_at", { ascending: false })
             .limit(100);
@@ -888,25 +895,43 @@ async function monitorSyncBatchStatus({ supabase }) {
         for (const batch of data || []) {
             if (!batch.batch_id) continue;
 
-            const snapshot = JSON.stringify({
-                batch_status: batch.batch_status,
-                worker_status: batch.worker_status,
-                progress: batch.sync_progress?.progress ?? null,
-                error_message: batch.error_message ?? null
-            });
+            
+const snapshot = JSON.stringify({
+    company_code: batch.company_code,
+    tally_owner: batch.tally_owner,
+    batch_status: batch.batch_status,
+    worker_status: batch.worker_status,
+    worker_id: batch.worker_id,
+    progress: batch.sync_progress?.progress ?? null,
+    stage: batch.current_stage ?? null,
+    module: batch.current_module ?? null,
+    action: batch.current_action ?? null,
+    heartbeat_at: batch.heartbeat_at ?? null,
+    error_message: batch.error_message ?? null
+});
+
 
             const previous =
                 batchStatusSnapshots.get(batch.batch_id);
 
+            
             if (previous !== snapshot) {
-                console.log("[BATCH STATUS CHANGE]", {
+                console.log("[BATCH LIVE STATUS]", {
                     batch_id: batch.batch_id,
                     company_code: batch.company_code,
+                    tally_owner: batch.tally_owner,
                     batch_status: batch.batch_status,
                     worker_status: batch.worker_status,
+                    worker_id: batch.worker_id,
                     progress: batch.sync_progress?.progress ?? null,
+                    stage: batch.current_stage ?? null,
+                    module: batch.current_module ?? null,
+                    action: batch.current_action ?? null,
+                    heartbeat_at: batch.heartbeat_at ?? null,
+                    started_at: batch.started_at ?? null,
+                    last_activity_at: batch.last_activity_at,
                     error_message: batch.error_message ?? null,
-                    last_activity_at: batch.last_activity_at
+                    observed_at: new Date().toISOString()
                 });
 
                 batchStatusSnapshots.set(
