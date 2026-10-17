@@ -372,10 +372,12 @@ const supabase =
     process.env.SUPABASE_SERVICE_KEY
   );
 
+  /*
   startConnectorWatchdog({
     supabase,
     registry
 });
+*/
 
 const localCacheSyncService =
     new LocalCacheSyncService(supabase);

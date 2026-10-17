@@ -11,7 +11,7 @@ const BatchStatusManager =
 
 const {
     dispatchBatch
-} = require("./queueExistingBatch");
+} = require("./secondQueueExistingBatch");
 
 let watchdogTimer = null;
 let watchdogRunning = false;
