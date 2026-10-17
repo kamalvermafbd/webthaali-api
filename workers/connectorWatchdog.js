@@ -852,12 +852,103 @@ function stopConnectorWatchdog() {
 
 }
 
+
+const batchStatusSnapshots = new Map();
+let batchStatusMonitorTimer = null;
+let batchStatusMonitorRunning = false;
+
+async function monitorSyncBatchStatus({ supabase }) {
+    if (batchStatusMonitorRunning) return;
+
+    batchStatusMonitorRunning = true;
+
+    try {
+        const { data, error } = await supabase
+            .from("sync_batches")
+            .select(`
+                batch_id,
+                company_code,
+                batch_status,
+                worker_status,
+                sync_progress,
+                error_message,
+                last_activity_at
+            `)
+            .order("last_activity_at", { ascending: false })
+            .limit(100);
+
+        if (error) {
+            console.error(
+                "[BATCH STATUS MONITOR] Query failed:",
+                error.message
+            );
+            return;
+        }
+
+        for (const batch of data || []) {
+            if (!batch.batch_id) continue;
+
+            const snapshot = JSON.stringify({
+                batch_status: batch.batch_status,
+                worker_status: batch.worker_status,
+                progress: batch.sync_progress?.progress ?? null,
+                error_message: batch.error_message ?? null
+            });
+
+            const previous =
+                batchStatusSnapshots.get(batch.batch_id);
+
+            if (previous !== snapshot) {
+                console.log("[BATCH STATUS CHANGE]", {
+                    batch_id: batch.batch_id,
+                    company_code: batch.company_code,
+                    batch_status: batch.batch_status,
+                    worker_status: batch.worker_status,
+                    progress: batch.sync_progress?.progress ?? null,
+                    error_message: batch.error_message ?? null,
+                    last_activity_at: batch.last_activity_at
+                });
+
+                batchStatusSnapshots.set(
+                    batch.batch_id,
+                    snapshot
+                );
+            }
+        }
+    } catch (error) {
+        console.error(
+            "[BATCH STATUS MONITOR] Error:",
+            error.message
+        );
+    } finally {
+        batchStatusMonitorRunning = false;
+    }
+}
+
+function startSyncBatchStatusMonitor({ supabase }) {
+    if (batchStatusMonitorTimer) return;
+
+    console.log(
+        "🔎 READ-ONLY BATCH STATUS MONITOR STARTED"
+    );
+
+    monitorSyncBatchStatus({ supabase });
+
+    batchStatusMonitorTimer = setInterval(() => {
+        monitorSyncBatchStatus({ supabase });
+    }, 15000);
+}
+
+
 // ------------------------------------------------------------
 // EXPORT
 // ------------------------------------------------------------
 
+
 module.exports = {
     startConnectorWatchdog,
     stopConnectorWatchdog,
-    checkConnectorWatchdog
+    checkConnectorWatchdog,
+    monitorSyncBatchStatus,
+    startSyncBatchStatusMonitor
 };

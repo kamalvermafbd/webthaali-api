@@ -252,9 +252,12 @@ const {
 const BatchStatusManager =
     require("./sync-engine/BatchStatusManager");
 
+
 const {
-    startConnectorWatchdog
+    startConnectorWatchdog,
+    startSyncBatchStatusMonitor
 } = require("./workers/connectorWatchdog");
+
 
 const { startSync } = require("./workers/secondSyncStartService");
 
@@ -374,6 +377,12 @@ const supabase =
     supabase,
     registry
 });
+
+
+startSyncBatchStatusMonitor({
+    supabase
+});
+
 
 const localCacheSyncService =
     new LocalCacheSyncService(supabase);
