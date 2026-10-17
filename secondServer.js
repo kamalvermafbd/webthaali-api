@@ -3725,10 +3725,21 @@ app.get("/sync/status", async (req, res) => {
 
         }
 
-        return res.json({
-            success: true,
-            batch: data
-        });
+        const finalStatusVerified =
+          data.batch_status === "CLOSED" &&
+          data.worker_status === "COMPLETED" &&
+          data.reconciliation_completed === true &&
+          data.ledger_reconciliation_completed === true &&
+          data.stock_reconciliation_completed === true &&
+          data.batch_closed === true;
+
+       return res.json({
+    success: true,
+    batch: {
+        ...data,
+        final_status_verified: finalStatusVerified
+    }
+});
 
     } catch (error) {
 

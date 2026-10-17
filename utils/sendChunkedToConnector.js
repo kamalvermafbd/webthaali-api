@@ -88,32 +88,49 @@ async function sendChunkedToConnector(
 
         const ackTimeout = setTimeout(() => {
 
-            socket.off(
-                ackEvent,
-                onAck
-            );
+    console.error("CHUNK ACK TIMEOUT:", {
+        event: ackEvent,
+        batchId,
+        chunkIndex,
+        socketConnected: socket.connected
+    });
 
-            socket.off(
-                "disconnect",
-                onDisconnect
-            );
+    socket.off(
+        ackEvent,
+        onAck
+    );
 
-            reject(
-                new Error(
-                    `ACK timeout for chunk ${chunkIndex}`
-                )
-            );
+    socket.off(
+        "disconnect",
+        onDisconnect
+    );
 
-        }, ACK_TIMEOUT);
+    reject(
+        new Error(
+            `ACK timeout for chunk ${chunkIndex}`
+        )
+    );
+
+}, ACK_TIMEOUT);
 
         function onAck(data) {
 
-            if (
-                data.batchId !== batchId ||
-                data.chunkIndex !== chunkIndex
-            ) {
-                return;
-            }
+    if (
+        !data ||
+        data.batchId !== batchId ||
+        data.chunkIndex !== chunkIndex
+    ) {
+        console.error("CHUNK ACK MISMATCH:", {
+            event: ackEvent,
+            expectedBatchId: batchId,
+            receivedBatchId: data?.batchId,
+            expectedChunkIndex: chunkIndex,
+            receivedChunkIndex: data?.chunkIndex,
+            success: data?.success
+        });
+
+        return;
+    }
 
             clearTimeout(
                 ackTimeout
