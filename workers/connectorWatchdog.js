@@ -892,6 +892,13 @@ async function monitorSyncBatchStatus({ supabase }) {
             return;
         }
 
+        
+console.log("[BATCH STATUS MONITOR POLL]", {
+    checked_at: new Date().toISOString(),
+    fetched_batches: data?.length || 0
+});
+
+
         for (const batch of data || []) {
             if (!batch.batch_id) continue;
 
