@@ -90,7 +90,7 @@ registerChunkListener() {
             if (!data) {
                 return;
             }
-
+/* 181026
             if (!this.session.batchId) {
 
                 this.session.start({
@@ -109,6 +109,47 @@ registerChunkListener() {
                 });
 
             }
+*/
+
+
+if (!this.session.batchId) {
+
+    this.session.start({
+
+        collection:
+            data.collection,
+
+        batchId:
+            data.batchId,
+
+        totalChunks:
+            data.totalChunks,
+
+        totalItems: 0
+
+    });
+
+} else {
+
+    if (
+        data.collection !== this.session.collection ||
+        data.batchId !== this.session.batchId
+    ) {
+
+        console.error(
+            "Ignoring chunk from unexpected batch:",
+            data.collection,
+            data.batchId,
+            "EXPECTED:",
+            this.session.collection,
+            this.session.batchId
+        );
+
+        return;
+
+    }
+
+}
 
             console.log(
                 "🔥 SERVER RECEIVED CHUNK:",
@@ -190,26 +231,56 @@ registerCompleteListener() {
             ) {
                 return;
             }
-
+/* 181026
             if (
                 this.session.rows.length !==
                 data.totalItems
             ) {
-this.sendCompleted(
+                this.sendCompleted(
 
-    data.collection,
+                    data.collection,
 
-    data.batchId,
+                    data.batchId,
 
-    false,
+                    false,
 
-    "Record count mismatch"
+                    "Record count mismatch"
 
-);
+                );
 
-return;
+                return;
 
             }
+*/
+
+
+if (
+    this.session.rows.length !==
+    data.totalItems
+) {
+
+    const error = new Error(
+        `Record count mismatch: expected ${data.totalItems}, received ${this.session.rows.length}`
+    );
+
+    const reject =
+        this.session.reject;
+
+    this.sendCompleted(
+        data.collection,
+        data.batchId,
+        false,
+        error.message
+    );
+
+    this.session.finish();
+
+    if (reject) {
+        reject(error);
+    }
+
+    return;
+}
 
         const rows = [
     ...this.session.rows

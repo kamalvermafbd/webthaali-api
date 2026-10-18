@@ -21,7 +21,7 @@ class ServerProtocolController {
                 `READY -> ${collection.key}`
 
             );
-
+/*181026
             this.receiver.sendReady(
 
                 collection.event
@@ -30,6 +30,17 @@ class ServerProtocolController {
 
          const rows =
              await this.receiver.waitForCollection();
+*/
+
+
+const rowsPromise =
+    this.receiver.waitForCollection();
+
+this.receiver.sendReady(
+    collection.event
+);
+
+const rows = await rowsPromise;
 
             result[
                 collection.key

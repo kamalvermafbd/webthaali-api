@@ -86,32 +86,62 @@ async function sendChunkedToConnector(
 
     return new Promise((resolve, reject) => {
 
-        const ackTimeout = setTimeout(() => {
+        let ackTimeout;
 
-    console.error("CHUNK ACK TIMEOUT:", {
-        event: ackEvent,
-        batchId,
-        chunkIndex,
-        socketConnected: socket.connected
-    });
+function resetAckTimeout() {
+    clearTimeout(ackTimeout);
 
-    socket.off(
-        ackEvent,
-        onAck
-    );
+    ackTimeout = setTimeout(() => {
 
-    socket.off(
-        "disconnect",
-        onDisconnect
-    );
+        const lastHeartbeat =
+            Number(socket.lastHeartbeat || 0);
 
-    reject(
-        new Error(
-            `ACK timeout for chunk ${chunkIndex}`
-        )
-    );
+        const heartbeatFresh =
+            lastHeartbeat > 0 &&
+            Date.now() - lastHeartbeat < 90000;
 
-}, ACK_TIMEOUT);
+        if (
+            socket.connected &&
+            heartbeatFresh &&
+            socket.tallyRequestActive === true
+        ) {
+            console.log(
+                "⏳ CHUNK ACK WAIT — CONNECTOR STILL ACTIVE",
+                {
+                    batchId,
+                    chunkIndex,
+                    heartbeatAgeMs:
+                        Date.now() - lastHeartbeat
+                }
+            );
+
+            resetAckTimeout();
+            return;
+        }
+
+        console.error("CHUNK ACK TIMEOUT:", {
+            event: ackEvent,
+            batchId,
+            chunkIndex,
+            socketConnected: socket.connected,
+            heartbeatFresh,
+            tallyRequestActive:
+                socket.tallyRequestActive
+        });
+
+        socket.off(ackEvent, onAck);
+        socket.off("disconnect", onDisconnect);
+
+        reject(
+            new Error(
+                `ACK timeout for chunk ${chunkIndex}`
+            )
+        );
+
+    }, ACK_TIMEOUT);
+}
+
+resetAckTimeout();
 
         function onAck(data) {
 

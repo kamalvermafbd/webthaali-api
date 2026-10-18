@@ -575,7 +575,7 @@ if (
               // -------------------------------------------------
 // 1. Actual Tally request is running
 // -------------------------------------------------
-
+/* 181026
 if (socket.tallyRequestActive) {
 
     const requestStartedAt =
@@ -633,6 +633,80 @@ if (socket.tallyRequestActive) {
     await BatchStatusManager.markWaitingConnector({
         batch_id:
             batch.batch_id
+    });
+
+    waitingConnectorSince.set(
+        batch.batch_id,
+        Date.now()
+    );
+
+    continue;
+}
+*/
+
+// -------------------------------------------------
+// 1. Actual Tally request is running
+// -------------------------------------------------
+
+if (socket.tallyRequestActive === true) {
+
+    const requestStartedAt =
+        Number(socket.tallyRequestStartedAt || 0);
+
+    const requestAge =
+        requestStartedAt
+            ? Date.now() - requestStartedAt
+            : 0;
+
+    const lastHeartbeat =
+        Number(socket.lastHeartbeat || 0);
+
+    const heartbeatAge =
+        lastHeartbeat > 0
+            ? Date.now() - lastHeartbeat
+            : Infinity;
+
+    const heartbeatFresh =
+        socket.connected === true &&
+        lastHeartbeat > 0 &&
+        heartbeatAge >= 0 &&
+        heartbeatAge < HEARTBEAT_TIMEOUT_MS;
+
+    // Fresh heartbeat + active request:
+    // wait even if request takes longer than 90 seconds.
+    if (heartbeatFresh) {
+
+        console.log(
+            "🟢 CONNECTOR WATCHDOG: ACTIVE REQUEST + FRESH HEARTBEAT",
+            {
+                batch_id: batch.batch_id,
+                request_age_seconds:
+                    Math.floor(requestAge / 1000),
+                heartbeat_age_seconds:
+                    Math.floor(heartbeatAge / 1000)
+            }
+        );
+
+        continue;
+    }
+
+    // Active request but heartbeat stale:
+    // use existing connector recovery flow.
+    console.log(
+        "⏳ CONNECTOR WATCHDOG: ACTIVE REQUEST + STALE HEARTBEAT — WAITING FOR RECOVERY",
+        {
+            batch_id: batch.batch_id,
+            request_age_seconds:
+                Math.floor(requestAge / 1000),
+            heartbeat_age_seconds:
+                Number.isFinite(heartbeatAge)
+                    ? Math.floor(heartbeatAge / 1000)
+                    : null
+        }
+    );
+
+    await BatchStatusManager.markWaitingConnector({
+        batch_id: batch.batch_id
     });
 
     waitingConnectorSince.set(

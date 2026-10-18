@@ -11,7 +11,7 @@ function sendToConnector(socket, event, payload) {
     function resetTimeout() {
 
         clearTimeout(timeout);
-
+/* 181026
         timeout = setTimeout(() => {
 
             socket.off(responseEvent, onResponse);
@@ -23,7 +23,37 @@ function sendToConnector(socket, event, payload) {
             reject(new Error("Connector timeout"));
 
         }, CONNECTOR_TIMEOUT);
+*/
+        timeout = setTimeout(() => {
 
+            const lastHeartbeat =
+                Number(socket.lastHeartbeat || 0);
+
+            const heartbeatFresh =
+                lastHeartbeat > 0 &&
+                Date.now() - lastHeartbeat < 90000;
+
+            if (
+                socket.connected &&
+                heartbeatFresh &&
+                socket.tallyRequestActive === true
+            ) {
+                console.log(
+                    "⏳ CONNECTOR REQUEST STILL ACTIVE — EXTENDING TIMEOUT",
+                    { event, heartbeatAgeMs: Date.now() - lastHeartbeat }
+                );
+
+                resetTimeout();
+                return;
+            }
+
+            socket.off(responseEvent, onResponse);
+            socket.off(`${event}Progress`, onProgress);
+            socket.off("disconnect", onDisconnect);
+
+            reject(new Error("Connector timeout"));
+
+        }, CONNECTOR_TIMEOUT);
     }
 
     function onResponse(data) {
