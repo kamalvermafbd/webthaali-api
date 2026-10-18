@@ -29,7 +29,7 @@ async function runJob(job, serverUrl) {
                         `TALLY_SYNC ATTEMPT ${attempt}/${MAX_ATTEMPTS}:`,
                         job.batch_id
                     );
-
+/* 181026
                     const controller =
                         new AbortController();
 
@@ -63,7 +63,22 @@ async function runJob(job, serverUrl) {
                         clearTimeout(timeout);
 
                     }
+*/
 
+let response;
+
+const syncServerUrl =
+    process.env.BILLEY_SYNC_API_URL ||
+    "https://sync-api.billey.in";
+
+response = await fetch(
+    `${syncServerUrl}/getMasters` +
+    `?company_code=${encodeURIComponent(job.company_code)}` +
+    `&tally_owner=${encodeURIComponent(job.tally_owner)}` +
+    `&sync_mode=${encodeURIComponent(job.sync_mode)}` +
+    `&sync_period=${encodeURIComponent(job.sync_period)}` +
+    `&worker_batch_id=${encodeURIComponent(job.batch_id)}`
+);
                     console.log(
                         "TALLY_SYNC HTTP STATUS:",
                         response.status

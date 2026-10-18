@@ -12,7 +12,7 @@ const crypto = require("crypto");
 
 const {
     runJob
-} = require("../jobs/jobRunner");
+} = require("../jobs/syncjobRunner");
 
 const {
     lockJob,
