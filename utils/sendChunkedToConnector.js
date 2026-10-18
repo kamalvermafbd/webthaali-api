@@ -231,7 +231,7 @@ function waitForCompleteAck(batchId) {
 
         const completeAckEvent =
             `${event}CompleteAck`;
-
+/* 181026
         const timeout = setTimeout(() => {
 
             socket.off(
@@ -251,6 +251,61 @@ function waitForCompleteAck(batchId) {
             );
 
         }, ACK_TIMEOUT);
+*/
+
+        let timeout;
+
+        function resetCompleteAckTimeout() {
+            clearTimeout(timeout);
+
+            timeout = setTimeout(() => {
+                const lastHeartbeat =
+                    Number(socket.lastHeartbeat || 0);
+
+                const heartbeatAge =
+                    lastHeartbeat > 0
+                        ? Date.now() - lastHeartbeat
+                        : Infinity;
+
+                const heartbeatFresh =
+                    socket.connected === true &&
+                    heartbeatAge >= 0 &&
+                    heartbeatAge < 90000;
+
+                if (
+                    heartbeatFresh &&
+                    socket.tallyRequestActive === true
+                ) {
+                    console.log(
+                        "⏳ COMPLETE ACK WAIT — CONNECTOR STILL ACTIVE",
+                        {
+                            batchId,
+                            heartbeatAgeMs: heartbeatAge
+                        }
+                    );
+
+                    resetCompleteAckTimeout();
+                    return;
+                }
+
+                socket.off(
+                    completeAckEvent,
+                    onCompleteAck
+                );
+
+                socket.off(
+                    "disconnect",
+                    onDisconnect
+                );
+
+                reject(
+                    new Error("Complete ACK timeout")
+                );
+
+            }, ACK_TIMEOUT);
+        }
+
+        resetCompleteAckTimeout();
 
         function onCompleteAck(data) {
 
@@ -644,7 +699,7 @@ console.log("SNAPSHOT :", payload.snapshot);
 console.log("ENTITY :", payload.entity_type);
 console.log("ROWS :", data.data.length);
 console.log("========================");
-
+/* 181026 comment
 collectionList.push(
     ...data.data
 );
@@ -674,6 +729,35 @@ collectionList.push(
 
 
     receivedItems += data.data.length;
+*/
+    try {
+    await saveSyncSnapshotChunk({
+        sync_batch_id: payload.sync_batch_id,
+        company_code: payload.company_code,
+        tally_owner: payload.tally_owner,
+        module: payload.module,
+        entity_type: payload.entity_type,
+        rows: data.data
+    });
+} catch (error) {
+    console.error("SNAPSHOT CHUNK SAVE FAILED:", {
+        batchId: data.batchId,
+        chunkIndex: data.chunkIndex,
+        error: error.message
+    });
+
+    socket.emit(ackEvent, {
+        batchId: data.batchId,
+        chunkIndex: data.chunkIndex,
+        success: false,
+        error: error.message || "Snapshot chunk save failed"
+    });
+
+    return;
+}
+
+collectionList.push(...data.data);
+receivedItems += data.data.length;
 
     }
     else {

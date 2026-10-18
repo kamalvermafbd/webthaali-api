@@ -17,6 +17,54 @@ let watchdogTimer = null;
 let watchdogRunning = false;
 const waitingConnectorSince = new Map();
 
+async function startWaitingConnectorTimer(supabase, batch) {
+    const { error } = await supabase
+        .from("sync_batches")
+        .update({ waiting_connector_since: new Date().toISOString() })
+        .eq("id", batch.id)
+        .is("waiting_connector_since", null);
+
+    if (error) throw error;
+}
+
+async function ensureWaitingConnectorSince(supabase, batch) {
+    if (batch.waiting_connector_since) {
+        return new Date(batch.waiting_connector_since).getTime();
+    }
+
+    const now = new Date().toISOString();
+
+    const { data, error } = await supabase
+        .from("sync_batches")
+        .update({ waiting_connector_since: now })
+        .eq("id", batch.id)
+        .is("waiting_connector_since", null)
+        .select("waiting_connector_since")
+        .maybeSingle();
+
+    if (error) {
+        throw error;
+    }
+
+    if (data?.waiting_connector_since) {
+        return new Date(data.waiting_connector_since).getTime();
+    }
+
+    const { data: existing, error: readError } = await supabase
+        .from("sync_batches")
+        .select("waiting_connector_since")
+        .eq("id", batch.id)
+        .maybeSingle();
+
+    if (readError) {
+        throw readError;
+    }
+
+    return existing?.waiting_connector_since
+        ? new Date(existing.waiting_connector_since).getTime()
+        : Date.now();
+}
+
 // ------------------------------------------------------------
 // CHECK CONNECTOR WATCHDOG
 // ------------------------------------------------------------
@@ -55,6 +103,7 @@ async function checkConnectorWatchdog({
                     started_at,
                     heartbeat_at,
                     last_activity_at,
+                    waiting_connector_since,
                     current_stage,
                     current_module,
                     current_action,
@@ -65,7 +114,8 @@ async function checkConnectorWatchdog({
                 `)
                 .or(
                     "and(batch_status.eq.PROCESSING,worker_status.eq.RUNNING),and(batch_status.eq.PENDING,worker_status.eq.PENDING,current_stage.eq.WAITING_CONNECTOR)"
-                );
+                )
+                .not("batch_status", "in", '("FAILED","CLOSED","COMPLETED")');
 
         if (batchError) {
 
@@ -203,7 +253,7 @@ async function checkConnectorWatchdog({
                 connector_id: connectorId
             }
         );
-
+/* 181026
         await BatchStatusManager.markWaitingConnector({
             batch_id: batch.batch_id
         });
@@ -212,8 +262,15 @@ async function checkConnectorWatchdog({
             batch.batch_id,
             now
         );
+*/
 
-        continue;
+await BatchStatusManager.markWaitingConnector({
+    batch_id: batch.batch_id
+});
+
+await startWaitingConnectorTimer(supabase, batch);
+
+continue;
     }
 
     // =================================================
@@ -223,7 +280,7 @@ async function checkConnectorWatchdog({
         batch.current_stage ===
         "WAITING_CONNECTOR"
     ) {
-
+/* 181026
         if (
             !waitingConnectorSince.has(
                 batch.batch_id
@@ -242,6 +299,16 @@ async function checkConnectorWatchdog({
 
         const waitingAge =
             now - waitingSince;
+*/
+
+const waitingSince =
+    await ensureWaitingConnectorSince(
+        supabase,
+        batch
+    );
+
+const waitingAge =
+    now - waitingSince;
 
         const waitingAgeSeconds =
             Math.floor(
@@ -314,15 +381,11 @@ async function checkConnectorWatchdog({
                         }
                     );
 
-                    await BatchStatusManager.markWaitingConnector({
+                  await BatchStatusManager.markWaitingConnector({
                         batch_id: batch.batch_id
                     });
 
-                    waitingConnectorSince.set(
-                        batch.batch_id,
-                        Date.now()
-                    );
-
+                    await startWaitingConnectorTimer(supabase, batch);
                     continue;
                 }
                 // =================================================
@@ -367,6 +430,7 @@ if (
         );
 
         // Make sure the 90-second timer exists.
+        /* 181026
         if (
             !waitingConnectorSince.has(
                 batch.batch_id
@@ -378,16 +442,15 @@ if (
                 Date.now()
             );
         }
+*/
+const waitingSince =
+    await ensureWaitingConnectorSince(
+        supabase,
+        batch
+    );
 
-        const waitingSince =
-            waitingConnectorSince.get(
-                batch.batch_id
-            );
-
-        const waitingAge =
-            Date.now() -
-            waitingSince;
-
+const waitingAge =
+    Date.now() - waitingSince;
         // ------------------------------------------------
         // Tally did not recover within 90 seconds.
         // ------------------------------------------------
@@ -436,6 +499,98 @@ if (
     // Now restart the same batch from beginning.
     // ------------------------------------------------
 
+        // Do not restart until connector heartbeat is fresh
+    // and the previous Tally request is no longer active.
+// added 181026
+    const recoveryHeartbeat =
+        Number(socket.lastHeartbeat || 0);
+
+    const recoveryHeartbeatAge =
+        recoveryHeartbeat > 0
+            ? Date.now() - recoveryHeartbeat
+            : Infinity;
+
+    const recoveryHeartbeatFresh =
+        socket.connected === true &&
+        recoveryHeartbeatAge >= 0 &&
+        recoveryHeartbeatAge < HEARTBEAT_TIMEOUT_MS;
+/* 181026
+    if (
+        !recoveryHeartbeatFresh ||
+        socket.tallyRequestActive === true
+    ) {
+        console.log(
+            "⏳ CONNECTOR WATCHDOG: RECOVERY NOT SAFE TO RESTART",
+            {
+                batch_id: batch.batch_id,
+                heartbeat_age_seconds:
+                    Number.isFinite(recoveryHeartbeatAge)
+                        ? Math.floor(recoveryHeartbeatAge / 1000)
+                        : null,
+                tally_request_active:
+                    socket.tallyRequestActive === true
+            }
+        );
+
+        continue;
+    }
+*/
+    
+    if (!recoveryHeartbeatFresh) {
+
+        const now = Date.now();
+
+        const waitingSince =
+            await ensureWaitingConnectorSince(
+                supabase,
+                batch
+            );
+
+        const waitingAge =
+            now - waitingSince;
+
+        console.log(
+            "⏳ CONNECTOR WATCHDOG: RECOVERY HEARTBEAT STALE",
+            {
+                batch_id: batch.batch_id,
+                heartbeat_age_seconds:
+                    Number.isFinite(recoveryHeartbeatAge)
+                        ? Math.floor(recoveryHeartbeatAge / 1000)
+                        : null,
+                waiting_age_seconds:
+                    Math.floor(waitingAge / 1000),
+                tally_request_active:
+                    socket.tallyRequestActive === true
+            }
+        );
+
+        if (waitingAge >= HEARTBEAT_TIMEOUT_MS) {
+            waitingConnectorSince.delete(batch.batch_id);
+
+            await BatchStatusManager.markFailed({
+                batch_id: batch.batch_id,
+                error:
+                    "Connector heartbeat stale; recovery timed out"
+            });
+        }
+
+        continue;
+    }
+
+    // Heartbeat is fresh, but the previous Tally request
+    // is still active. Do not restart it.
+    if (socket.tallyRequestActive === true) {
+        console.log(
+            "⏳ CONNECTOR WATCHDOG: TALLY REQUEST STILL ACTIVE",
+            {
+                batch_id: batch.batch_id
+            }
+        );
+
+        continue;
+    }
+
+
     waitingConnectorSince.delete(
         batch.batch_id
     );
@@ -474,6 +629,7 @@ if (
             worker_id: null,
             locked_at: null,
             heartbeat_at: null,
+            waiting_connector_since: null,
             completed_at: null,
             error_message: null,
 
@@ -705,17 +861,14 @@ if (socket.tallyRequestActive === true) {
         }
     );
 
-    await BatchStatusManager.markWaitingConnector({
-        batch_id: batch.batch_id
-    });
+await BatchStatusManager.markWaitingConnector({
+    batch_id: batch.batch_id
+});
 
-    waitingConnectorSince.set(
-        batch.batch_id,
-        Date.now()
-    );
+await startWaitingConnectorTimer(supabase, batch);
 
-    continue;
-}
+continue;
+    }
 
                 // -------------------------------------------------
                 // 2. No active Tally request
@@ -818,17 +971,13 @@ console.log(
 // WAITING_CONNECTOR logic will mark the batch FAILED.
 // ------------------------------------------------
 
-await BatchStatusManager.markWaitingConnector({
-    batch_id:
-        batch.batch_id
-});
+                await BatchStatusManager.markWaitingConnector({
+                    batch_id: batch.batch_id
+                });
 
-waitingConnectorSince.set(
-    batch.batch_id,
-    Date.now()
-);
+                await startWaitingConnectorTimer(supabase, batch);
 
-continue;
+                continue;
             } catch (batchError) {
 
                 console.error(
