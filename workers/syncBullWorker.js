@@ -98,11 +98,32 @@ const {
     }
 );
 
+/* 181026
 if (
     runtimeError ||
     !claimedWorker ||
     claimedWorker.length === 0
 ) {
+    throw new Error(
+        `Worker runtime already active or claim failed: ${worker.worker_name}`
+    );
+}
+    */
+
+if (
+    runtimeError ||
+    !claimedWorker ||
+    claimedWorker.length === 0
+) {
+    console.error("WORKER CLAIM DEBUG:", {
+        worker_name: worker.worker_name,
+        worker_id: worker.id,
+        runtime_error: runtimeError?.message || null,
+        runtime_code: runtimeError?.code || null,
+        runtime_details: runtimeError?.details || null,
+        claimed_worker: claimedWorker
+    });
+
     throw new Error(
         `Worker runtime already active or claim failed: ${worker.worker_name}`
     );
