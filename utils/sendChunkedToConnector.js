@@ -309,7 +309,7 @@ function waitForCompleteAck(batchId) {
         console.log(
             `Sending chunk ${chunk.chunkIndex}/${chunk.totalChunks}`
         );
-
+/* 181026
        socket.emit(
     `${event}Chunk`,
             {
@@ -330,7 +330,7 @@ function waitForCompleteAck(batchId) {
                 toDate: payload.toDate,
 
                 booksBeginningFrom:
-    payload.booksBeginningFrom,
+                payload.booksBeginningFrom,
 
                 chunkIndex: chunk.chunkIndex,
 
@@ -347,7 +347,29 @@ function waitForCompleteAck(batchId) {
             batchId,
             chunk.chunkIndex
         );
+*/
+const ackPromise = waitForAck(batchId, chunk.chunkIndex);
 
+socket.emit(
+    `${event}Chunk`,
+    {
+        batchId,
+        company: payload.company,
+        sync_batch_id: payload.sync_batch_id,
+        tally_owner: payload.tally_owner,
+        module: payload.module,
+        entity_type: payload.entity_type,
+        fromDate: payload.fromDate,
+        toDate: payload.toDate,
+        booksBeginningFrom: payload.booksBeginningFrom,
+        chunkIndex: chunk.chunkIndex,
+        totalChunks: chunk.totalChunks,
+        payloadSize: chunk.payloadSize,
+        data: chunk.data
+    }
+);
+
+await ackPromise;
         console.log(
             `ACK received for chunk ${chunk.chunkIndex}/${chunk.totalChunks}`
         );

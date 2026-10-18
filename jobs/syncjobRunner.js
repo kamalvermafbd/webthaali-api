@@ -47,7 +47,6 @@ async function runJob(job, serverUrl) {
     process.env.BILLEY_SYNC_API_URL || "https://sync-api.billey.in";
 
                         response = await fetch(
-                       //     `${serverUrl}/getMasters` +
                        `${syncServerUrl}/getMasters` +
                             `?company_code=${encodeURIComponent(job.company_code)}` +
                             `&tally_owner=${encodeURIComponent(job.tally_owner)}` +
