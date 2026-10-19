@@ -3703,7 +3703,6 @@ app.post("/sync/start", async (req, res) => {
 
 });
 
-
 app.get("/sync/status", async (req, res) => {
     try {
         const batch_id = String(req.query.batch_id || "").trim();
@@ -3752,8 +3751,13 @@ app.get("/sync/status", async (req, res) => {
             });
         }
 
-        const batchStatus = String(data.batch_status || "").toUpperCase();
-        const workerStatus = String(data.worker_status || "").toUpperCase();
+        const batchStatus = String(
+            data.batch_status || ""
+        ).trim().toUpperCase();
+
+        const workerStatus = String(
+            data.worker_status || ""
+        ).trim().toUpperCase();
 
         const finalStatusVerified =
             batchStatus === "CLOSED" &&
@@ -3763,21 +3767,28 @@ app.get("/sync/status", async (req, res) => {
             data.stock_reconciliation_completed === true &&
             data.batch_closed === true;
 
-        const currentStage = String(data.current_stage || "")
-            .trim()
-            .toUpperCase();
+        const currentStage = String(
+            data.current_stage || ""
+        ).trim().toUpperCase();
 
-        const progressStage = String(data.sync_progress?.stage || "")
-            .trim()
-            .toUpperCase();
+        const progressStage = String(
+            data.sync_progress?.stage || ""
+        ).trim().toUpperCase();
 
-        // Prefer the progress stage if current_stage is stale INIT/START.
+        // Prefer the live progress stage when current_stage
+        // contains a stale or generic value.
+        const genericStages = [
+            "",
+            "INIT",
+            "START",
+            "PENDING",
+            "STARTING"
+        ];
+
         const rawStage =
-            currentStage === "" ||
-            currentStage === "INIT" ||
-            currentStage === "START"
-                ? (progressStage || currentStage)
-                : currentStage;
+            genericStages.includes(currentStage) && progressStage
+                ? progressStage
+                : currentStage || progressStage;
 
         const steps = [
             { step_name: "CONNECT_PREPARE", status: "PENDING" },
@@ -3795,36 +3806,51 @@ app.get("/sync/status", async (req, res) => {
             START: 0,
             STARTING: 0,
             COMPANY_SYNC: 0,
+            COMPANY: 0,
             WAITING_CONNECTOR: 0,
 
             // 1 — Process Masters
             MASTERS: 1,
             MASTER_SYNC: 1,
             MASTERS_COMPLETED: 1,
+            GROUPS: 1,
             GROUP_PROCESSING: 1,
             GROUP_COMPLETED: 1,
-            STOCK_GROUP_PROCESSING: 1,
-            STOCK_GROUP_COMPLETED: 1,
-            LEDGER_PROCESSING: 1,
-            LEDGER_COMPLETED: 1,
-            GODOWN_PROCESSING: 1,
-            GODOWN_COMPLETED: 1,
+            UNITS: 1,
             UNIT_PROCESSING: 1,
             UNIT_COMPLETED: 1,
+            LEDGERS: 1,
+            LEDGER_PROCESSING: 1,
+            LEDGER_COMPLETED: 1,
+            STOCK_GROUPS: 1,
+            STOCK_GROUP_PROCESSING: 1,
+            STOCK_GROUP_COMPLETED: 1,
+            GODOWNS: 1,
+            GODOWN_PROCESSING: 1,
+            GODOWN_COMPLETED: 1,
+            COST_CENTRES: 1,
+            COST_CENTRE: 1,
+            COST_CENTRES_PROCESSING: 1,
             COST_CENTRE_PROCESSING: 1,
             COST_CENTRE_COMPLETED: 1,
+            STOCKS: 1,
             STOCK_PROCESSING: 1,
             STOCK_COMPLETED: 1,
 
             // 2 — Sync Vouchers
             VOUCHER: 2,
             VOUCHER_SYNC: 2,
+            VOUCHER_GUID_DISCOVERY: 2,
+            VOUCHER_GUIDS_RECEIVED: 2,
+            VOUCHER_IMPORT: 2,
             VOUCHER_CHUNK_SEND: 2,
+            VOUCHER_CHUNK_RECEIVE: 2,
             BEFORE_VOUCHER_BY_GUID: 2,
             BEFORE_VOUCHER_BY_GUID_REQUEST: 2,
             SENDING_VOUCHER_BY_GUID: 2,
             AFTER_VOUCHER_BY_GUID_RESPONSE: 2,
             VOUCHER_PROCESSING: 2,
+            VOUCHER_COMPLETE: 2,
             VOUCHER_COMPLETED: 2,
 
             // 3 — Ledger & Inventory
@@ -3836,22 +3862,29 @@ app.get("/sync/status", async (req, res) => {
             SNAPSHOT: 4,
             SAVE_SNAPSHOT: 4,
 
-            // 5 — Validate Data
+            // 5 — Validate Data / Reconciliation
             INITIAL_CHILD_RECONCILIATION: 5,
             CHILD_RECONCILIATION: 5,
+            CHILD_RECON: 5,
             LEDGER_RECONCILIATION: 5,
+            LEDGER_RECON: 5,
             STOCK_RECONCILIATION: 5,
+            STOCK_RECON: 5,
             RECONCILIATION: 5,
 
             // 6 — Finalize
             CLEANUP: 6,
             FINALIZING: 6,
             FINALIZE: 6,
-            COMPLETED: 6
+            COMPLETED: 6,
+            SYNC_COMPLETED: 6
         };
 
-        const currentStepIndex = stageIndexMap[rawStage] ?? -1;
+        const currentStepIndex =
+            stageIndexMap[rawStage] ?? -1;
 
+        // Mark all earlier stages complete and the current
+        // recognized stage in progress.
         if (currentStepIndex >= 0) {
             steps.forEach((step, index) => {
                 if (index < currentStepIndex) {
@@ -3862,16 +3895,21 @@ app.get("/sync/status", async (req, res) => {
             });
         }
 
-        // Do not report successful completion without authoritative verification.
+        // Authoritative completion takes precedence over stage data.
         if (finalStatusVerified) {
             steps.forEach((step) => {
                 step.status = "COMPLETED";
             });
-        } else if (batchStatus === "FAILED" || workerStatus === "FAILED") {
+        } else if (
+            batchStatus === "FAILED" ||
+            workerStatus === "FAILED"
+        ) {
             const failedIndex =
                 currentStepIndex >= 0
                     ? currentStepIndex
-                    : steps.findIndex((step) => step.status === "IN_PROGRESS");
+                    : steps.findIndex(
+                        (step) => step.status === "IN_PROGRESS"
+                    );
 
             if (failedIndex >= 0) {
                 steps[failedIndex].status = "FAILED";
