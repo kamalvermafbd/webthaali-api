@@ -435,13 +435,28 @@ console.log("OPTIONS :", options);
                 ledgerGuids
             );
 
-        if (existingError) {
+       
+if (existingError) {
 
-            throw new Error(
-                `OPENING BALANCE FETCH failed (${table}) : ${existingError.message}`
-            );
+    console.error("OPENING BALANCE FETCH DIAGNOSTICS:", {
+        table,
+        company_code,
+        ledgerGuidCount: ledgerGuids.length,
+        errorMessage: existingError.message,
+        errorCode: existingError.code,
+        errorDetails: existingError.details,
+        errorHint: existingError.hint,
+        causeMessage: existingError.cause?.message,
+        causeCode: existingError.cause?.code,
+        causeName: existingError.cause?.name
+    });
 
-        }
+    throw new Error(
+        `OPENING BALANCE FETCH failed (${table}) : ${existingError.message}`
+    );
+
+}
+
 
         // ----------------------------------
         // 3. CURRENT TALLY BILL KEYS
