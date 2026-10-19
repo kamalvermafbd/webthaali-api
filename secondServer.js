@@ -3703,6 +3703,7 @@ app.post("/sync/start", async (req, res) => {
 
 });
 
+
 app.get("/sync/status", async (req, res) => {
     try {
         const batch_id = String(req.query.batch_id || "").trim();
@@ -3751,19 +3752,32 @@ app.get("/sync/status", async (req, res) => {
             });
         }
 
+        const batchStatus = String(data.batch_status || "").toUpperCase();
+        const workerStatus = String(data.worker_status || "").toUpperCase();
+
         const finalStatusVerified =
-            data.batch_status === "CLOSED" &&
-            data.worker_status === "COMPLETED" &&
+            batchStatus === "CLOSED" &&
+            workerStatus === "COMPLETED" &&
             data.reconciliation_completed === true &&
             data.ledger_reconciliation_completed === true &&
             data.stock_reconciliation_completed === true &&
             data.batch_closed === true;
 
-        const rawStage = String(
-            data.current_stage ||
-            data.sync_progress?.stage ||
-            ""
-        ).toUpperCase();
+        const currentStage = String(data.current_stage || "")
+            .trim()
+            .toUpperCase();
+
+        const progressStage = String(data.sync_progress?.stage || "")
+            .trim()
+            .toUpperCase();
+
+        // Prefer the progress stage if current_stage is stale INIT/START.
+        const rawStage =
+            currentStage === "" ||
+            currentStage === "INIT" ||
+            currentStage === "START"
+                ? (progressStage || currentStage)
+                : currentStage;
 
         const steps = [
             { step_name: "CONNECT_PREPARE", status: "PENDING" },
@@ -3775,62 +3789,67 @@ app.get("/sync/status", async (req, res) => {
             { step_name: "FINALIZE", status: "PENDING" }
         ];
 
-       const stageIndexMap = {
-    // 0 — Connect & Prepare
-    START: 0,
-    STARTING: 0,
-    COMPANY_SYNC: 0,
-    WAITING_CONNECTOR: 0,
+        const stageIndexMap = {
+            // 0 — Connect & Prepare
+            INIT: 0,
+            START: 0,
+            STARTING: 0,
+            COMPANY_SYNC: 0,
+            WAITING_CONNECTOR: 0,
 
-    // 1 — Process Masters
-    MASTERS: 1,
-    MASTERS_COMPLETED: 1,
-    GROUP_PROCESSING: 1,
-    GROUP_COMPLETED: 1,
-    STOCK_GROUP_PROCESSING: 1,
-    STOCK_GROUP_COMPLETED: 1,
-    LEDGER_PROCESSING: 1,
-    LEDGER_COMPLETED: 1,
-    GODOWN_PROCESSING: 1,
-    GODOWN_COMPLETED: 1,
-    UNIT_PROCESSING: 1,
-    UNIT_COMPLETED: 1,
-    COST_CENTRE_PROCESSING: 1,
-    COST_CENTRE_COMPLETED: 1,
-    STOCK_PROCESSING: 1,
-    STOCK_COMPLETED: 1,
+            // 1 — Process Masters
+            MASTERS: 1,
+            MASTER_SYNC: 1,
+            MASTERS_COMPLETED: 1,
+            GROUP_PROCESSING: 1,
+            GROUP_COMPLETED: 1,
+            STOCK_GROUP_PROCESSING: 1,
+            STOCK_GROUP_COMPLETED: 1,
+            LEDGER_PROCESSING: 1,
+            LEDGER_COMPLETED: 1,
+            GODOWN_PROCESSING: 1,
+            GODOWN_COMPLETED: 1,
+            UNIT_PROCESSING: 1,
+            UNIT_COMPLETED: 1,
+            COST_CENTRE_PROCESSING: 1,
+            COST_CENTRE_COMPLETED: 1,
+            STOCK_PROCESSING: 1,
+            STOCK_COMPLETED: 1,
 
-    // 2 — Sync Vouchers
-    VOUCHER: 2,
-    VOUCHER_CHUNK_SEND: 2,
-    BEFORE_VOUCHER_BY_GUID: 2,
-    BEFORE_VOUCHER_BY_GUID_REQUEST: 2,
-    SENDING_VOUCHER_BY_GUID: 2,
-    AFTER_VOUCHER_BY_GUID_RESPONSE: 2,
-    VOUCHER_PROCESSING: 2,
-    VOUCHER_COMPLETED: 2,
+            // 2 — Sync Vouchers
+            VOUCHER: 2,
+            VOUCHER_SYNC: 2,
+            VOUCHER_CHUNK_SEND: 2,
+            BEFORE_VOUCHER_BY_GUID: 2,
+            BEFORE_VOUCHER_BY_GUID_REQUEST: 2,
+            SENDING_VOUCHER_BY_GUID: 2,
+            AFTER_VOUCHER_BY_GUID_RESPONSE: 2,
+            VOUCHER_PROCESSING: 2,
+            VOUCHER_COMPLETED: 2,
 
-    // 3 — Ledger & Inventory
-    LEDGER_SYNC: 3,
-    INVENTORY_SYNC: 3,
-    LEDGER_INVENTORY: 3,
+            // 3 — Ledger & Inventory
+            LEDGER_SYNC: 3,
+            INVENTORY_SYNC: 3,
+            LEDGER_INVENTORY: 3,
 
-    // 4 — Save Snapshot
-    SNAPSHOT: 4,
-    SAVE_SNAPSHOT: 4,
+            // 4 — Save Snapshot
+            SNAPSHOT: 4,
+            SAVE_SNAPSHOT: 4,
 
-    // 5 — Validate Data
-    INITIAL_CHILD_RECONCILIATION: 5,
-    CHILD_RECONCILIATION: 5,
-    LEDGER_RECONCILIATION: 5,
-    STOCK_RECONCILIATION: 5,
-    RECONCILIATION: 5,
+            // 5 — Validate Data
+            INITIAL_CHILD_RECONCILIATION: 5,
+            CHILD_RECONCILIATION: 5,
+            LEDGER_RECONCILIATION: 5,
+            STOCK_RECONCILIATION: 5,
+            RECONCILIATION: 5,
 
-    // 6 — Finalize
-    CLEANUP: 6,
-    FINALIZE: 6,
-    COMPLETED: 6
-};
+            // 6 — Finalize
+            CLEANUP: 6,
+            FINALIZING: 6,
+            FINALIZE: 6,
+            COMPLETED: 6
+        };
+
         const currentStepIndex = stageIndexMap[rawStage] ?? -1;
 
         if (currentStepIndex >= 0) {
@@ -3843,22 +3862,20 @@ app.get("/sync/status", async (req, res) => {
             });
         }
 
-        // A failed batch must never be presented as successful.
-        if (String(data.batch_status || "").toUpperCase() === "FAILED") {
-            const failedIndex = currentStepIndex >= 0
-                ? currentStepIndex
-                : steps.findIndex(step => step.status === "IN_PROGRESS");
+        // Do not report successful completion without authoritative verification.
+        if (finalStatusVerified) {
+            steps.forEach((step) => {
+                step.status = "COMPLETED";
+            });
+        } else if (batchStatus === "FAILED" || workerStatus === "FAILED") {
+            const failedIndex =
+                currentStepIndex >= 0
+                    ? currentStepIndex
+                    : steps.findIndex((step) => step.status === "IN_PROGRESS");
 
             if (failedIndex >= 0) {
                 steps[failedIndex].status = "FAILED";
             }
-        }
-
-        // Finalize only after authoritative final verification.
-        if (finalStatusVerified) {
-            steps.forEach(step => {
-                step.status = "COMPLETED";
-            });
         }
 
         return res.json({
@@ -3869,7 +3886,6 @@ app.get("/sync/status", async (req, res) => {
                 final_status_verified: finalStatusVerified
             }
         });
-
     } catch (error) {
         console.error("SYNC STATUS ERROR:", error);
 
@@ -3879,7 +3895,6 @@ app.get("/sync/status", async (req, res) => {
         });
     }
 });
-
 
 app.get("/testTally", async (req, res) => {
 
