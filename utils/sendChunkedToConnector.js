@@ -439,6 +439,7 @@ socket.emit(
     `${event}Chunk`,
     {
         batchId,
+        requestId,
         company: payload.company,
         sync_batch_id: payload.sync_batch_id,
         tally_owner: payload.tally_owner,
@@ -469,6 +470,8 @@ await ackPromise;
             {
 
             batchId,
+
+            requestId,
 
             company: payload.company,
 
@@ -518,6 +521,17 @@ console.log("CHUNK RESULT DEBUG:", {
     success: data?.success,
     collectionName: data?.collectionName
 });
+
+        if (
+            event === "voucherByGuid" &&
+            data?.requestId !== requestId
+        ) {
+            console.warn("Ignoring mismatched voucherByGuid result:", {
+                expectedRequestId: requestId,
+                receivedRequestId: data?.requestId
+            });
+            return;
+        }
         if (!data) {
             return;
         }
@@ -593,6 +607,19 @@ console.log("ENTITY:", payload.entity_type);
 
     if (!data) {
      return;
+    }
+
+        if (
+        event === "voucherByGuid" &&
+        data.requestId !== requestId
+    ) {
+        console.warn("Ignoring mismatched voucherByGuid chunk:", {
+            expectedRequestId: requestId,
+            receivedRequestId: data.requestId,
+            batchId: data.batchId,
+            chunkIndex: data.chunkIndex
+        });
+        return;
     }
 
             if (
@@ -812,6 +839,18 @@ async function onComplete(data) {
 });
 
     //resetTimeout();
+
+        if (
+        event === "voucherByGuid" &&
+        data?.requestId !== requestId
+    ) {
+        console.warn("Ignoring mismatched voucherByGuid Complete:", {
+            expectedRequestId: requestId,
+            receivedRequestId: data?.requestId,
+            batchId: data?.batchId
+        });
+        return;
+    }
 
     if (
             event === "getMasters"
@@ -1070,8 +1109,9 @@ if (
 socket.emit(
     event,
     {
-        requestId,
-        ...payload
+        ...payload,
+        requestId
+        
     }
 );
 
