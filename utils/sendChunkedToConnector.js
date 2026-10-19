@@ -511,7 +511,13 @@ const protocolController =
 async function onResult(data) {
 
     try {
-
+console.log("CHUNK RESULT DEBUG:", {
+    event,
+    requestId,
+    receivedRequestId: data?.requestId,
+    success: data?.success,
+    collectionName: data?.collectionName
+});
         if (!data) {
             return;
         }
@@ -796,6 +802,14 @@ receivedItems += data.data.length;
     }
 
 async function onComplete(data) {
+
+    console.log("CHUNK COMPLETE DEBUG:", {
+    event,
+    requestId,
+    receivedBatchId: data?.batchId,
+    masterResultReceived: Boolean(masterResult),
+    socketConnected: socket.connected
+});
 
     //resetTimeout();
 
