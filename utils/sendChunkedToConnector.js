@@ -838,7 +838,11 @@ if (
                 cleanup();
 
                 return reject(
-                    new Error("Master payload not received")
+                    new Error(
+    `${event}: Master payload not received; ` +
+    `requestId=${requestId}, ` +
+    `batchId=${payload.sync_batch_id || payload.batchId || "unknown"}`
+)
                 );
 
             }
