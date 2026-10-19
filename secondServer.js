@@ -287,6 +287,44 @@ app.use(
 
 );
 
+
+const networkSpeedLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: "Too many speed tests. Please try again shortly."
+  }
+});
+
+app.get("/network-speed-test", networkSpeedLimiter, (req, res) => {
+  try {
+    // 128 KB test payload; random bytes avoid highly compressible data.
+    const payload = crypto.randomBytes(128 * 1024);
+
+    res.set({
+      "Content-Type": "application/octet-stream",
+      "Content-Length": String(payload.length),
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+      "Pragma": "no-cache",
+      "Expires": "0",
+      "X-Content-Type-Options": "nosniff"
+    });
+
+    return res.status(200).send(payload);
+  } catch (err) {
+    console.error("NETWORK SPEED TEST ERROR:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: "Network speed test failed"
+    });
+  }
+});
+
+
 const loginLimiter =
   rateLimit({
 
