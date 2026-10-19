@@ -409,7 +409,7 @@ console.log("OPTIONS :", options);
         // ----------------------------------
         // 2. GET EXISTING TALLY ROWS
         // ----------------------------------
-
+/* 191026
         const {
             data: existingRows,
             error: existingError
@@ -456,6 +456,60 @@ if (existingError) {
     );
 
 }
+*/
+
+
+        // ----------------------------------
+        // 2. GET EXISTING TALLY ROWS
+        // ----------------------------------
+
+        const existingRows = [];
+        const FETCH_GUID_CHUNK_SIZE = 50;
+
+        for (
+            let i = 0;
+            i < ledgerGuids.length;
+            i += FETCH_GUID_CHUNK_SIZE
+        ) {
+            const guidChunk = ledgerGuids.slice(
+                i,
+                i + FETCH_GUID_CHUNK_SIZE
+            );
+
+            const {
+                data: fetchedRows,
+                error: existingError
+            } = await supabase
+                .from(table)
+                .select("id,ledger_guid,bill_name")
+                .eq("company_code", company_code)
+                .eq("tally_owner", tally_owner)
+                .eq("source_type", "TALLY")
+                .in("ledger_guid", guidChunk);
+
+            if (existingError) {
+                console.error(
+                    "OPENING BALANCE FETCH DIAGNOSTICS:",
+                    {
+                        table,
+                        company_code,
+                        chunkIndex: i,
+                        chunkSize: guidChunk.length,
+                        totalLedgerGuids: ledgerGuids.length,
+                        errorMessage: existingError.message,
+                        errorCode: existingError.code,
+                        errorDetails: existingError.details,
+                        errorHint: existingError.hint
+                    }
+                );
+
+                throw new Error(
+                    `OPENING BALANCE FETCH failed (${table}) : ${existingError.message}`
+                );
+            }
+
+            existingRows.push(...(fetchedRows || []));
+        }
 
 
         // ----------------------------------
@@ -619,7 +673,7 @@ if (existingError) {
         // ----------------------------------
         // 2. GET EXISTING TALLY ROWS
         // ----------------------------------
-
+/* 191026
         const {
             data: existingRows,
             error: existingError
@@ -652,6 +706,7 @@ if (existingError) {
             );
 
         }
+*/
 
         // ----------------------------------
         // 3. CURRENT TALLY STOCK KEYS
