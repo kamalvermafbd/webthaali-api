@@ -708,6 +708,60 @@ if (existingError) {
         }
 */
 
+
+        // ----------------------------------
+        // 2. GET EXISTING TALLY ROWS
+        // ----------------------------------
+
+        const existingRows = [];
+        const FETCH_STOCK_GUID_CHUNK_SIZE = 50;
+
+        for (
+            let i = 0;
+            i < stockGuids.length;
+            i += FETCH_STOCK_GUID_CHUNK_SIZE
+        ) {
+            const guidChunk = stockGuids.slice(
+                i,
+                i + FETCH_STOCK_GUID_CHUNK_SIZE
+            );
+
+            const {
+                data: fetchedRows,
+                error: existingError
+            } = await supabase
+                .from(table)
+                .select("id,stock_guid,godown_name,batch_name")
+                .eq("company_code", company_code)
+                .eq("tally_owner", tally_owner)
+                .eq("source_type", "TALLY")
+                .in("stock_guid", guidChunk);
+
+            if (existingError) {
+                console.error(
+                    "STOCK OPENING BALANCE FETCH DIAGNOSTICS:",
+                    {
+                        table,
+                        company_code,
+                        chunkOffset: i,
+                        chunkSize: guidChunk.length,
+                        totalStockGuids: stockGuids.length,
+                        errorMessage: existingError.message,
+                        errorCode: existingError.code,
+                        errorDetails: existingError.details,
+                        errorHint: existingError.hint
+                    }
+                );
+
+                throw new Error(
+                    `STOCK OPENING BALANCE FETCH failed (${table}) : ${existingError.message}`
+                );
+            }
+
+            existingRows.push(...(fetchedRows || []));
+        }
+
+
         // ----------------------------------
         // 3. CURRENT TALLY STOCK KEYS
         // ----------------------------------
