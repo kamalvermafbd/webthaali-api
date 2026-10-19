@@ -203,6 +203,33 @@ response = await fetch(
 
             }
 
+            let currentBatch = null;
+
+            try {
+                currentBatch = await BatchStatusManager.loadBatch({
+                    batch_id: job.batch_id
+                });
+            } catch (statusError) {
+                console.error(
+                    "BATCH STATUS CHECK FAILED:",
+                    job.batch_id,
+                    statusError.message
+                );
+            }
+
+            if (
+                currentBatch?.batch_status === "CLOSED" &&
+                currentBatch?.batch_closed === true &&
+                currentBatch?.reconciliation_completed === true
+            ) {
+                console.log(
+                    "BATCH ALREADY CLOSED — SKIPPING FAILURE UPDATE:",
+                    job.batch_id
+                );
+
+                return;
+            }
+
             await BatchStatusManager.markFailed({
 
                 batch_id: job.batch_id,
