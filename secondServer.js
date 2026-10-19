@@ -3771,12 +3771,94 @@ app.get("/sync/status", async (req, res) => {
           data.stock_reconciliation_completed === true &&
           data.batch_closed === true;
 
+        const rawStage = String(
+    data.current_stage ||
+    data.sync_progress?.stage ||
+    ""
+).toUpperCase();
+
+const overallProgress = Number(
+    data.sync_progress?.progress || 0
+);
+
+const steps = [
+    { step_name: "CONNECT_PREPARE", status: "PENDING" },
+    { step_name: "PROCESS_MASTERS", status: "PENDING" },
+    { step_name: "SYNC_VOUCHERS", status: "PENDING" },
+    { step_name: "LEDGER_INVENTORY", status: "PENDING" },
+    { step_name: "SAVE_SNAPSHOT", status: "PENDING" },
+    { step_name: "VALIDATE_DATA", status: "PENDING" },
+    { step_name: "FINALIZE", status: "PENDING" }
+];
+
+const stageIndexMap = {
+    START: 0,
+    STARTING: 0,
+    COMPANY_SYNC: 0,
+
+    MASTERS: 1,
+    MASTERS_COMPLETED: 1,
+    GROUP_PROCESSING: 1,
+    GROUP_COMPLETED: 1,
+    STOCK_GROUP_PROCESSING: 1,
+    STOCK_GROUP_COMPLETED: 1,
+    LEDGER_PROCESSING: 1,
+    LEDGER_COMPLETED: 1,
+    GODOWN_PROCESSING: 1,
+    GODOWN_COMPLETED: 1,
+    UNIT_PROCESSING: 1,
+    UNIT_COMPLETED: 1,
+    COST_CENTRE_PROCESSING: 1,
+    COST_CENTRE_COMPLETED: 1,
+    STOCK_PROCESSING: 1,
+    STOCK_COMPLETED: 1,
+
+    BEFORE_VOUCHER_BY_GUID: 2,
+    BEFORE_VOUCHER_BY_GUID_REQUEST: 2,
+    SENDING_VOUCHER_BY_GUID: 2,
+    AFTER_VOUCHER_BY_GUID_RESPONSE: 2,
+    VOUCHER_PROCESSING: 2,
+    VOUCHER_COMPLETED: 2,
+
+    INITIAL_CHILD_RECONCILIATION: 3,
+    CHILD_RECONCILIATION: 3,
+    LEDGER_RECONCILIATION: 3,
+    STOCK_RECONCILIATION: 3,
+
+    COMPLETED: 5,
+    SYNC_COMPLETED: 5
+};
+
+const currentStepIndex =
+    stageIndexMap[rawStage] ?? -1;
+
+if (currentStepIndex >= 0) {
+    steps.forEach((step, index) => {
+        if (index < currentStepIndex) {
+            step.status = "COMPLETED";
+        } else if (index === currentStepIndex) {
+            step.status =
+                rawStage === "COMPLETED" ||
+                rawStage === "SYNC_COMPLETED"
+                    ? "COMPLETED"
+                    : "IN_PROGRESS";
+        }
+    });
+}
+
+if (finalStatusVerified) {
+    steps.forEach(step => {
+        step.status = "COMPLETED";
+    });
+}
+
        return res.json({
     success: true,
-    batch: {
-        ...data,
-        final_status_verified: finalStatusVerified
-    }
+   batch: {
+    ...data,
+    steps,
+    final_status_verified: finalStatusVerified
+}
 });
 
     } catch (error) {

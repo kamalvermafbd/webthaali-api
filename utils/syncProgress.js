@@ -500,7 +500,7 @@ async function updateSyncProgress({
         // ----------------------------------------------------
         // DATABASE UPDATE
         // ----------------------------------------------------
-
+/* 191026
         const updateData = {
 
             sync_progress: {
@@ -526,7 +526,40 @@ async function updateSyncProgress({
             }
         };
 
+*/
 
+        const { data: existingBatch, error: fetchError } =
+            await supabase
+                .from("sync_batches")
+                .select("sync_progress")
+                .eq("batch_id", batchId)
+                .maybeSingle();
+
+        if (fetchError) {
+            console.error(
+                "❌ SYNC PROGRESS FETCH ERROR:",
+                fetchError.message
+            );
+            return;
+        }
+
+        const updateData = {
+            sync_progress: {
+                ...(existingBatch?.sync_progress || {}),
+
+                stage,
+
+                phase_progress:
+                    progress === null ||
+                    progress === undefined
+                        ? null
+                        : Number(progress),
+
+                progress: overallProgress,
+
+                updated_at: new Date().toISOString()
+            }
+        };
         // ----------------------------------------------------
         // CURRENT ACTION
         // ----------------------------------------------------
