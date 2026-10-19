@@ -308,13 +308,26 @@ function waitForCompleteAck(batchId) {
         resetCompleteAckTimeout();
 
         function onCompleteAck(data) {
-
+/* 191026
             if (
                 !data ||
                 data.batchId !== batchId
             ) {
                 return;
             }
+*/
+
+
+if (
+    !data ||
+    data.batchId !== batchId ||
+    (
+        event === "voucherByGuid" &&
+        data.requestId !== requestId
+    )
+) {
+    return;
+}
 
             clearTimeout(timeout);
 

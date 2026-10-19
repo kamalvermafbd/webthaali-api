@@ -99,7 +99,7 @@ response = await fetch(
     {
         dispatcher: syncAgent
     }
-);
+);  
 
                     console.log(
                         "TALLY_SYNC HTTP STATUS:",

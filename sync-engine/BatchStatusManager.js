@@ -681,7 +681,7 @@ async markFailed({
                 ? error
                 : error?.message || "Unknown Error"
     });
-
+/* 191026
     return this.updateFields({
 
         batch_id,
@@ -701,6 +701,35 @@ async markFailed({
         }
 
     });
+*/
+
+
+const { data, error: updateError } = await supabase
+    .from(TABLES.SYNC_BATCHES)
+    .update({
+        batch_status: BATCH_STATUS.FAILED,
+        worker_status: "FAILED",
+        error_message:
+            typeof error === "string"
+                ? error
+                : error?.message || "Unknown Error"
+    })
+    .eq("batch_id", batch_id)
+    .neq("batch_status", "COMPLETED")
+    .neq("batch_status", "CLOSED")
+    .select("batch_id")
+    .maybeSingle();
+
+if (updateError) {
+    throw new Error("Failed to mark batch failed: " + updateError.message);
+}
+
+if (!data) {
+    console.log("BATCH FAILURE UPDATE SKIPPED — ALREADY COMPLETED/CLOSED:", batch_id);
+}
+
+return Boolean(data);
+
 
 }
     // ----------------------------------
@@ -713,6 +742,7 @@ async markWaitingConnector({
 
 }) {
 
+    /*191026
     return this.updateFields({
 
         batch_id,
@@ -743,6 +773,36 @@ async markWaitingConnector({
         }
 
     });
+    */
+
+    
+const { data, error } = await supabase
+    .from(TABLES.SYNC_BATCHES)
+    .update({
+        batch_status: BATCH_STATUS.PENDING,
+        worker_status: "PENDING",
+        current_stage: SYNC_STAGE.WAITING_CONNECTOR,
+        error_message: null,
+        worker_id: null,
+        locked_at: null,
+        heartbeat_at: null
+    })
+    .eq("batch_id", batch_id)
+    .neq("batch_status", "COMPLETED")
+    .neq("batch_status", "CLOSED")
+    .select("batch_id")
+    .maybeSingle();
+
+if (error) {
+    throw new Error("Failed to mark batch waiting: " + error.message);
+}
+
+if (!data) {
+    console.log("WAITING CONNECTOR UPDATE SKIPPED — ALREADY COMPLETED/CLOSED:", batch_id);
+}
+
+return Boolean(data);
+
 
 }
 
