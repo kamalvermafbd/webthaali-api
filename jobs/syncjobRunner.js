@@ -1,6 +1,13 @@
 const BatchStatusManager =
     require("../sync-engine/BatchStatusManager");
 
+const { Agent } = require("undici");
+
+const syncAgent = new Agent({
+    headersTimeout: 0,
+    bodyTimeout: 0
+});
+
 async function runJob(job, serverUrl) {
 
     switch (job.job_type) {
@@ -70,7 +77,7 @@ let response;
 const syncServerUrl =
     process.env.BILLEY_SYNC_API_URL ||
     "https://sync-api.billey.in";
-
+/* 191026
 response = await fetch(
     `${syncServerUrl}/getMasters` +
     `?company_code=${encodeURIComponent(job.company_code)}` +
@@ -79,6 +86,21 @@ response = await fetch(
     `&sync_period=${encodeURIComponent(job.sync_period)}` +
     `&worker_batch_id=${encodeURIComponent(job.batch_id)}`
 );
+*/
+
+
+response = await fetch(
+    `${syncServerUrl}/getMasters` +
+    `?company_code=${encodeURIComponent(job.company_code)}` +
+    `&tally_owner=${encodeURIComponent(job.tally_owner)}` +
+    `&sync_mode=${encodeURIComponent(job.sync_mode)}` +
+    `&sync_period=${encodeURIComponent(job.sync_period)}` +
+    `&worker_batch_id=${encodeURIComponent(job.batch_id)}`,
+    {
+        dispatcher: syncAgent
+    }
+);
+
                     console.log(
                         "TALLY_SYNC HTTP STATUS:",
                         response.status
