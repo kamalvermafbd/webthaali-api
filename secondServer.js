@@ -3776,19 +3776,7 @@ app.get("/sync/status", async (req, res) => {
 
         // Prefer the live progress stage when current_stage
         // contains a stale or generic value.
-        const genericStages = [
-            "",
-            "INIT",
-            "START",
-            "PENDING",
-            "STARTING"
-        ];
-
-        const rawStage =
-            genericStages.includes(currentStage) && progressStage
-                ? progressStage
-                : currentStage || progressStage;
-
+     
         const steps = [
             { step_name: "CONNECT_PREPARE", status: "PENDING" },
             { step_name: "PROCESS_MASTERS", status: "PENDING" },
@@ -3879,6 +3867,21 @@ app.get("/sync/status", async (req, res) => {
             SYNC_COMPLETED: 6
         };
 
+         const moduleStage = String(data.current_module || "")
+            .trim()
+            .toUpperCase();
+
+        const isKnownStage = (stage) =>
+              Object.prototype.hasOwnProperty.call(stageIndexMap, stage);
+
+        const rawStage =
+            isKnownStage(progressStage)
+                ? progressStage
+                : isKnownStage(currentStage)
+                    ? currentStage
+                    : moduleStage || currentStage || progressStage;
+
+                    
         const currentStepIndex =
             stageIndexMap[rawStage] ?? -1;
 
@@ -3894,21 +3897,7 @@ app.get("/sync/status", async (req, res) => {
             });
         }
 
-        if (
-    batchStatus === "COMPLETED" &&
-    workerStatus === "COMPLETED" &&
-    Number(
-        typeof data.sync_progress === "object"
-            ? data.sync_progress?.progress
-            : data.sync_progress
-    ) === 100
-) {
-    steps.forEach((step) => {
-        step.status = "COMPLETED";
-    });
-}
-
-        // Authoritative completion takes precedence over stage data.
+    // Authoritative completion takes precedence over stage data.
         if (finalStatusVerified) {
             steps.forEach((step) => {
                 step.status = "COMPLETED";
