@@ -39914,6 +39914,14 @@ return res.json(result);
 
 }
 
+await updateSyncProgress({
+    supabase,
+    batchId: sync_batch_id,
+    stage: "MASTERS",
+    progress: 0,
+    action: "PROCESSING_MASTERS"
+});
+
 console.log("================================");
 console.log("RESUME POINT :", resumePoint);
 console.log("================================");
