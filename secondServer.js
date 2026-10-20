@@ -287,7 +287,7 @@ app.use(
 
 );
 
-
+/* 20101026
 const networkSpeedLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
@@ -298,10 +298,9 @@ const networkSpeedLimiter = rateLimit({
     error: "Too many speed tests. Please try again shortly."
   }
 });
-
-app.get("/network-speed-test", networkSpeedLimiter, (req, res) => {
+*/
+app.get("/network-speed-test", (req, res) => {
   try {
-    // 128 KB test payload; random bytes avoid highly compressible data.
     const payload = crypto.randomBytes(128 * 1024);
 
     res.set({
