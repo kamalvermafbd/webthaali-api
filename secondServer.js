@@ -3771,7 +3771,10 @@ app.get("/sync/status", async (req, res) => {
         ).trim().toUpperCase();
 
         const progressStage = String(
-            data.sync_progress?.stage || ""
+            data.sync_progress &&
+            typeof data.sync_progress === "object"
+                ? data.sync_progress.stage || ""
+                : ""
         ).trim().toUpperCase();
 
         // Prefer the live progress stage when current_stage
