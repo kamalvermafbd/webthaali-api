@@ -547,7 +547,8 @@ console.log(
             tallyLedgers: tallyLedgers.length,
             dbEligible: dbLedgers?.length || 0,
             updated,
-            skipped
+            skipped,
+            ledgerReconciliationPassed
         }
     };
 }
@@ -846,7 +847,9 @@ console.log(
                 stock.length,
 
             dbSaved:
-                saveResult?.total || 0
+                saveResult?.total || 0,
+
+             stockReconciliationPassed
 
         }
 

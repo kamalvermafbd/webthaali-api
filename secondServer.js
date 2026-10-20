@@ -3827,8 +3827,8 @@ app.get("/sync/status", async (req, res) => {
             // 2 — Sync Vouchers
             VOUCHER: 2,
             VOUCHER_SYNC: 2,
-            VOUCHER_GUID_DISCOVERY: 2,
-            VOUCHER_GUIDS_RECEIVED: 2,
+            VOUCHER_GUID_DISCOVERY: 1,
+            VOUCHER_GUIDS_RECEIVED: 1,
             VOUCHER_IMPORT: 2,
             VOUCHER_CHUNK_SEND: 2,
             VOUCHER_CHUNK_RECEIVE: 2,
@@ -41307,6 +41307,13 @@ console.log(
     changedVoucherGuidRows.length
 );
 
+await updateSyncProgress({
+    supabase,
+    batchId: sync_batch_id,
+    stage: "VOUCHER_IMPORT",
+    progress: 20,
+    action: "VOUCHER_COMPARISON_COMPLETED"
+});
 
 // 270826 start
 
@@ -41370,7 +41377,7 @@ await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
     stage: "VOUCHER_IMPORT",
-    progress: 0,
+    progress: 25,
     action: "SAVING_VOUCHERS"
 });
 
@@ -41385,6 +41392,14 @@ voucherResult = await saveVouchers({
       voucherGuidResult?.items || [],
 
     executionMode: "ALTER_RECOVERY"
+});
+
+await updateSyncProgress({
+  supabase,
+  batchId: sync_batch_id,
+  stage: "VOUCHER_IMPORT",
+  progress: 40,
+  action: "INITIAL_VOUCHER_SAVE_COMPLETED"
 });
 
 console.log("=== VOUCHER RESULT AFTER SAVE ===");
@@ -41461,6 +41476,14 @@ fs.appendFileSync(
         missingVoucherGuids: voucherResult.missingVoucherGuids
     }) + "\n"
     );
+
+    await updateSyncProgress({
+    supabase,
+    batchId: sync_batch_id,
+    stage: "VOUCHER_IMPORT",
+    progress: 50,
+    action: "FETCHING_MISSING_CHANGED_VOUCHERS"
+});
 
 
    const missingResult =
@@ -41572,10 +41595,18 @@ fs.writeFileSync(
 
     if (!missingResult.success) {
 
-    await failHttpBatch(missingResult);
-    return res.json(missingResult);
+        await failHttpBatch(missingResult);
+        return res.json(missingResult);
 
-}
+    }
+
+    await updateSyncProgress({
+        supabase,
+        batchId: sync_batch_id,
+        stage: "VOUCHER_IMPORT",
+        progress: 65,
+        action: "VOUCHER_RECOVERY_FETCH_COMPLETED"
+    });
 
 const allFetchedVouchers = [
     ...(result.vouchers || []),
@@ -41596,18 +41627,35 @@ console.log("===== BEFORE SECOND SAVE VOUCHERS =====", {
         allFetchedVouchers[0]
 });
 
+
+await updateSyncProgress({
+    supabase,
+    batchId: sync_batch_id,
+    stage: "VOUCHER_IMPORT",
+    progress: 70,
+    action: "SAVING_RECOVERED_VOUCHERS"
+});
+
     voucherResult = await saveVouchers({
-      company_code,
-      tally_owner,
-      sync_batch_id,
-      syncMode,
-      vouchers: allFetchedVouchers,
-      //vouchers: missingResult.items || [],
-      allVoucherGuids:
-        voucherGuidResult?.items || [],
-       executionMode:
-    "ALTER_RECOVERY" 
-  });
+        company_code,
+        tally_owner,
+        sync_batch_id,
+        syncMode,
+        vouchers: allFetchedVouchers,
+        //vouchers: missingResult.items || [],
+        allVoucherGuids:
+          voucherGuidResult?.items || [],
+        executionMode:
+      "ALTER_RECOVERY" 
+    });
+
+await updateSyncProgress({
+    supabase,
+    batchId: sync_batch_id,
+    stage: "VOUCHER_IMPORT",
+    progress: 85,
+    action: "RECOVERED_VOUCHER_SAVE_COMPLETED"
+});
 
   }
 
@@ -41634,6 +41682,14 @@ fs.writeFileSync(
 // =========================
 // PARENT VOUCHER RECONCILIATION GATE
 // =========================
+
+await updateSyncProgress({
+    supabase,
+    batchId: sync_batch_id,
+    stage: "VOUCHER_IMPORT",
+    progress: 90,
+    action: "STARTING_PARENT_VOUCHER_RECONCILIATION"
+});
 
 const {
     data: parentReconciliationRows,
@@ -41700,6 +41756,16 @@ if (
     );
 
 }
+
+
+await updateSyncProgress({
+    supabase,
+    batchId: sync_batch_id,
+    stage: "VOUCHER_IMPORT",
+    progress: 100,
+    action: "PARENT_VOUCHER_RECONCILIATION_COMPLETED"
+});
+
 
 await BatchStatusManager.updateModule({
 
@@ -42741,6 +42807,20 @@ const ledgerReconResponse =
 const ledgerReconResult =
     await ledgerReconResponse.json();
 
+    if (
+    ledgerReconResponse.ok &&
+    ledgerReconResult.success &&
+    ledgerReconResult.summary?.ledgerReconciliationPassed === true
+) {
+    await updateSyncProgress({
+        supabase,
+        batchId: sync_batch_id,
+        stage: "LEDGER_RECONCILIATION",
+        progress: 100,
+        action: "LEDGER_RECONCILIATION_COMPLETED"
+    });
+}
+
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
@@ -42756,6 +42836,19 @@ const stockReconResponse = await fetch(
 const stockReconResult =
     await stockReconResponse.json();
 
+if (
+    stockReconResponse.ok &&
+    stockReconResult.success &&
+    stockReconResult.summary?.stockReconciliationPassed === true
+) {
+    await updateSyncProgress({
+        supabase,
+        batchId: sync_batch_id,
+        stage: "STOCK_RECONCILIATION",
+        progress: 100,
+        action: "STOCK_RECONCILIATION_COMPLETED"
+    });
+}
 
 console.log(
     "POST-SYNC RECONCILIATION:",

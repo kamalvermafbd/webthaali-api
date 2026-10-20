@@ -79,13 +79,16 @@ function trackSyncEvent({
 //
 // Overall flow:
 //
-// 0  - 30   MASTERS
-// 30 - 35   VOUCHER GUID DISCOVERY
-// 35 - 75   VOUCHER IMPORT
-// 75 - 90   CHILD RECONCILIATION
-// 90 - 95   LEDGER RECONCILIATION
-// 95 - 100  STOCK RECONCILIATION
-// 100      COMPLETED
+
+    // Overall flow:
+    //
+    // 0  - 35   MASTERS (includes initial GUID discovery)
+    // 35 - 75   VOUCHER IMPORT
+    // 75 - 90   CHILD RECONCILIATION
+    // 90 - 95   LEDGER RECONCILIATION
+    // 95 - 100  STOCK RECONCILIATION
+    // 100       COMPLETED
+
 //
 // ============================================================
 
@@ -102,91 +105,52 @@ function calculateOverallProgress(
             : null;
 
 
+    
     // --------------------------------------------------------
     // MASTERS
+    // Master progress markers in /getMasters range from 0 to 35.
     // --------------------------------------------------------
 
     if (
-
         stage === "MASTERS" ||
-
         stage === "COMPANY" ||
-
         stage === "GROUPS" ||
-
         stage === "UNITS" ||
-
         stage === "LEDGERS" ||
-
         stage === "STOCK_GROUPS" ||
-
         stage === "STOCKS" ||
-
         stage === "GODOWNS" ||
-
         stage === "COST_CENTRES"
-
     ) {
-
         if (p === null) {
-
             return 0;
         }
 
-
         return Math.round(
-
-            (
-                Math.max(
-                    0,
-                    Math.min(
-                        100,
-                        p
-                    )
-                ) *
-                30
-            ) /
-            100
-
+            Math.max(0, Math.min(35, p))
         );
     }
 
 
+   
     // --------------------------------------------------------
     // VOUCHER GUID DISCOVERY
+    // This step runs before master processing in /getMasters.
+    // It occupies the 0-5% range.
     // --------------------------------------------------------
 
-    if (
-
-        stage ===
-        "VOUCHER_GUID_DISCOVERY"
-
-    ) {
-
+    if (stage === "VOUCHER_GUID_DISCOVERY") {
         if (p === null) {
-
-            return 30;
+            return 0;
         }
 
-
         return Math.round(
-
-            30 +
-
             (
-                Math.max(
-                    0,
-                    Math.min(
-                        100,
-                        p
-                    )
-                ) *
-                5
-            ) /
-            100
-
+                Math.max(0, Math.min(100, p)) * 5
+            ) / 100
         );
     }
+
 
 
     // --------------------------------------------------------
@@ -200,7 +164,7 @@ function calculateOverallProgress(
 
     ) {
 
-        return 35;
+        return 5;
     }
 
 
