@@ -543,32 +543,24 @@ async function updateSyncProgress({
             return;
         }
 
-        const updateData = {
-            sync_progress: {
-                ...(existingBatch?.sync_progress || {}),
+        
+const updateData = {
+    current_stage: String(stage).trim().toUpperCase(),
 
-                stage,
+    sync_progress: {
+        stage: String(stage).trim().toUpperCase(),
+        phase_progress:
+            progress === null || progress === undefined
+                ? null
+                : Number(progress),
+        progress: overallProgress,
+        updated_at: new Date().toISOString()
+    }
+};
 
-                phase_progress:
-                    progress === null ||
-                    progress === undefined
-                        ? null
-                        : Number(progress),
-
-                progress: overallProgress,
-
-                updated_at: new Date().toISOString()
-            }
-        };
-        // ----------------------------------------------------
-        // CURRENT ACTION
-        // ----------------------------------------------------
-
-        if (action) {
-
-            updateData.current_action =
-                action;
-        }
+if (action) {
+    updateData.current_action = action;
+}
 
 
         // ----------------------------------------------------
