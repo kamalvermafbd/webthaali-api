@@ -317,6 +317,53 @@ async function recoverStaleBatches(workerConfig) {
 
     }
 
+    
+      /*
+       * ---------------------------------------------------------
+       * 2B. STALE PENDING INIT RESERVATION
+       *
+       * Batch reserved but worker never started it.
+       * Release the stale reservation for normal dispatch.
+       * ---------------------------------------------------------
+       */
+
+      const initReservationStaleBefore =
+          new Date(Date.now() - 180 * 1000).toISOString();
+
+      const {
+          data: staleInitBatches,
+          error: staleInitError
+      } = await supabase
+          .from("sync_batches")
+          .update({
+              worker_id: null,
+              locked_at: null,
+              heartbeat_at: null
+          })
+          .eq("worker_id", workerConfig.worker_name)
+          .eq("batch_status", "PENDING")
+          .eq("worker_status", "PENDING")
+          .eq("current_stage", "INIT")
+          .is("started_at", null)
+          .is("heartbeat_at", null)
+          .lt("locked_at", initReservationStaleBefore)
+          .select("id, batch_id");
+
+      if (staleInitError) {
+          throw new Error(
+              "Stale INIT reservation recovery failed: " +
+              staleInitError.message
+          );
+      }
+
+      if (staleInitBatches?.length) {
+          console.log(
+              "STALE INIT RESERVATIONS RELEASED:",
+              JSON.stringify(staleInitBatches)
+          );
+      }
+
+
 
     /*
      * ---------------------------------------------------------
@@ -378,9 +425,10 @@ async function recoverStaleBatches(workerConfig) {
      * ---------------------------------------------------------
      */
 
-    if (
+      if (
         staleRunning?.length ||
         staleConnectorBatches?.length ||
+        staleInitBatches?.length ||
         terminalBatches?.length
     ) {
 
@@ -390,6 +438,7 @@ async function recoverStaleBatches(workerConfig) {
                 {
                     staleRunning,
                     staleConnectorBatches,
+                    staleInitBatches,
                     terminalBatches
                 },
                 null,
@@ -400,17 +449,11 @@ async function recoverStaleBatches(workerConfig) {
     }
 
 
-    return {
-
-        staleRunning:
-            staleRunning || [],
-
-        staleConnectorBatches:
-            staleConnectorBatches || [],
-
-        terminalBatches:
-            terminalBatches || []
-
+      return {
+        staleRunning: staleRunning || [],
+        staleConnectorBatches: staleConnectorBatches || [],
+        staleInitBatches: staleInitBatches || [],
+        terminalBatches: terminalBatches || []
     };
 
 }
