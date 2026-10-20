@@ -3827,8 +3827,8 @@ app.get("/sync/status", async (req, res) => {
             // 2 — Sync Vouchers
             VOUCHER: 2,
             VOUCHER_SYNC: 2,
-            VOUCHER_GUID_DISCOVERY: 1,
-            VOUCHER_GUIDS_RECEIVED: 1,
+            VOUCHER_GUID_DISCOVERY: 2,
+            VOUCHER_GUIDS_RECEIVED: 2,
             VOUCHER_IMPORT: 2,
             VOUCHER_CHUNK_SEND: 2,
             VOUCHER_CHUNK_RECEIVE: 2,
