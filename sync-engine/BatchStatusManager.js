@@ -775,7 +775,7 @@ async markWaitingConnector({
     });
     */
 
-    
+    /* 201026 
 const { data, error } = await supabase
     .from(TABLES.SYNC_BATCHES)
     .update({
@@ -792,6 +792,25 @@ const { data, error } = await supabase
     .neq("batch_status", "CLOSED")
     .select("batch_id")
     .maybeSingle();
+*/
+
+const { data, error } = await supabase
+    .from(TABLES.SYNC_BATCHES)
+    .update({
+        batch_status: BATCH_STATUS.PENDING,
+        worker_status: "PENDING",
+        current_stage: SYNC_STAGE.WAITING_CONNECTOR,
+        error_message: null,
+        worker_id: null,
+        locked_at: null,
+        heartbeat_at: null
+    })
+    .eq("batch_id", batch_id)
+    .eq("batch_status", "PROCESSING")
+    .eq("worker_status", "RUNNING")
+    .select("batch_id")
+    .maybeSingle();
+
 
 if (error) {
     throw new Error("Failed to mark batch waiting: " + error.message);

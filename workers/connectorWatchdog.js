@@ -65,6 +65,46 @@ async function ensureWaitingConnectorSince(supabase, batch) {
         : Date.now();
 }
 
+async function failWaitingConnectorBatch(supabase, batch, reason) {
+    const { data, error } = await supabase
+        .from("sync_batches")
+        .update({
+            batch_status: "FAILED",
+            worker_status: "FAILED",
+            error_message: reason,
+            worker_id: null,
+            locked_at: null,
+            heartbeat_at: null
+        })
+        .eq("id", batch.id)
+        .eq("batch_status", "PENDING")
+        .eq("worker_status", "PENDING")
+        .eq("current_stage", "WAITING_CONNECTOR")
+        .select("batch_id")
+        .maybeSingle();
+
+    if (error) {
+        throw new Error(
+            `Connector timeout failure update failed: ${error.message}`
+        );
+    }
+
+    if (!data) {
+        console.log(
+            "WATCHDOG FAILURE SKIPPED — BATCH STATE CHANGED:",
+            batch.batch_id
+        );
+        return false;
+    }
+
+    console.log(
+        "WATCHDOG BATCH FAILED AFTER CONNECTOR TIMEOUT:",
+        batch.batch_id,
+        reason
+    );
+
+    return true;
+}
 // ------------------------------------------------------------
 // CHECK CONNECTOR WATCHDOG
 // ------------------------------------------------------------
@@ -346,12 +386,19 @@ const waitingAge =
             waitingConnectorSince.delete(
                 batch.batch_id
             );
-
+/*
             await BatchStatusManager.markFailed({
                 batch_id: batch.batch_id,
                 error:
                     "Connector offline / heartbeat timeout"
             });
+            */
+
+            await failWaitingConnectorBatch(
+                supabase,
+                batch,
+                "Connector offline / heartbeat timeout"
+            );
         }
 
         continue;
@@ -481,7 +528,7 @@ const waitingAge =
             waitingConnectorSince.delete(
                 batch.batch_id
             );
-
+/* 201026
             await BatchStatusManager.markFailed({
                 batch_id:
                     batch.batch_id,
@@ -489,6 +536,14 @@ const waitingAge =
                 error:
                     "Tally offline / heartbeat timeout"
             });
+*/
+            await failWaitingConnectorBatch(
+                supabase,
+                batch,
+                "Tally offline / heartbeat timeout"
+            );
+
+
         }
 
         continue;
@@ -566,12 +621,20 @@ const waitingAge =
 
         if (waitingAge >= HEARTBEAT_TIMEOUT_MS) {
             waitingConnectorSince.delete(batch.batch_id);
-
+/* 201026 
             await BatchStatusManager.markFailed({
                 batch_id: batch.batch_id,
                 error:
                     "Connector heartbeat stale; recovery timed out"
             });
+            */
+
+            await failWaitingConnectorBatch(
+                supabase,
+                batch,
+                "Connector heartbeat stale; recovery timed out"
+            );
+
         }
 
         continue;
