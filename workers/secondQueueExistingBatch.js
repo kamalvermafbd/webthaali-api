@@ -30,6 +30,35 @@ const supabase = createClient(
 );
 
 
+async function rollbackConnectorLossRetry(batch, workerName, originalError) {
+    const { error: rollbackError } = await supabase
+        .from("sync_batches")
+        .update({
+            batch_status: "FAILED",
+            worker_status: "FAILED",
+            worker_id: null,
+            locked_at: null,
+            heartbeat_at: null,
+            error_message: originalError
+        })
+        .eq("id", batch.id)
+        .eq("batch_status", "PENDING")
+        .eq("worker_status", "PENDING")
+        .eq("worker_id", workerName);
+
+    if (rollbackError) {
+        console.error(
+            "CONNECTOR RETRY ROLLBACK FAILED:",
+            batch.batch_id,
+            rollbackError.message
+        );
+        return false;
+    }
+
+    return true;
+}
+
+
 async function dispatchConnectorLossRetry(batch) {
     if (!batch?.id || !batch?.batch_id) {
         throw new Error("Retry batch id missing");
@@ -154,7 +183,14 @@ async function dispatchConnectorLossRetry(batch) {
         .eq("worker_status", "PENDING")
         .maybeSingle();
 
+
     if (loadClaimedError || !claimed) {
+        await rollbackConnectorLossRetry(
+            batch,
+            workerConfig.worker_name,
+            originalError
+        );
+
         throw new Error(
             `Retry claimed but batch reload failed for ${batch.batch_id}: ${
                 loadClaimedError?.message || "Claimed batch not found"
@@ -182,6 +218,7 @@ async function dispatchConnectorLossRetry(batch) {
         };
     } catch (queueError) {
         // Roll back only if this retry still owns the reservation.
+        /* 211026
         const { error: rollbackError } = await supabase
             .from("sync_batches")
             .update({
@@ -203,6 +240,15 @@ async function dispatchConnectorLossRetry(batch) {
                 rollbackError.message
             );
         }
+            */
+           
+        // Roll back only if this retry still owns the reservation.
+        await rollbackConnectorLossRetry(
+            batch,
+            workerConfig.worker_name,
+            originalError
+        );
+
 
         throw queueError;
     }

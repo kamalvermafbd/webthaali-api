@@ -437,6 +437,7 @@ async function retryLatestConnectorLossBatchForCompanies(companyGuids) {
     for (const scope of companyScopes.values()) {
         try {
             // Select the latest batch FIRST, regardless of status.
+            /* 211026
             const { data: latestBatch, error } = await supabase
                 .from("sync_batches")
                 .select("*")
@@ -445,6 +446,20 @@ async function retryLatestConnectorLossBatchForCompanies(companyGuids) {
                 .order("created_at", { ascending: false })
                 .limit(1)
                 .maybeSingle();
+                */
+
+                
+            // Select the latest batch FIRST, regardless of status.
+            const { data: latestBatch, error } = await supabase
+                .from("sync_batches")
+                .select("*")
+                .eq("company_code", scope.company_code)
+                .eq("tally_owner", scope.tally_owner)
+                .order("created_at", { ascending: false })
+                .order("id", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
 
             if (error) {
                 throw error;
