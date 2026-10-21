@@ -65,6 +65,7 @@ async function dispatchConnectorLossRetry(batch) {
     }
 
     // Claim only if this exact batch is still connector-loss FAILED.
+  /* 211026
     const { data: claimed, error: claimError } = await supabase
         .from("sync_batches")
         .update({
@@ -103,6 +104,64 @@ async function dispatchConnectorLossRetry(batch) {
             reason: "ALREADY_CLAIMED"
         };
     }
+*/
+
+
+    // Atomically verify latest batch and claim connector-loss retry.
+    const { data: claimResult, error: claimError } = await supabase
+        .rpc("claim_latest_connector_loss_retry", {
+            p_company_code: batch.company_code,
+            p_tally_owner: batch.tally_owner,
+            p_expected_batch_id: batch.batch_id,
+            p_worker_name: workerConfig.worker_name
+        });
+
+    if (claimError) {
+        throw new Error(
+            `Retry claim failed for ${batch.batch_id}: ${claimError.message}`
+        );
+    }
+
+    const retryClaim = Array.isArray(claimResult)
+        ? claimResult[0]
+        : claimResult;
+
+    if (
+        !retryClaim?.claimed ||
+        retryClaim.claimed_batch_id !== batch.batch_id
+    ) {
+        console.log(
+            "CONNECTOR RETRY SKIPPED:",
+            retryClaim?.reason || "CLAIM_REJECTED",
+            batch.batch_id,
+            "LATEST:",
+            retryClaim?.claimed_batch_id || null
+        );
+
+        return {
+            success: false,
+            reason: retryClaim?.reason || "CLAIM_REJECTED"
+        };
+    }
+
+    // Reload the claimed row so queue payload uses current database state.
+    const { data: claimed, error: loadClaimedError } = await supabase
+        .from("sync_batches")
+        .select("*")
+        .eq("batch_id", batch.batch_id)
+        .eq("worker_id", workerConfig.worker_name)
+        .eq("batch_status", "PENDING")
+        .eq("worker_status", "PENDING")
+        .maybeSingle();
+
+    if (loadClaimedError || !claimed) {
+        throw new Error(
+            `Retry claimed but batch reload failed for ${batch.batch_id}: ${
+                loadClaimedError?.message || "Claimed batch not found"
+            }`
+        );
+    }
+
 
     try {
         await addBatchToQueue(claimed, workerConfig);
