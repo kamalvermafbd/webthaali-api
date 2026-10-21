@@ -17,6 +17,8 @@ let watchdogTimer = null;
 let watchdogRunning = false;
 const waitingConnectorSince = new Map();
 
+
+/* 211026
 async function startWaitingConnectorTimer(supabase, batch) {
     const { error } = await supabase
         .from("sync_batches")
@@ -25,6 +27,26 @@ async function startWaitingConnectorTimer(supabase, batch) {
         .is("waiting_connector_since", null);
 
     if (error) throw error;
+}
+*/
+
+async function startWaitingConnectorTimer(supabase, batch) {
+    const { data, error } = await supabase
+        .from("sync_batches")
+        .update({
+            waiting_connector_since: new Date().toISOString()
+        })
+        .eq("id", batch.id)
+        .eq("batch_status", "PENDING")
+        .eq("worker_status", "PENDING")
+        .eq("current_stage", "WAITING_CONNECTOR")
+        .is("waiting_connector_since", null)
+        .select("waiting_connector_since")
+        .maybeSingle();
+
+    if (error) throw error;
+
+    return data?.waiting_connector_since || null;
 }
 
 async function ensureWaitingConnectorSince(supabase, batch) {
@@ -256,16 +278,30 @@ async function checkConnectorWatchdog({
                             tally_owner: tallyOwner
                         }
                     );
+/* 211026
+                if (
+                    batch.batch_status === "PROCESSING" &&
+                    batch.worker_status === "RUNNING"
+                ) {
+                    await BatchStatusManager.markWaitingConnector({
+                        batch_id: batch.batch_id
+                    });
+                }
 
-                    if (
-    batch.batch_status === "PROCESSING" &&
-    batch.worker_status === "RUNNING"
-) {
-    await BatchStatusManager.markWaitingConnector({
-        batch_id: batch.batch_id
-    });
-}
+                */
 
+                if (
+                    batch.batch_status === "PROCESSING" &&
+                    batch.worker_status === "RUNNING"
+                ) {
+                    await BatchStatusManager.markWaitingConnector({
+                        batch_id: batch.batch_id
+                    });
+
+                    await startWaitingConnectorTimer(supabase, batch);
+                }
+
+/* 211026
 if (batch.current_stage === "WAITING_CONNECTOR") {
     const { error } = await supabase
         .from("sync_batches")
@@ -281,7 +317,28 @@ if (batch.current_stage === "WAITING_CONNECTOR") {
         );
     }
 }
+*/
 
+if (
+    batch.batch_status === "PENDING" &&
+    batch.worker_status === "PENDING" &&
+    batch.current_stage === "WAITING_CONNECTOR"
+) {
+    const waitingSince = await ensureWaitingConnectorSince(
+        supabase,
+        batch
+    );
+
+    const waitingAge = Date.now() - waitingSince;
+
+    if (waitingAge >= HEARTBEAT_TIMEOUT_MS) {
+        await failWaitingConnectorBatch(
+            supabase,
+            batch,
+            "Connector not paired for 90 seconds"
+        );
+    }
+}
                     continue;
                 }
 
@@ -1009,37 +1066,29 @@ continue;
                     */
 
                 
-                if (!lastHeartbeat) {
-                    console.log(
-                        "⚠️ CONNECTOR WATCHDOG: NO HEARTBEAT — WAITING FOR RECOVERY",
-                        {
-                            batch_id: batch.batch_id,
-                            company_code: companyCode,
-                            connector_id: connectorId,
-                            tally_request_active:
-                                socket.tallyRequestActive === true
-                        }
-                    );
+             
+if (!lastHeartbeat) {
+    console.log(
+        "⚠️ CONNECTOR WATCHDOG: NO HEARTBEAT — WAITING FOR RECOVERY",
+        {
+            batch_id: batch.batch_id,
+            company_code: companyCode,
+            connector_id: connectorId,
+            tally_request_active:
+                socket.tallyRequestActive === true
+        }
+    );
 
-                    await BatchStatusManager.markWaitingConnector({
-                        batch_id: batch.batch_id
-                    });
+    await BatchStatusManager.markWaitingConnector({
+        batch_id: batch.batch_id
+    });
 
-                    // Start a fresh 90-second recovery window.
-                    const { error: timerResetError } = await supabase
-                        .from("sync_batches")
-                        .update({ waiting_connector_since: null })
-                        .eq("id", batch.id)
-                        .eq("current_stage", "WAITING_CONNECTOR");
+    // Initialize the timer only if it is missing.
+    await startWaitingConnectorTimer(supabase, batch);
 
-                    if (timerResetError) {
-                        throw timerResetError;
-                    }
+    continue;
+}
 
-                    await startWaitingConnectorTimer(supabase, batch);
-
-                    continue;
-                }
 
 
                 const heartbeatAge =
