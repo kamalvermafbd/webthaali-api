@@ -247,8 +247,8 @@ async function recoverStaleBatches(workerConfig) {
      * because WAITING_CONNECTOR has worker_id = NULL.
      * ---------------------------------------------------------
      */
-
-    const connectorWaitTimeoutSeconds = 180;
+/* 211026
+    const connectorWaitTimeoutSeconds = 90;
 
     const connectorStaleBefore =
         new Date(
@@ -300,8 +300,8 @@ async function recoverStaleBatches(workerConfig) {
             "current_stage",
             "WAITING_CONNECTOR"
         )
-        .lt(
-            "last_activity_at",
+       .lt(
+            "waiting_connector_since",
             connectorStaleBefore
         )
         .select(
@@ -316,7 +316,7 @@ async function recoverStaleBatches(workerConfig) {
         );
 
     }
-
+*/
     
       /*
        * ---------------------------------------------------------
@@ -427,7 +427,7 @@ async function recoverStaleBatches(workerConfig) {
 
       if (
         staleRunning?.length ||
-        staleConnectorBatches?.length ||
+        
         staleInitBatches?.length ||
         terminalBatches?.length
     ) {
@@ -437,7 +437,7 @@ async function recoverStaleBatches(workerConfig) {
             JSON.stringify(
                 {
                     staleRunning,
-                    staleConnectorBatches,
+                    
                     staleInitBatches,
                     terminalBatches
                 },
@@ -451,7 +451,7 @@ async function recoverStaleBatches(workerConfig) {
 
       return {
         staleRunning: staleRunning || [],
-        staleConnectorBatches: staleConnectorBatches || [],
+
         staleInitBatches: staleInitBatches || [],
         terminalBatches: terminalBatches || []
     };

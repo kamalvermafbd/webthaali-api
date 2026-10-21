@@ -257,6 +257,31 @@ async function checkConnectorWatchdog({
                         }
                     );
 
+                    if (
+    batch.batch_status === "PROCESSING" &&
+    batch.worker_status === "RUNNING"
+) {
+    await BatchStatusManager.markWaitingConnector({
+        batch_id: batch.batch_id
+    });
+}
+
+if (batch.current_stage === "WAITING_CONNECTOR") {
+    const { error } = await supabase
+        .from("sync_batches")
+        .update({ waiting_connector_since: null })
+        .eq("id", batch.id)
+        .eq("current_stage", "WAITING_CONNECTOR");
+
+    if (error) {
+        console.error(
+            "CONNECTOR WAIT TIMER RESET FAILED:",
+            batch.batch_id,
+            error.message
+        );
+    }
+}
+
                     continue;
                 }
 
@@ -768,20 +793,45 @@ const waitingAge =
             }
         );
 
-    } catch (dispatchError) {
+  } catch (dispatchError) {
 
-        console.error(
-            "❌ CONNECTOR WATCHDOG: RESTART DISPATCH FAILED",
-            {
-                batch_id:
-                    batch.batch_id,
+    console.error(
+        "❌ CONNECTOR WATCHDOG: RESTART DISPATCH FAILED",
+        {
+            batch_id: batch.batch_id,
+            error: dispatchError.message
+        }
+    );
 
-                error:
-                    dispatchError.message
-            }
-        );
+    const { error: recoveryError } = await supabase
+    .from("sync_batches")
+    .update({
+        current_stage: "WAITING_CONNECTOR",
+        worker_id: null,
+        locked_at: null
+    })
+    .eq("id", batch.id)
+    .eq("batch_status", "PENDING")
+    .eq("worker_status", "PENDING")
+    .eq("current_stage", "PENDING")
+    .is("worker_id", null);
 
-    }
+if (recoveryError) {
+    console.error(
+        "CONNECTOR WATCHDOG: RECOVERY FAILED",
+        batch.batch_id,
+        recoveryError.message
+    );
+} else {
+    await startWaitingConnectorTimer(supabase, {
+        id: batch.id
+    });
+}
+
+
+
+
+}
 
     continue;
 }
@@ -942,7 +992,7 @@ continue;
                     Number(
                         socket.lastHeartbeat || 0
                     );
-
+/*211026
                 if (!lastHeartbeat) {
 
                     console.log(
@@ -956,6 +1006,41 @@ continue;
 
                     continue;
                 }
+                    */
+
+                
+                if (!lastHeartbeat) {
+                    console.log(
+                        "⚠️ CONNECTOR WATCHDOG: NO HEARTBEAT — WAITING FOR RECOVERY",
+                        {
+                            batch_id: batch.batch_id,
+                            company_code: companyCode,
+                            connector_id: connectorId,
+                            tally_request_active:
+                                socket.tallyRequestActive === true
+                        }
+                    );
+
+                    await BatchStatusManager.markWaitingConnector({
+                        batch_id: batch.batch_id
+                    });
+
+                    // Start a fresh 90-second recovery window.
+                    const { error: timerResetError } = await supabase
+                        .from("sync_batches")
+                        .update({ waiting_connector_since: null })
+                        .eq("id", batch.id)
+                        .eq("current_stage", "WAITING_CONNECTOR");
+
+                    if (timerResetError) {
+                        throw timerResetError;
+                    }
+
+                    await startWaitingConnectorTimer(supabase, batch);
+
+                    continue;
+                }
+
 
                 const heartbeatAge =
                     Date.now() - lastHeartbeat;
