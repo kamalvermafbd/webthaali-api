@@ -5,6 +5,7 @@
 
 const WATCH_INTERVAL_MS = 15 * 1000;       // 15 seconds
 const HEARTBEAT_TIMEOUT_MS = 90 * 1000;     // 90 seconds
+const CONNECTOR_RECOVERY_TIMEOUT_MS = 30 * 1000; // 30 seconds
 
 const BatchStatusManager =
     require("../sync-engine/BatchStatusManager");
@@ -90,9 +91,11 @@ async function ensureWaitingConnectorSince(supabase, batch) {
 async function failWaitingConnectorBatch(supabase, batch, reason) {
     const { data, error } = await supabase
         .from("sync_batches")
-        .update({
+       .update({
             batch_status: "FAILED",
             worker_status: "FAILED",
+            current_stage: "FAILED",
+            completed_at: new Date().toISOString(),
             error_message: reason,
             worker_id: null,
             locked_at: null,
@@ -331,11 +334,11 @@ if (
 
     const waitingAge = Date.now() - waitingSince;
 
-    if (waitingAge >= HEARTBEAT_TIMEOUT_MS) {
+    if (waitingAge >= CONNECTOR_RECOVERY_TIMEOUT_MS) {
         await failWaitingConnectorBatch(
             supabase,
             batch,
-            "Connector not paired for 90 seconds"
+            "CONNECTOR_LOSS: Connector not paired within 30 seconds"
         );
     }
 }
@@ -360,7 +363,7 @@ if (
 
     // =================================================
     // RUNNING BATCH + CONNECTOR LOST
-    // Give connector 90 seconds to reconnect.
+    // Give connector 30 seconds to reconnect.
     // =================================================
     if (
         batch.batch_status === "PROCESSING" &&
@@ -449,10 +452,10 @@ const waitingAge =
             }
         );
 
-        if (
-            waitingAge >=
-            HEARTBEAT_TIMEOUT_MS
-        ) {
+ if (
+    waitingAge >=
+    CONNECTOR_RECOVERY_TIMEOUT_MS
+) {
 
             console.log(
                 "🚨 CONNECTOR WATCHDOG: FAILING WAITING BATCH",
@@ -461,7 +464,7 @@ const waitingAge =
                     company_code: companyCode,
                     connector_id: connectorId,
                     reason:
-                        "Connector offline for 90 seconds"
+                        "Connector offline for 30 seconds"
                 }
             );
 
@@ -479,7 +482,7 @@ const waitingAge =
             await failWaitingConnectorBatch(
                 supabase,
                 batch,
-                "Connector offline / heartbeat timeout"
+                "CONNECTOR_LOSS: Connector offline / heartbeat timeout"
             );
         }
 
@@ -581,16 +584,16 @@ const waitingSince =
 const waitingAge =
     Date.now() - waitingSince;
         // ------------------------------------------------
-        // Tally did not recover within 90 seconds.
+        // Tally did not recover within 30 seconds.
         // ------------------------------------------------
 
-        if (
-            waitingAge >=
-            HEARTBEAT_TIMEOUT_MS
-        ) {
+       if (
+    waitingAge >=
+    CONNECTOR_RECOVERY_TIMEOUT_MS
+) {
 
             console.log(
-                "🚨 CONNECTOR WATCHDOG: TALLY OFFLINE FOR 90 SECONDS",
+                "🚨 CONNECTOR WATCHDOG: TALLY OFFLINE FOR 30 SECONDS",
                 {
                     batch_id:
                         batch.batch_id,
@@ -701,7 +704,7 @@ const waitingAge =
             }
         );
 
-        if (waitingAge >= HEARTBEAT_TIMEOUT_MS) {
+        if (waitingAge >= CONNECTOR_RECOVERY_TIMEOUT_MS) {
             waitingConnectorSince.delete(batch.batch_id);
 /* 201026 
             await BatchStatusManager.markFailed({
@@ -714,7 +717,7 @@ const waitingAge =
             await failWaitingConnectorBatch(
                 supabase,
                 batch,
-                "Connector heartbeat stale; recovery timed out"
+                "CONNECTOR_LOSS: Connector heartbeat stale; recovery timed out"
             );
 
         }

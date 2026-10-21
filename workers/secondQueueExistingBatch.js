@@ -30,6 +30,126 @@ const supabase = createClient(
 );
 
 
+async function dispatchConnectorLossRetry(batch) {
+    if (!batch?.id || !batch?.batch_id) {
+        throw new Error("Retry batch id missing");
+    }
+
+    const originalError = String(batch.error_message || "");
+
+    if (
+        batch.batch_status !== "FAILED" ||
+        batch.worker_status !== "FAILED" ||
+        !originalError.startsWith("CONNECTOR_LOSS:")
+    ) {
+        console.log(
+            "CONNECTOR RETRY SKIPPED: NOT ELIGIBLE",
+            batch.batch_id
+        );
+
+        return {
+            success: false,
+            reason: "NOT_ELIGIBLE"
+        };
+    }
+
+    // Resolve worker using the existing routing configuration.
+    const workerConfig = await resolveWorkerForBatch(batch, {
+    connectorLossRetry: true
+});
+
+    if (!workerConfig?.worker_name || !workerConfig?.queue_name) {
+        throw new Error(
+            `No valid retry worker for batch ${batch.batch_id}`
+        );
+    }
+
+    // Claim only if this exact batch is still connector-loss FAILED.
+    const { data: claimed, error: claimError } = await supabase
+        .from("sync_batches")
+        .update({
+            batch_status: "PENDING",
+            worker_status: "PENDING",
+            worker_id: workerConfig.worker_name,
+            locked_at: new Date(),
+            heartbeat_at: null,
+            completed_at: null,
+            error_message: null,
+            current_stage: "PENDING",
+            current_module: "MASTERS",
+            current_action: "PENDING"
+        })
+        .eq("id", batch.id)
+        .eq("batch_status", "FAILED")
+        .eq("worker_status", "FAILED")
+        .like("error_message", "CONNECTOR_LOSS:%")
+        .select()
+        .maybeSingle();
+
+    if (claimError) {
+        throw new Error(
+            `Retry claim failed for ${batch.batch_id}: ${claimError.message}`
+        );
+    }
+
+    if (!claimed) {
+        console.log(
+            "CONNECTOR RETRY SKIPPED: ALREADY CLAIMED OR CHANGED",
+            batch.batch_id
+        );
+
+        return {
+            success: false,
+            reason: "ALREADY_CLAIMED"
+        };
+    }
+
+    try {
+        await addBatchToQueue(claimed, workerConfig);
+
+        console.log(
+            "CONNECTOR LOSS RETRY QUEUED:",
+            batch.batch_id,
+            "QUEUE:",
+            workerConfig.queue_name,
+            "WORKER:",
+            workerConfig.worker_name
+        );
+
+        return {
+            success: true,
+            batch: claimed,
+            worker: workerConfig
+        };
+    } catch (queueError) {
+        // Roll back only if this retry still owns the reservation.
+        const { error: rollbackError } = await supabase
+            .from("sync_batches")
+            .update({
+                batch_status: "FAILED",
+                worker_status: "FAILED",
+                worker_id: null,
+                locked_at: null,
+                error_message: originalError
+            })
+            .eq("id", batch.id)
+            .eq("batch_status", "PENDING")
+            .eq("worker_status", "PENDING")
+            .eq("worker_id", workerConfig.worker_name);
+
+        if (rollbackError) {
+            console.error(
+                "CONNECTOR RETRY ROLLBACK FAILED:",
+                batch.batch_id,
+                rollbackError.message
+            );
+        }
+
+        throw queueError;
+    }
+}
+
+
 async function dispatchBatch(batch) {
 
     if (!batch) {
@@ -350,7 +470,9 @@ function startBatchQueueDispatcher() {
 }
     */
 
+
 module.exports = {
     //startBatchQueueDispatcher
-     dispatchBatch
+    dispatchBatch,
+    dispatchConnectorLossRetry
 };

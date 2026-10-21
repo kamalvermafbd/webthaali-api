@@ -1,7 +1,8 @@
 const registry = require("./connectorRegistry");
 
 const {
-    dispatchBatch
+    dispatchBatch,
+    dispatchConnectorLossRetry
 } = require("../workers/secondQueueExistingBatch");
 
 // 060926 start
@@ -377,6 +378,116 @@ async function recoverWaitingBatchesForCompanies({
     }
 
 }
+
+
+async function retryLatestConnectorLossBatchForCompanies(companyGuids) {
+    if (!Array.isArray(companyGuids) || !companyGuids.length) {
+        return;
+    }
+
+    const cleanGuids = [
+        ...new Set(
+            companyGuids
+                .map(guid => String(guid).trim())
+                .filter(Boolean)
+        )
+    ];
+
+    const [clientResult, caResult] = await Promise.all([
+        supabase
+            .from("company")
+            .select("company_code, client_tally_company_guid")
+            .in("client_tally_company_guid", cleanGuids),
+
+        supabase
+            .from("company")
+            .select("company_code, ca_tally_company_guid")
+            .in("ca_tally_company_guid", cleanGuids)
+    ]);
+
+    if (clientResult.error || caResult.error) {
+        throw new Error(
+            clientResult.error?.message ||
+            caResult.error?.message
+        );
+    }
+
+    const companyScopes = new Map();
+
+    for (const row of clientResult.data || []) {
+        companyScopes.set(
+            `${row.company_code}:USER`,
+            {
+                company_code: row.company_code,
+                tally_owner: "USER"
+            }
+        );
+    }
+
+    for (const row of caResult.data || []) {
+        companyScopes.set(
+            `${row.company_code}:CA`,
+            {
+                company_code: row.company_code,
+                tally_owner: "CA"
+            }
+        );
+    }
+
+    for (const scope of companyScopes.values()) {
+        try {
+            // Select the latest batch FIRST, regardless of status.
+            const { data: latestBatch, error } = await supabase
+                .from("sync_batches")
+                .select("*")
+                .eq("company_code", scope.company_code)
+                .eq("tally_owner", scope.tally_owner)
+                .order("created_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+            if (error) {
+                throw error;
+            }
+
+            if (!latestBatch) {
+                continue;
+            }
+
+            // Closed or any non-connector failure must not retry.
+            if (
+                latestBatch.batch_status !== "FAILED" ||
+                latestBatch.worker_status !== "FAILED" ||
+                !String(latestBatch.error_message || "")
+                    .startsWith("CONNECTOR_LOSS:")
+            ) {
+                console.log(
+                    "CONNECTOR RETRY SKIPPED: LATEST BATCH NOT ELIGIBLE",
+                    {
+                        company_code: scope.company_code,
+                        tally_owner: scope.tally_owner,
+                        batch_id: latestBatch.batch_id,
+                        batch_status: latestBatch.batch_status
+                    }
+                );
+
+                continue;
+            }
+
+            await dispatchConnectorLossRetry(latestBatch);
+        } catch (error) {
+            console.error(
+                "LATEST CONNECTOR RETRY FAILED:",
+                {
+                    company_code: scope.company_code,
+                    tally_owner: scope.tally_owner,
+                    error: error.message
+                }
+            );
+        }
+    }
+}
+
 
 function registerEvents(io) {
 
@@ -772,6 +883,10 @@ await recoverWaitingBatchesForCompanies({
     companyGuids: company_guids,
     socket
 });
+
+await retryLatestConnectorLossBatchForCompanies(
+    company_guids
+);
     } catch (err) {
 
         console.error(

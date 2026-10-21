@@ -2,6 +2,38 @@ const {
     getSyncQueue
 } = require("./secondSyncQueue");
 
+
+async function removeFailedJobIfSafe(syncQueue, batchId) {
+    const existingJob = await syncQueue.getJob(batchId);
+
+    if (!existingJob) {
+        return true;
+    }
+
+    const state = await existingJob.getState();
+
+    console.log(
+        "EXISTING BULLMQ JOB CHECK:",
+        batchId,
+        state
+    );
+
+    if (state === "failed") {
+        await existingJob.remove();
+
+        console.log(
+            "OLD FAILED BULLMQ JOB REMOVED:",
+            batchId
+        );
+
+        return true;
+    }
+
+    // Never remove an active or waiting job.
+    return false;
+}
+
+
 async function addBatchToQueue(
     batch,
     workerConfig
@@ -39,7 +71,16 @@ async function addBatchToQueue(
         getSyncQueue(
             workerConfig.queue_name
         );
+    const canEnqueue = await removeFailedJobIfSafe(
+        syncQueue,
+        batch.batch_id
+    );
 
+    if (!canEnqueue) {
+        throw new Error(
+            `Existing BullMQ job is not failed; retry skipped for ${batch.batch_id}`
+        );
+    }
         console.log(
     "ABOUT TO ADD BULLMQ JOB:",
     batch.batch_id,

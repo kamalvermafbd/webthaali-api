@@ -11,7 +11,7 @@ const supabase = createClient(
     process.env.SUPABASE_SERVICE_KEY
 );
 
-async function resolveWorkerForBatch(batch) {
+async function resolveWorkerForBatch(batch, options = {}) {
 
     if (!batch) {
 
@@ -665,13 +665,13 @@ if (specialServerConfig) {
 
         const concurrency =
             worker.concurrency || 1;
-
+/* 211026
         if (
             currentLoad >= concurrency
         ) {
             continue;
         }
-
+*/
         eligibleWorkers.push({
             worker,
             currentLoad,
