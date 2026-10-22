@@ -74,6 +74,187 @@ async function resolveWorkerForBatch(batch, options = {}) {
             + configError.message
         );
     }
+
+        // Connector-loss retry: use the batch's original worker.
+    // sync_batches.worker_id stores worker_name, not workers.id.
+    if (options.connectorLossRetry && batch.worker_id) {
+        const originalWorkerName = String(batch.worker_id).trim();
+
+        const { data: worker, error: workerError } =
+            await supabase
+                .from("workers")
+                .select(`
+                    id,
+                    worker_name,
+                    worker_type,
+                    queue_name,
+                    server_id,
+                    is_active,
+                    concurrency,
+                    priority,
+                    heartbeat_timeout_seconds,
+                    runtime_id,
+                    runtime_heartbeat_at
+                `)
+                .eq("worker_name", originalWorkerName)
+                .eq("is_active", true)
+                .maybeSingle();
+
+        if (workerError) {
+            throw new Error(
+                "Original retry worker lookup failed: " +
+                workerError.message
+            );
+        }
+
+        if (!worker) {
+            throw new Error(
+                `Original worker ${originalWorkerName} is unavailable; retry stopped`
+            );
+        }
+
+                if (
+            worker_type &&
+            worker.worker_type !== worker_type
+        ) {
+            throw new Error(
+                `Original worker ${originalWorkerName} type mismatch: expected ${worker_type}, got ${worker.worker_type}`
+            );
+        }
+
+        if (!worker.runtime_id || !worker.runtime_heartbeat_at) {
+            throw new Error(
+                `Original worker ${originalWorkerName} has no active runtime`
+            );
+        }
+
+        const heartbeatAge =
+            Date.now() -
+            new Date(worker.runtime_heartbeat_at).getTime();
+
+        const heartbeatTimeout =
+            worker.heartbeat_timeout_seconds || 120;
+
+        if (
+            !Number.isFinite(heartbeatAge) ||
+            heartbeatAge < 0 ||
+            heartbeatAge > heartbeatTimeout * 1000
+        ) {
+            throw new Error(
+                `Original worker ${originalWorkerName} heartbeat is stale`
+            );
+        }
+
+        const { data: server, error: serverError } =
+            await supabase
+                .from("worker_servers")
+                .select(`
+                    id,
+                    server_name,
+                    http_url,
+                    is_active,
+                    server_category,
+                    machine_name
+                `)
+                .eq("id", worker.server_id)
+                .eq("is_active", true)
+                .maybeSingle();
+
+        if (serverError) {
+            throw new Error(
+                "Original worker server lookup failed: " +
+                serverError.message
+            );
+        }
+
+        if (!server) {
+            throw new Error(
+                `Original worker ${originalWorkerName} server is unavailable`
+            );
+        }
+
+                const specialWorkerConfig = configs?.find(
+            config => config.sync_preference === "SPECIAL_WORKER"
+        );
+
+        const specialServerConfig = configs?.find(
+            config => config.sync_preference === "SPECIAL_SERVER"
+        );
+
+        if (specialWorkerConfig) {
+            if (
+                String(specialWorkerConfig.worker_id) !== String(worker.id) ||
+                String(specialWorkerConfig.server_id) !== String(server.id)
+            ) {
+                throw new Error(
+                    `Original worker does not match SPECIAL_WORKER configuration for ${company_code}/${tally_owner}`
+                );
+            }
+
+            if (worker.worker_type !== "SPECIAL_SYNC") {
+                throw new Error(
+                    `SPECIAL_WORKER requires SPECIAL_SYNC worker`
+                );
+            }
+        } else if (specialServerConfig) {
+            if (
+                String(specialServerConfig.server_id) !== String(server.id)
+            ) {
+                throw new Error(
+                    `Original worker is not on the configured SPECIAL_SERVER`
+                );
+            }
+        } else if (server.server_category !== "GENERAL") {
+            throw new Error(
+                `Original worker is not on a GENERAL server`
+            );
+        }
+
+        const { count: runningCount, error: loadError } =
+            await supabase
+                .from("sync_batches")
+                .select("id", { count: "exact", head: true })
+                .eq("worker_id", originalWorkerName)
+                .in("worker_status", ["PENDING", "RUNNING"])
+                .neq("batch_id", batch.batch_id);
+
+
+        if (loadError) {
+            throw new Error(
+                "Original worker load lookup failed: " +
+                loadError.message
+            );
+        }
+
+        if ((runningCount || 0) >= (worker.concurrency || 1)) {
+            throw new Error(
+                `Original worker ${originalWorkerName} has no available capacity`
+            );
+        }
+
+        return {
+            id: worker.id,
+            worker_name: worker.worker_name,
+            worker_type: worker.worker_type,
+            queue_name: worker.queue_name,
+            server_id: server.id,
+            server_category: server.server_category,
+            http_url: server.http_url,
+                       sync_preference:
+                specialWorkerConfig?.sync_preference ||
+                specialServerConfig?.sync_preference ||
+                configs?.find(
+                    config => config.sync_preference === "GENERAL"
+                )?.sync_preference ||
+                "GENERAL",
+            company_code,
+            tally_owner,
+            concurrency: worker.concurrency,
+            priority: worker.priority,
+            heartbeat_timeout_seconds:
+                worker.heartbeat_timeout_seconds
+        };
+    }
 /*070926
     if (
         !configs ||
