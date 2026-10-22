@@ -29,7 +29,7 @@ const supabase = createClient(
     process.env.SUPABASE_SERVICE_KEY
 );
 
-
+/*211026
 async function rollbackConnectorLossRetry(batch, workerName, originalError) {
     const { error: rollbackError } = await supabase
         .from("sync_batches")
@@ -57,6 +57,84 @@ async function rollbackConnectorLossRetry(batch, workerName, originalError) {
 
     return true;
 }
+*/
+
+async function rollbackConnectorLossRetry(batch, workerName, originalError) {
+    const { data: rolledBack, error: rollbackError } = await supabase
+        .from("sync_batches")
+        .update({
+            batch_status: "FAILED",
+            worker_status: "FAILED",
+            worker_id: null,
+            locked_at: null,
+            heartbeat_at: null,
+            error_message: originalError
+        })
+        .eq("id", batch.id)
+        .eq("batch_status", "PENDING")
+        .eq("worker_status", "PENDING")
+        .eq("worker_id", workerName)
+        .select("id")
+        .maybeSingle();
+
+    if (rollbackError) {
+        console.error(
+            "CONNECTOR RETRY ROLLBACK FAILED:",
+            batch.batch_id,
+            rollbackError.message
+        );
+        return false;
+    }
+
+    if (!rolledBack) {
+        console.error(
+            "CONNECTOR RETRY ROLLBACK SKIPPED: RESERVATION NOT OWNED",
+            batch.batch_id,
+            workerName
+        );
+        return false;
+    }
+
+    return true;
+}
+
+
+async function inspectConnectorRetryJob(
+    queueName,
+    batch,
+    workerConfig
+) {
+    const { getSyncQueue } = require("./secondSyncQueue");
+    const syncQueue = getSyncQueue(queueName);
+
+    try {
+        const job = await syncQueue.getJob(batch.batch_id);
+
+        if (!job) {
+            return {
+                state: "NOT_FOUND",
+                matches: false
+            };
+        }
+
+        const state = await job.getState();
+        const data = job.data || {};
+
+        const matches =
+            data.batch_id === batch.batch_id &&
+            String(data.batch_db_id) === String(batch.id) &&
+            data.worker_name === workerConfig.worker_name &&
+            String(data.worker_id) === String(workerConfig.id) &&
+            data.server_id === workerConfig.server_id;
+
+        return {
+            state,
+            matches
+        };
+    } finally {
+        await syncQueue.close();
+    }
+}
 
 
 async function dispatchConnectorLossRetry(batch) {
@@ -64,13 +142,23 @@ async function dispatchConnectorLossRetry(batch) {
         throw new Error("Retry batch id missing");
     }
 
-    const originalError = String(batch.error_message || "");
+   
+const originalError = String(batch.error_message || "");
 
-    if (
-        batch.batch_status !== "FAILED" ||
-        batch.worker_status !== "FAILED" ||
-        !originalError.startsWith("CONNECTOR_LOSS:")
-    ) {
+const isConnectorLossError =
+    originalError.startsWith("CONNECTOR_LOSS:") ||
+    (
+        batch.current_stage === "WAITING_CONNECTOR" &&
+        originalError.trim().toLowerCase() ===
+            "connector offline / heartbeat timeout"
+    );
+
+if (
+    batch.batch_status !== "FAILED" ||
+    batch.worker_status !== "FAILED" ||
+    !isConnectorLossError
+) {
+
         console.log(
             "CONNECTOR RETRY SKIPPED: NOT ELIGIBLE",
             batch.batch_id
@@ -216,42 +304,82 @@ async function dispatchConnectorLossRetry(batch) {
             batch: claimed,
             worker: workerConfig
         };
+    
+    
     } catch (queueError) {
-        // Roll back only if this retry still owns the reservation.
-        /* 211026
-        const { error: rollbackError } = await supabase
-            .from("sync_batches")
-            .update({
-                batch_status: "FAILED",
-                worker_status: "FAILED",
-                worker_id: null,
-                locked_at: null,
-                error_message: originalError
-            })
-            .eq("id", batch.id)
-            .eq("batch_status", "PENDING")
-            .eq("worker_status", "PENDING")
-            .eq("worker_id", workerConfig.worker_name);
+        let queueCheck;
 
-        if (rollbackError) {
-            console.error(
-                "CONNECTOR RETRY ROLLBACK FAILED:",
-                batch.batch_id,
-                rollbackError.message
+        try {
+            queueCheck = await inspectConnectorRetryJob(
+                workerConfig.queue_name,
+                claimed,
+                workerConfig
             );
+        } catch (stateError) {
+            console.error(
+                "CONNECTOR RETRY QUEUE CHECK FAILED:",
+                batch.batch_id,
+                stateError.message
+            );
+
+            // Preserve the reservation until queue state can be verified.
+            throw queueError;
         }
-            */
-           
-        // Roll back only if this retry still owns the reservation.
-        await rollbackConnectorLossRetry(
+
+        console.error(
+            "CONNECTOR RETRY QUEUE ADD ERROR:",
+            batch.batch_id,
+            queueError.message,
+            "QUEUE STATE:",
+            queueCheck.state,
+            "ASSIGNMENT MATCH:",
+            queueCheck.matches
+        );
+
+        const activeStates = [
+            "waiting",
+            "active",
+            "delayed",
+            "prioritized",
+            "waiting-children"
+        ];
+
+        if (activeStates.includes(queueCheck.state)) {
+            if (queueCheck.matches) {
+                return {
+                    success: true,
+                    queued: true,
+                    reason: "JOB_ALREADY_EXISTS",
+                    batch: claimed,
+                    worker: workerConfig
+                };
+            }
+
+            // Do not rollback while a conflicting job exists.
+            throw queueError;
+        }
+
+        if (queueCheck.state === "UNKNOWN") {
+            throw queueError;
+        }
+
+        const rolledBack = await rollbackConnectorLossRetry(
             batch,
             workerConfig.worker_name,
             originalError
         );
 
+        if (!rolledBack) {
+            console.error(
+                "CONNECTOR RETRY RESERVATION NEEDS REVIEW:",
+                batch.batch_id
+            );
+        }
 
         throw queueError;
     }
+
+
 }
 
 

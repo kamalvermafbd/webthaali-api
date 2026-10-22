@@ -625,7 +625,7 @@ const waitingAge =
             await failWaitingConnectorBatch(
                 supabase,
                 batch,
-                "Tally offline / heartbeat timeout"
+                "CONNECTOR_LOSS: Tally offline / heartbeat timeout"
             );
 
 

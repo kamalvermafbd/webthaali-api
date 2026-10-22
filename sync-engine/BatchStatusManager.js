@@ -801,7 +801,7 @@ const { data, error } = await supabase
         worker_status: "PENDING",
         current_stage: SYNC_STAGE.WAITING_CONNECTOR,
         error_message: null,
-        worker_id: null,
+        //worker_id: null,
         locked_at: null,
         heartbeat_at: null
     })

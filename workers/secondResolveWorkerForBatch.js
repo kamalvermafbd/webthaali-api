@@ -93,6 +93,7 @@ const hasGeneralConfig =
 const isGeneral =
     !configs?.length ||
     hasGeneralConfig;
+    
     /*
      * ---------------------------------------------------------
      * 2. TRY CONFIGURED WORKER FIRST
@@ -375,17 +376,74 @@ if (configuredConfig) {
             `Configured worker ${configuredConfig.worker_id} is not active`
         );
     }
-/* 090926 commented
-    if (
-        worker_type &&
-        worker.worker_type !== worker_type
-    ) {
 
+    
+    // SPECIAL_WORKER must be online and have available capacity.
+    // Never fall back to another worker.
+
+    if (
+        !worker.runtime_id ||
+        !worker.runtime_heartbeat_at
+    ) {
         throw new Error(
-            `Configured worker type mismatch for ${company_code}/${tally_owner}`
+            `SPECIAL_WORKER ${worker.worker_name} has no active runtime`
         );
     }
-*/
+
+    const heartbeatTimeout =
+        worker.heartbeat_timeout_seconds || 120;
+
+    const heartbeatAge =
+        Date.now() -
+        new Date(worker.runtime_heartbeat_at).getTime();
+
+    if (
+        !Number.isFinite(heartbeatAge) ||
+        heartbeatAge < 0 ||
+        heartbeatAge > heartbeatTimeout * 1000
+    ) {
+        throw new Error(
+            `SPECIAL_WORKER ${worker.worker_name} heartbeat is stale`
+        );
+    }
+
+    const {
+        count: runningCount,
+        error: batchLoadError
+    } = await supabase
+        .from("sync_batches")
+        .select("id", {
+            count: "exact",
+            head: true
+        })
+        .eq("worker_id", worker.worker_name)
+        .in("worker_status", [
+            "PENDING",
+            "RUNNING"
+        ]);
+
+    if (batchLoadError) {
+        throw new Error(
+            "SPECIAL_WORKER batch load lookup failed: " +
+            batchLoadError.message
+        );
+    }
+
+    const currentLoad = runningCount || 0;
+    const concurrency = worker.concurrency || 1;
+
+    if (currentLoad >= concurrency) {
+        throw new Error(
+            `SPECIAL_WORKER ${worker.worker_name} has no available capacity`
+        );
+    }
+
+// SPECIAL_WORKER must always use a SPECIAL_SYNC worker.
+if (worker.worker_type !== "SPECIAL_SYNC") {
+    throw new Error(
+        `SPECIAL_WORKER requires SPECIAL_SYNC worker, but ${worker.worker_name} has type ${worker.worker_type}`
+    );
+}
     if (
         worker.server_id !==
         configuredConfig.server_id
@@ -665,13 +723,11 @@ if (specialServerConfig) {
 
         const concurrency =
             worker.concurrency || 1;
-/* 211026
-        if (
-            currentLoad >= concurrency
-        ) {
+
+        if (currentLoad >= concurrency) {
             continue;
         }
-*/
+
         eligibleWorkers.push({
             worker,
             currentLoad,
@@ -1026,7 +1082,7 @@ const normalizedWorkerType =
 );
 
         const eligibleWorkers = [];
-
+/*
         for (const worker of workers) {
 
             try {
@@ -1039,7 +1095,23 @@ const normalizedWorkerType =
                 );
             }
         }
+        */
 
+          // Normal sync keeps existing stale-batch recovery.
+    // Connector-loss retry must not modify unrelated batches.
+    if (!options.connectorLossRetry) {
+        for (const worker of workers) {
+            try {
+                await recoverStaleBatches(worker);
+            } catch (error) {
+                console.error(
+                    "STALE BATCH RECOVERY ERROR:",
+                    worker.worker_name,
+                    error.message
+                );
+            }
+        }
+    }
         
         for (const worker of workers) {
 
@@ -1231,13 +1303,11 @@ const normalizedWorkerType =
             /*
              * Worker has no available execution slot.
              */
-/*070926
-            if (
-                currentLoad >= concurrency
-            ) {
+
+            if (currentLoad >= concurrency) {
                 continue;
             }
-*/
+
             eligibleWorkers.push({
 
                 worker,
