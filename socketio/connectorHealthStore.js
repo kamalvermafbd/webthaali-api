@@ -136,6 +136,67 @@ async function getConnectorHealth(connectorId) {
     }
 }
 
+async function updateConnectorHealthAtomic(
+    connectorId,
+    patch,
+    options = {}
+) {
+    if (
+        !patch ||
+        typeof patch !== "object" ||
+        Array.isArray(patch)
+    ) {
+        throw new Error("patch must be a valid object");
+    }
+
+    const id = normalizeConnectorId(connectorId);
+    const ttlSeconds = Number(
+        options.ttlSeconds || DEFAULT_HEALTH_TTL_SECONDS
+    );
+
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds <= 0) {
+        throw new Error("ttlSeconds must be a positive integer");
+    }
+
+    await ensureConnected();
+
+    const key = getHealthKey(id);
+
+    const result = await redis.eval(
+        `
+        local current = redis.call("GET", KEYS[1])
+        local record = {}
+
+        if current then
+            record = cjson.decode(current)
+        end
+
+        local patch = cjson.decode(ARGV[1])
+
+        for k, v in pairs(patch) do
+            record[k] = v
+        end
+
+        record["connector_id"] = ARGV[2]
+        record["shared_updated_at"] = ARGV[3]
+
+        local updated = cjson.encode(record)
+
+        redis.call("SET", KEYS[1], updated, "EX", ARGV[4])
+
+        return updated
+        `,
+        1,
+        key,
+        JSON.stringify(patch),
+        id,
+        new Date().toISOString(),
+        String(ttlSeconds)
+    );
+
+    return JSON.parse(result);
+}
+
 async function deleteConnectorHealth(connectorId) {
     const id = normalizeConnectorId(connectorId);
 
@@ -165,6 +226,7 @@ async function closeConnectorHealthStore() {
 module.exports = {
     setConnectorHealth,
     getConnectorHealth,
+    updateConnectorHealthAtomic,
     deleteConnectorHealth,
     ping,
     closeConnectorHealthStore
