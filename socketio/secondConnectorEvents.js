@@ -976,10 +976,10 @@ for (const connectorId of connectorIds) {
                 socket.id,
                 {
                     connection_status: "CONNECTED",
-                    operation_status:
-                        socket.tallyRequestActive === true
-                            ? "BUSY"
-                            : "FREE",
+            operation_status:
+    socket.tallyRequestActive === true
+        ? "BUSY"
+        : "UNKNOWN",
                     last_heartbeat_at:
                         socket.lastHeartbeat
                             ? new Date(socket.lastHeartbeat).toISOString()
@@ -1579,7 +1579,7 @@ socket.on("tally:request:error", (data) => {
 
             await updateOwnedSocketHealth({
                 connection_status: "CONNECTED",
-                operation_status: "FREE",
+                operation_status: "RECOVERING",
                 last_heartbeat_at:
                     socket.lastHeartbeat
                         ? new Date(socket.lastHeartbeat).toISOString()
