@@ -16,6 +16,9 @@ const {
 
 const connectorRegistry = require("../socketio/connectorRegistry");
 
+const connectorHealthStore =
+    require("../socketio/connectorHealthStore");
+
 let watchdogTimer = null;
 let watchdogRunning = false;
 const waitingConnectorSince = new Map();
@@ -165,10 +168,39 @@ function updateConnectorHealth(connectorId, updates = {}) {
 
     health.updated_at = new Date().toISOString();
 
-    connectorHealth.set(health.connector_id, health);
+connectorHealth.set(health.connector_id, health);
 
-    return health;
+publishConnectorHealthToSharedStore({
+    ...health,
+    reasons: Array.isArray(health.reasons)
+        ? [...health.reasons]
+        : []
+});
+
+return health;
 }
+
+
+// ============================================================
+// PUBLISH CONNECTOR HEALTH TO SHARED REDIS STORE
+// ============================================================
+
+function publishConnectorHealthToSharedStore(health) {
+    if (!health || !health.connector_id) {
+        return;
+    }
+
+    connectorHealthStore
+        .setConnectorHealth(health.connector_id, health)
+        .catch((error) => {
+            console.error(
+                "[ConnectorWatchdog] Shared health publish failed:",
+                health.connector_id,
+                error.message
+            );
+        });
+}
+
 
 // ============================================================
 // GET CONNECTOR HEALTH REPORT
