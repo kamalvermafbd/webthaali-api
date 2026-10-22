@@ -10,10 +10,9 @@ publishConnectorHealth,
 updateConnectorHealth,
 getSharedConnectorHealth
 } = require("./connectorHealth");
-
 const {
-claimConnectorSocketOwnership,
-updateConnectorHealthIfSocketOwner
+    claimConnectorSocketOwnership,
+    updateConnectorHealthIfSocketOwner
 } = require("./connectorHealthStore");
 
 // 060926 start

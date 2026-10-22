@@ -330,6 +330,7 @@ async function updateConnectorHealthIfSocketOwner(
             return 0
         end
 
+       
         local record = cjson.decode(current)
 
         if record["socket_id"] ~= ARGV[1] then
@@ -337,6 +338,14 @@ async function updateConnectorHealthIfSocketOwner(
         end
 
         local patch = cjson.decode(ARGV[2])
+
+        -- A delayed heartbeat must not revive a disconnected socket.
+        -- Reconnection must first pass through claimConnectorSocketOwnership.
+        if record["connection_status"] == "DISCONNECTED"
+            and patch["connection_status"] == "CONNECTED" then
+            return 0
+        end
+
 
         for k, v in pairs(patch) do
             if k ~= "connector_id"
@@ -373,6 +382,65 @@ async function updateConnectorHealthIfSocketOwner(
         health: JSON.parse(result)
     };
 }
+
+
+
+ // Renew health-key TTL only if this socket still owns a CONNECTED record.
+async function renewConnectorSocketLease(
+    connectorId,
+    socketId,
+    options = {}
+) {
+    const id = normalizeConnectorId(connectorId);
+    const sid = String(socketId || "").trim();
+
+    if (!sid) {
+        throw new Error("socketId is required");
+    }
+
+    const ttlSeconds = Number(
+        options.ttlSeconds || DEFAULT_HEALTH_TTL_SECONDS
+    );
+
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds <= 0) {
+        throw new Error("ttlSeconds must be a positive integer");
+    }
+
+    await ensureConnected();
+
+    const result = await redis.eval(
+        `
+        local current = redis.call("GET", KEYS[1])
+
+        if not current then
+            return 0
+        end
+
+        local record = cjson.decode(current)
+
+        if record["socket_id"] ~= ARGV[1] then
+            return 0
+        end
+
+        if record["connection_status"] ~= "CONNECTED" then
+            return 0
+        end
+
+        return redis.call("EXPIRE", KEYS[1], ARGV[2])
+        `,
+        1,
+        getHealthKey(id),
+        sid,
+        String(ttlSeconds)
+    );
+
+    return {
+        renewed: Number(result) === 1,
+        connector_id: id
+    };
+}
+
+
 
 async function acquireConnectorOperationLock(
     connectorId,
@@ -457,14 +525,18 @@ const key =
     `billey:connector:operation-lock:${normalizeConnectorId(connectorId)}`;
 
 
-    const script = `
-        if redis.call("GET", KEYS[1]) == ARGV[1] then
-            return redis.call("PEXPIRE", KEYS[1], ARGV[2])
-        end
-        return 0
-    `;
+    
+const script = `
+    if redis.call("GET", KEYS[1]) == ARGV[1] then
+        return redis.call("PEXPIRE", KEYS[1], ARGV[2])
+    end
+    return 0
+`;
 
-    const result = await redis.eval(
+await ensureConnected();
+
+const result = await redis.eval(
+
         script,
         1,
         key,
@@ -485,7 +557,9 @@ module.exports = {
     closeConnectorHealthStore,
     claimConnectorSocketOwnership,
     updateConnectorHealthIfSocketOwner,
+        renewConnectorSocketLease,
     renewConnectorOperationLock,
     acquireConnectorOperationLock,
+    
     releaseConnectorOperationLock
 };
