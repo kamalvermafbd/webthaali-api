@@ -140,7 +140,11 @@ const CONNECTOR_HEALTH_STATUSES = {
 // UPDATE CONNECTOR HEALTH
 // ============================================================
 
-function updateConnectorHealth(connectorId, updates = {}) {
+function updateConnectorHealth(
+    connectorId,
+    updates = {},
+    registry = connectorRegistry
+) {
     const health = getOrCreateConnectorHealth(connectorId);
 
     if (!health) {
@@ -170,12 +174,15 @@ function updateConnectorHealth(connectorId, updates = {}) {
 
 connectorHealth.set(health.connector_id, health);
 
-publishConnectorHealthToSharedStore({
-    ...health,
-    reasons: Array.isArray(health.reasons)
-        ? [...health.reasons]
-        : []
-});
+publishConnectorHealthToSharedStore(
+    {
+        ...health,
+        reasons: Array.isArray(health.reasons)
+            ? [...health.reasons]
+            : []
+    },
+    registry
+);
 
 return health;
 }
@@ -184,7 +191,7 @@ return health;
 // ============================================================
 // PUBLISH CONNECTOR HEALTH TO SHARED REDIS STORE
 // ============================================================
-
+/* 221026
 function publishConnectorHealthToSharedStore(health) {
     if (!health || !health.connector_id) {
         return;
@@ -200,6 +207,80 @@ function publishConnectorHealthToSharedStore(health) {
             );
         });
 }
+*/
+
+async function publishConnectorHealthToSharedStore(
+    health,
+    registry = connectorRegistry
+) {
+    if (!health || !health.connector_id) {
+        return;
+    }
+
+    try {
+        const sharedHealth =
+            await connectorHealthStore.getConnectorHealth(
+                health.connector_id
+            );
+
+        const localSocket =
+    registry?.get?.(health.connector_id);
+
+        if (!localSocket || !localSocket.id) {
+            console.warn(
+                "[ConnectorWatchdog] Shared health publish skipped: no local socket",
+                health.connector_id
+            );
+            return;
+        }
+
+        const ownerSocketId = sharedHealth?.socket_id;
+
+        if (!ownerSocketId || ownerSocketId !== localSocket.id) {
+            console.warn(
+                "[ConnectorWatchdog] Shared health publish skipped: local socket is not owner",
+                {
+                    connector_id: health.connector_id,
+                    local_socket_id: localSocket.id,
+                    owner_socket_id: ownerSocketId || null
+                }
+            );
+            return;
+        }
+
+        const result =
+            await connectorHealthStore.updateConnectorHealthIfSocketOwner(
+                health.connector_id,
+                localSocket.id,
+                {
+                    responsiveness: health.responsiveness,
+                    tally_status: health.tally_status,
+                    heartbeat_status: health.heartbeat_status,
+                    health_status: health.health_status,
+                    active_operation: health.active_operation,
+                    last_response_at: health.last_response_at,
+                    last_success_at: health.last_success_at,
+                    last_error: health.last_error,
+                    reasons: health.reasons,
+                    updated_at: health.updated_at
+                }
+            );
+
+        if (!result.updated) {
+            console.warn(
+                "[ConnectorWatchdog] Shared health update rejected: owner changed",
+                health.connector_id
+            );
+        }
+    } catch (error) {
+        console.error(
+            "[ConnectorWatchdog] Shared health publish failed:",
+            health.connector_id,
+            error.message
+        );
+    }
+}
+
 
 
 // ============================================================
@@ -240,8 +321,12 @@ function getAllConnectorHealthReports() {
 // DISCOVER REGISTERED CONNECTORS
 // ============================================================
 
-function discoverRegisteredConnectors() {
-    const connectorIds = connectorRegistry.list();
+function discoverRegisteredConnectors(registry = connectorRegistry) {
+    if (!registry || typeof registry.list !== "function") {
+        return [];
+    }
+
+    const connectorIds = registry.list();
 
     for (const connectorId of connectorIds) {
         getOrCreateConnectorHealth(connectorId);
@@ -249,7 +334,6 @@ function discoverRegisteredConnectors() {
 
     return connectorIds;
 }
-
 
 function refreshRegisteredConnectorHealth(registry = connectorRegistry) {
     if (
@@ -275,7 +359,7 @@ function refreshRegisteredConnectorHealth(registry = connectorRegistry) {
                 health_status: "UNHEALTHY",
                 last_error: "Connector socket not found",
                 reasons: ["Connector socket not found in registry"]
-            });
+            }, registry);
 
             continue;
         }
@@ -339,7 +423,7 @@ function refreshRegisteredConnectorHealth(registry = connectorRegistry) {
                 : null,
 
             reasons
-        });
+        }, registry);
     }
 }
 
@@ -471,7 +555,7 @@ async function checkConnectorWatchdog({
     watchdogRunning = true;
 
     try {
-discoverRegisteredConnectors();
+discoverRegisteredConnectors(registry || connectorRegistry);
 
 refreshRegisteredConnectorHealth(registry || connectorRegistry);
         // ----------------------------------------------------
@@ -691,7 +775,7 @@ if (!socket) {
         health_status: "UNHEALTHY",
         last_error: "Connector socket not found",
         reasons: ["Connector socket not found in registry"]
-    });
+        }, registry);
 } else {
     const lastHeartbeat = Number(socket.lastHeartbeat || 0);
     const heartbeatAge = lastHeartbeat > 0
@@ -738,7 +822,7 @@ if (!socket) {
                 ? "Tally is not confirmed online"
                 : null
         ].filter(Boolean)
-    });
+       }, registry);
 }
 
                 // =================================================

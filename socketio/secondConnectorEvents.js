@@ -902,49 +902,196 @@ for (const connectorId of connectorIds) {
     */
 
 
+
 for (const connectorId of connectorIds) {
+    const claimed = await claimConnectorSocketOwnership(
+        connectorId,
+        socket.id
+    ).catch((error) => {
+        console.error(
+            "❌ AUTO-REGISTER OWNERSHIP CLAIM FAILED",
+            {
+                socket_id: socket.id,
+                connector_id: connectorId,
+                error: error.message
+            }
+        );
+
+        return { claimed: false, health: null };
+    });
+
+    if (!claimed.claimed) {
+        console.warn(
+            "⚠️ EXISTING CONNECTOR AUTO-REGISTER SKIPPED: ownership unavailable",
+            {
+                socket_id: socket.id,
+                connector_id: connectorId,
+                current_owner: claimed.health?.socket_id || null
+            }
+        );
+
+        continue;
+    }
+
     const registered = registry.register(
         connectorId,
         socket
     );
 
-    if (registered) {
-        publishConnectorHealth(connectorId, {
-            connection_status: "CONNECTED",
-            socket_id: socket.id,
-            operation_status:
-                socket.tallyRequestActive === true
-                    ? "BUSY"
-                    : "FREE",
-            last_heartbeat_at:
-                socket.lastHeartbeat
-                    ? new Date(socket.lastHeartbeat).toISOString()
-                    : null
+    if (!registered) {
+        await updateConnectorHealthIfSocketOwner(
+            connectorId,
+            socket.id,
+            {
+                connection_status: "DISCONNECTED",
+                operation_status: "UNKNOWN"
+            }
+        ).catch((error) => {
+            console.error(
+                "❌ AUTO-REGISTER OWNERSHIP ROLLBACK FAILED",
+                {
+                    connector_id: connectorId,
+                    error: error.message
+                }
+            );
         });
 
-        console.log(
-            "✅ EXISTING CONNECTOR AUTO REGISTERED",
+        console.error(
+            "❌ EXISTING CONNECTOR AUTO REGISTER FAILED",
             {
                 socket_id: socket.id,
                 connector_id: connectorId
             }
         );
-    }
-}
 
+        continue;
+    }
+
+   
+    let healthUpdate;
+
+    try {
+        healthUpdate =
+            await updateConnectorHealthIfSocketOwner(
+                connectorId,
+                socket.id,
+                {
+                    connection_status: "CONNECTED",
+                    operation_status:
+                        socket.tallyRequestActive === true
+                            ? "BUSY"
+                            : "FREE",
+                    last_heartbeat_at:
+                        socket.lastHeartbeat
+                            ? new Date(socket.lastHeartbeat).toISOString()
+                            : null
+                }
+            );
+    } catch (error) {
+        console.error(
+            "❌ AUTO-REGISTER HEALTH UPDATE FAILED",
+            {
+                socket_id: socket.id,
+                connector_id: connectorId,
+                error: error.message
+            }
+        );
+
+        healthUpdate = { updated: false };
+    }
+
+
+    if (!healthUpdate.updated) {
+        console.error(
+            "❌ AUTO-REGISTER HEALTH UPDATE REJECTED",
+            {
+                socket_id: socket.id,
+                connector_id: connectorId
+            }
+        );
+
+                     let rollbackUpdated = false;
+
+        try {
+            const rollback =
+                await updateConnectorHealthIfSocketOwner(
+                    connectorId,
+                    socket.id,
+                    {
+                        connection_status: "DISCONNECTED",
+                        operation_status: "UNKNOWN"
+                    }
+                );
+
+            rollbackUpdated = rollback.updated;
+        } catch (error) {
+            console.error(
+                "❌ AUTO-REGISTER OWNERSHIP ROLLBACK FAILED",
+                {
+                    connector_id: connectorId,
+                    socket_id: socket.id,
+                    error: error.message
+                }
+            );
+        }
+
+        registry.remove(connectorId, socket);
+
+        console.warn(
+            "AUTO-REGISTER OWNERSHIP ROLLBACK:",
+            {
+                connector_id: connectorId,
+                socket_id: socket.id,
+                rollback_updated: rollbackUpdated
+            }
+        );
+
+        continue;
+    }
+
+    console.log(
+        "✅ EXISTING CONNECTOR AUTO REGISTERED WITH OWNERSHIP",
+        {
+            socket_id: socket.id,
+            connector_id: connectorId
+        }
+    );
+}
 
 // ==========================================
 // RECOVER WAITING BATCHES
 // ==========================================
 
-await recoverWaitingBatchesForCompanies({
-    companyGuids: company_guids,
-    socket
-});
 
-await retryLatestConnectorLossBatchForCompanies(
-    company_guids
-);
+        // ==========================================
+        // RECOVER WAITING BATCHES — VALID OWNER ONLY
+        // ==========================================
+
+        const hasOwnedConnector =
+            connectorIds.some(connectorId =>
+                socket.connectorIds?.has(connectorId) &&
+                registry.get(connectorId) === socket
+            );
+
+        if (hasOwnedConnector) {
+            await recoverWaitingBatchesForCompanies({
+                companyGuids: company_guids,
+                socket
+            });
+
+            await retryLatestConnectorLossBatchForCompanies(
+                company_guids
+            );
+        } else {
+            console.warn(
+                "⚠️ BATCH RECOVERY SKIPPED: SOCKET OWNS NO REGISTERED CONNECTOR",
+                {
+                    socket_id: socket.id,
+                    connector_ids: connectorIds
+                }
+            );
+        }
+
     } catch (err) {
 
         console.error(
@@ -1064,29 +1211,39 @@ publishConnectorHealth(data.connector_id, {
                 return;
             }
 
-            socket.companyCode = data.company_code;
-            socket.companyGuid = data.company_guid;
-            socket.connectorId = connectorId;
+            
+const registered = registry.register(
+    connectorId,
+    socket
+);
 
-            const registered = registry.register(
-                connectorId,
-                socket
-            );
+if (!registered) {
 
-            if (!registered) {
-                await updateConnectorHealthIfSocketOwner(
-                    connectorId,
-                    socket.id,
-                    {
-                        connection_status: "DISCONNECTED",
-                        operation_status: "UNKNOWN"
-                    }
-                ).catch((error) => {
+                try {
+                    await updateConnectorHealthIfSocketOwner(
+                        connectorId,
+                        socket.id,
+                        {
+                            connection_status: "DISCONNECTED",
+                            operation_status: "UNKNOWN"
+                        }
+                    );
+                } catch (error) {
                     console.error(
                         "❌ OWNERSHIP ROLLBACK FAILED",
-                        error.message
+                        {
+                            socket_id: socket.id,
+                            connector_id: connectorId,
+                            error: error.message
+                        }
                     );
-                });
+                }
+
+                if (socket.connectorId === connectorId) {
+                    socket.connectorId = previousConnectorId || null;
+                }
+
+                registry.remove(connectorId, socket);
 
                 console.error(
                     "❌ CONNECTOR REGISTRATION REJECTED",
@@ -1096,8 +1253,15 @@ publishConnectorHealth(data.connector_id, {
                         company_code: data.company_code
                     }
                 );
+
                 return;
             }
+
+            
+socket.companyCode = data.company_code;
+socket.companyGuid = data.company_guid;
+socket.connectorId = connectorId;
+
 
             if (
                 previousConnectorId &&
@@ -1106,33 +1270,73 @@ publishConnectorHealth(data.connector_id, {
                 registry.remove(previousConnectorId, socket);
             }
 
-            const healthUpdate =
-                await updateConnectorHealthIfSocketOwner(
-                    connectorId,
-                    socket.id,
+            
+            let healthUpdate;
+
+            try {
+                healthUpdate =
+                    await updateConnectorHealthIfSocketOwner(
+                        connectorId,
+                        socket.id,
+                        {
+                            connection_status: "CONNECTED",
+                            operation_status:
+                                socket.tallyRequestActive === true
+                                    ? "BUSY"
+                                    : "FREE",
+                            last_heartbeat_at:
+                                socket.lastHeartbeat
+                                    ? new Date(socket.lastHeartbeat).toISOString()
+                                    : null
+                        }
+                    );
+            } catch (error) {
+                console.error(
+                    "❌ CONNECTOR HEALTH UPDATE FAILED",
                     {
-                        connection_status: "CONNECTED",
-                        operation_status:
-                            socket.tallyRequestActive === true
-                                ? "BUSY"
-                                : "FREE",
-                        last_heartbeat_at:
-                            socket.lastHeartbeat
-                                ? new Date(socket.lastHeartbeat).toISOString()
-                                : null
+                        socket_id: socket.id,
+                        connector_id: connectorId,
+                        error: error.message
                     }
                 );
 
+                healthUpdate = { updated: false };
+            }
+
             if (!healthUpdate.updated) {
+                try {
+                    await updateConnectorHealthIfSocketOwner(
+                        connectorId,
+                        socket.id,
+                        {
+                            connection_status: "DISCONNECTED",
+                            operation_status: "UNKNOWN"
+                        }
+                    );
+                } catch (error) {
+                    console.error(
+                        "❌ CONNECTOR OWNERSHIP ROLLBACK FAILED",
+                        {
+                            socket_id: socket.id,
+                            connector_id: connectorId,
+                            error: error.message
+                        }
+                    );
+                }
+
+                registry.remove(connectorId, socket);
+
                 console.error(
-                    "❌ CONNECTOR HEALTH UPDATE REJECTED",
+                    "❌ CONNECTOR REGISTRATION ROLLED BACK",
                     {
                         socket_id: socket.id,
                         connector_id: connectorId
                     }
                 );
+
                 return;
             }
+
 
             console.log("✅ CONNECTOR REGISTERED WITH OWNERSHIP", {
                 socket_id: socket.id,
@@ -1161,6 +1365,16 @@ socket.on("getMastersProgress", async (data) => {
 
     socket.lastTallyActivity =
         Date.now();
+
+            await updateOwnedSocketHealth({
+        connection_status: "CONNECTED",
+        operation_status:
+            socket.tallyRequestActive === true
+                ? "BUSY"
+                : "FREE",
+        last_heartbeat_at:
+            new Date(socket.lastHeartbeat).toISOString()
+    });
 
     console.log(
         "📊 TALLY PROGRESS :",
@@ -1196,6 +1410,9 @@ socket.on("getMastersProgress", async (data) => {
 
 });
 
+
+
+/* 221026
         socket.on("protocol:heartbeat", () => {
             socket.lastHeartbeat = Date.now();
         });
@@ -1230,16 +1447,7 @@ socket.on("tally:request:error", (data) => {
             console.log("❌ Connector Disconnected");
             console.log("Socket ID :", socket.id);
             console.log("Reason :", reason);
-/*040926
-            if (socket.connectorId) {
 
-                registry.remove(
-                    socket.connectorId,
-                    socket
-                );
-
-            }
-*/
 
             if (socket.connectorIds) {
 
@@ -1256,6 +1464,186 @@ socket.on("tally:request:error", (data) => {
             console.log("================================");
 
         });
+
+*/
+
+        // ============================================================
+        // SHARED HEALTH UPDATES — CURRENT SOCKET OWNER ONLY
+        // ============================================================
+
+        async function updateOwnedSocketHealth(patch) {
+            const connectorIds = new Set([
+                ...(socket.connectorIds || []),
+                socket.connectorId
+            ].filter(Boolean));
+
+            for (const connectorId of connectorIds) {
+                try {
+                    const result =
+                        await updateConnectorHealthIfSocketOwner(
+                            connectorId,
+                            socket.id,
+                            patch
+                        );
+
+                    if (!result.updated) {
+                        console.warn(
+                            "⚠️ SHARED HEALTH UPDATE SKIPPED: SOCKET IS NOT OWNER",
+                            {
+                                socket_id: socket.id,
+                                connector_id: connectorId
+                            }
+                        );
+                    }
+                } catch (error) {
+                    console.error(
+                        "❌ SHARED HEALTH UPDATE FAILED",
+                        {
+                            socket_id: socket.id,
+                            connector_id: connectorId,
+                            error: error.message
+                        }
+                    );
+                }
+            }
+        }
+
+        // ============================================================
+        // PROTOCOL HEARTBEAT
+        // ============================================================
+
+        socket.on("protocol:heartbeat", async () => {
+            socket.lastHeartbeat = Date.now();
+
+            await updateOwnedSocketHealth({
+                connection_status: "CONNECTED",
+                operation_status:
+                    socket.tallyRequestActive === true
+                        ? "BUSY"
+                        : "FREE",
+                last_heartbeat_at:
+                    new Date(socket.lastHeartbeat).toISOString()
+            });
+        });
+
+        // ============================================================
+        // TALLY REQUEST START
+        // ============================================================
+
+        socket.on("tally:request:start", async (data) => {
+            socket.tallyRequestActive = true;
+            socket.tallyRequestStartedAt =
+                data?.timestamp || Date.now();
+            socket.lastTallyActivity = Date.now();
+
+            await updateOwnedSocketHealth({
+                connection_status: "CONNECTED",
+                operation_status: "BUSY",
+                last_heartbeat_at:
+                    socket.lastHeartbeat
+                        ? new Date(socket.lastHeartbeat).toISOString()
+                        : null
+            });
+
+            console.log("🟢 TALLY REQUEST START:", data?.batchId);
+        });
+
+        // ============================================================
+        // TALLY REQUEST END
+        // ============================================================
+
+        socket.on("tally:request:end", async (data) => {
+            socket.tallyRequestActive = false;
+            socket.tallyRequestStartedAt = 0;
+            socket.lastTallyActivity = Date.now();
+
+            await updateOwnedSocketHealth({
+                connection_status: "CONNECTED",
+                operation_status: "FREE",
+                last_heartbeat_at:
+                    socket.lastHeartbeat
+                        ? new Date(socket.lastHeartbeat).toISOString()
+                        : null
+            });
+
+            console.log("✅ TALLY REQUEST END:", data?.batchId);
+        });
+
+        // ============================================================
+        // TALLY REQUEST ERROR
+        // ============================================================
+
+        socket.on("tally:request:error", async (data) => {
+            socket.tallyRequestActive = false;
+            socket.tallyRequestStartedAt = 0;
+            socket.lastTallyActivity = Date.now();
+
+            await updateOwnedSocketHealth({
+                connection_status: "CONNECTED",
+                operation_status: "FREE",
+                last_heartbeat_at:
+                    socket.lastHeartbeat
+                        ? new Date(socket.lastHeartbeat).toISOString()
+                        : null
+            });
+
+            console.log("❌ TALLY REQUEST ERROR:", data?.batchId);
+        });
+
+        // ============================================================
+        // DISCONNECT — ONLY THE CURRENT OWNER CAN MARK DISCONNECTED
+        // ============================================================
+
+        socket.on("disconnect", async (reason) => {
+            console.log("================================");
+            console.log("❌ Connector Disconnected");
+            console.log("Socket ID :", socket.id);
+            console.log("Reason :", reason);
+
+            const connectorIds = new Set([
+                ...(socket.connectorIds || []),
+                socket.connectorId
+            ].filter(Boolean));
+
+            for (const connectorId of connectorIds) {
+                try {
+                    const result =
+                        await updateConnectorHealthIfSocketOwner(
+                            connectorId,
+                            socket.id,
+                            {
+                                connection_status: "DISCONNECTED",
+                                operation_status: "UNKNOWN"
+                            }
+                        );
+
+                    if (!result.updated) {
+                        console.log(
+                            "ℹ️ DISCONNECT HEALTH UPDATE SKIPPED: SOCKET NO LONGER OWNS CONNECTOR",
+                            {
+                                socket_id: socket.id,
+                                connector_id: connectorId
+                            }
+                        );
+                    }
+                } catch (error) {
+                    console.error(
+                        "❌ DISCONNECT HEALTH UPDATE FAILED",
+                        {
+                            socket_id: socket.id,
+                            connector_id: connectorId,
+                            error: error.message
+                        }
+                    );
+                }
+
+                registry.remove(connectorId, socket);
+            }
+
+            console.log("================================");
+        });
+
+
 
     });
 
