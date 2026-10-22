@@ -956,27 +956,15 @@ await retryLatestConnectorLossBatchForCompanies(
 
 });
 
+
 // Connector Register
+/* 221026
 socket.on("register", (data) => {
 
             console.log(
                 "Register Request :",
                 data
             );
-/*
-020926
-            socket.companyCode =
-                data.company_code;
-
-            socket.companyGuid =
-                data.company_guid;
-
-            socket.connectorId =
-                data.connector_id;
-                
-                console.log("REGISTER TRACE:", {
-                
-                */
 
                 socket.companyCode =
                 data.company_code;
@@ -1030,32 +1018,129 @@ publishConnectorHealth(data.connector_id, {
 
 
 });
+*/
 
-/*020926
-            registry.register(
-                data.connector_id,
+        // Connector Register
+        socket.on("register", async (data) => {
+            console.log("Register Request :", data);
+
+            const connectorId =
+                String(data?.connector_id || "").trim();
+
+            if (!connectorId) {
+                console.error(
+                    "❌ CONNECTOR REGISTRATION REJECTED: connector_id missing",
+                    { socket_id: socket.id }
+                );
+                return;
+            }
+
+            const previousConnectorId = socket.connectorId;
+
+            const claimed = await claimConnectorSocketOwnership(
+                connectorId,
+                socket.id
+            ).catch((error) => {
+                console.error(
+                    "❌ CONNECTOR OWNERSHIP CLAIM FAILED",
+                    {
+                        socket_id: socket.id,
+                        connector_id: connectorId,
+                        error: error.message
+                    }
+                );
+                return { claimed: false, health: null };
+            });
+
+            if (!claimed.claimed) {
+                console.error(
+                    "❌ CONNECTOR REGISTRATION REJECTED: ownership unavailable",
+                    {
+                        socket_id: socket.id,
+                        connector_id: connectorId,
+                        current_owner: claimed.health?.socket_id || null
+                    }
+                );
+                return;
+            }
+
+            socket.companyCode = data.company_code;
+            socket.companyGuid = data.company_guid;
+            socket.connectorId = connectorId;
+
+            const registered = registry.register(
+                connectorId,
                 socket
             );
 
+            if (!registered) {
+                await updateConnectorHealthIfSocketOwner(
+                    connectorId,
+                    socket.id,
+                    {
+                        connection_status: "DISCONNECTED",
+                        operation_status: "UNKNOWN"
+                    }
+                ).catch((error) => {
+                    console.error(
+                        "❌ OWNERSHIP ROLLBACK FAILED",
+                        error.message
+                    );
+                });
+
+                console.error(
+                    "❌ CONNECTOR REGISTRATION REJECTED",
+                    {
+                        socket_id: socket.id,
+                        connector_id: connectorId,
+                        company_code: data.company_code
+                    }
+                );
+                return;
+            }
+
+            if (
+                previousConnectorId &&
+                previousConnectorId !== connectorId
+            ) {
+                registry.remove(previousConnectorId, socket);
+            }
+
+            const healthUpdate =
+                await updateConnectorHealthIfSocketOwner(
+                    connectorId,
+                    socket.id,
+                    {
+                        connection_status: "CONNECTED",
+                        operation_status:
+                            socket.tallyRequestActive === true
+                                ? "BUSY"
+                                : "FREE",
+                        last_heartbeat_at:
+                            socket.lastHeartbeat
+                                ? new Date(socket.lastHeartbeat).toISOString()
+                                : null
+                    }
+                );
+
+            if (!healthUpdate.updated) {
+                console.error(
+                    "❌ CONNECTOR HEALTH UPDATE REJECTED",
+                    {
+                        socket_id: socket.id,
+                        connector_id: connectorId
+                    }
+                );
+                return;
+            }
+
+            console.log("✅ CONNECTOR REGISTERED WITH OWNERSHIP", {
+                socket_id: socket.id,
+                connector_id: connectorId,
+                company_code: data.company_code
+            });
         });
 
-socket.on("register", (data) => {
-
-    console.log(
-        "Register Request :",
-        data
-    );
-
-    socket.connectorId =
-        data.connector_id;
-
-    registry.register(
-        data.connector_id,
-        socket
-    );
-
-});
-*/
         socket.on("testExport", () => {
 
             console.log("================================");
