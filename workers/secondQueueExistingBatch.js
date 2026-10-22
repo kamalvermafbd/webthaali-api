@@ -143,25 +143,17 @@ async function dispatchConnectorLossRetry(batch) {
     }
 
    
-const originalError = String(batch.error_message || "");
+    const originalError = String(batch.error_message || "");
 
-const isConnectorLossError =
-    originalError.startsWith("CONNECTOR_LOSS:") ||
-    (
-        batch.current_stage === "WAITING_CONNECTOR" &&
-        originalError.trim().toLowerCase() ===
-            "connector offline / heartbeat timeout"
-    );
-
-if (
-    batch.batch_status !== "FAILED" ||
-    batch.worker_status !== "FAILED" ||
-    !isConnectorLossError
-) {
-
+    if (
+        batch.batch_status !== "FAILED" ||
+        batch.worker_status !== "FAILED"
+    ) {
         console.log(
-            "CONNECTOR RETRY SKIPPED: NOT ELIGIBLE",
-            batch.batch_id
+            "FAILED RETRY SKIPPED: NOT ELIGIBLE",
+            batch.batch_id,
+            batch.batch_status,
+            batch.worker_status
         );
 
         return {
@@ -171,9 +163,7 @@ if (
     }
 
     // Resolve worker using the existing routing configuration.
-    const workerConfig = await resolveWorkerForBatch(batch, {
-    connectorLossRetry: true
-});
+   const workerConfig = await resolveWorkerForBatch(batch);
 
     if (!workerConfig?.worker_name || !workerConfig?.queue_name) {
         throw new Error(

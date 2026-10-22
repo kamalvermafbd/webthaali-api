@@ -469,31 +469,19 @@ async function retryLatestConnectorLossBatchForCompanies(companyGuids) {
                 continue;
             }
 
-                       // Only retry the latest failed connector-loss batch.
-            const retryError = String(
-                latestBatch.error_message || ""
-            ).trim();
-
-            const isConnectorLossError =
-                retryError.startsWith("CONNECTOR_LOSS:") ||
-                (
-                    latestBatch.current_stage === "WAITING_CONNECTOR" &&
-                    retryError.toLowerCase() ===
-                        "connector offline / heartbeat timeout"
-                );
-
+                                   // Only retry the latest FAILED batch.
             if (
                 latestBatch.batch_status !== "FAILED" ||
-                latestBatch.worker_status !== "FAILED" ||
-                !isConnectorLossError
+                latestBatch.worker_status !== "FAILED"
             ) {
                 console.log(
-                    "CONNECTOR RETRY SKIPPED: LATEST BATCH NOT ELIGIBLE",
+                    "FAILED RETRY SKIPPED: LATEST BATCH NOT ELIGIBLE",
                     {
                         company_code: scope.company_code,
                         tally_owner: scope.tally_owner,
                         batch_id: latestBatch.batch_id,
-                        batch_status: latestBatch.batch_status
+                        batch_status: latestBatch.batch_status,
+                        worker_status: latestBatch.worker_status
                     }
                 );
 
