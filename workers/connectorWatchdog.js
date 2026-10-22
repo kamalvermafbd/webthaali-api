@@ -14,9 +14,302 @@ const {
     dispatchBatch
 } = require("./secondQueueExistingBatch");
 
+const connectorRegistry = require("../socketio/connectorRegistry");
+
 let watchdogTimer = null;
 let watchdogRunning = false;
 const waitingConnectorSince = new Map();
+
+// ============================================================
+// CONNECTOR HEALTH REGISTRY — CONNECTOR ID WISE
+// ============================================================
+
+const connectorHealth = new Map();
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 90 * 1000;
+
+// ============================================================
+// CONNECTOR HEALTH RECORD
+// ============================================================
+
+function createConnectorHealthRecord(connectorId) {
+    return {
+        connector_id: String(connectorId),
+
+        connection_status: "UNKNOWN",
+        responsiveness: "UNKNOWN",
+        operation_status: "UNKNOWN",
+        tally_status: "UNKNOWN",
+        heartbeat_status: "UNKNOWN",
+        company_status: "UNKNOWN",
+        health_status: "UNKNOWN",
+
+        active_operation: null,
+
+        last_response_at: null,
+        last_success_at: null,
+        last_error: null,
+
+        reasons: [
+            "Health record created; connector status not verified yet"
+        ],
+
+        updated_at: new Date().toISOString()
+    };
+}
+
+// ============================================================
+// CONNECTOR HEALTH REGISTRY HELPERS
+// ============================================================
+
+function getOrCreateConnectorHealth(connectorId) {
+    const id = String(connectorId || "").trim();
+
+    if (!id) {
+        return null;
+    }
+
+    let health = connectorHealth.get(id);
+
+    if (!health) {
+        health = createConnectorHealthRecord(id);
+        connectorHealth.set(id, health);
+    }
+
+    return health;
+}
+
+
+
+// ============================================================
+// CONNECTOR HEALTH STATUS VALIDATION
+// ============================================================
+
+const CONNECTOR_HEALTH_STATUSES = {
+    connection_status: [
+        "UNKNOWN",
+        "CONNECTED",
+        "DISCONNECTED"
+    ],
+
+    responsiveness: [
+        "UNKNOWN",
+        "RESPONSIVE",
+        "UNRESPONSIVE"
+    ],
+
+    operation_status: [
+        "UNKNOWN",
+        "FREE",
+        "BUSY",
+        "RECOVERING"
+    ],
+
+    tally_status: [
+        "UNKNOWN",
+        "ONLINE",
+        "OFFLINE"
+    ],
+
+    heartbeat_status: [
+        "UNKNOWN",
+        "FRESH",
+        "STALE",
+        "MISSING"
+    ],
+
+    company_status: [
+        "UNKNOWN",
+        "READY",
+        "NOT_FOUND",
+        "NOT_READY"
+    ],
+
+    health_status: [
+        "UNKNOWN",
+        "HEALTHY",
+        "DEGRADED",
+        "UNHEALTHY"
+    ]
+};
+
+// ============================================================
+// UPDATE CONNECTOR HEALTH
+// ============================================================
+
+function updateConnectorHealth(connectorId, updates = {}) {
+    const health = getOrCreateConnectorHealth(connectorId);
+
+    if (!health) {
+        return null;
+    }
+
+    for (const [key, value] of Object.entries(updates)) {
+        if (
+            Object.prototype.hasOwnProperty.call(
+                CONNECTOR_HEALTH_STATUSES,
+                key
+            )
+        ) {
+            if (!CONNECTOR_HEALTH_STATUSES[key].includes(value)) {
+                console.warn(
+                    `[ConnectorWatchdog] Invalid ${key} for connector ${health.connector_id}:`,
+                    value
+                );
+                continue;
+            }
+        }
+
+        health[key] = value;
+    }
+
+    health.updated_at = new Date().toISOString();
+
+    connectorHealth.set(health.connector_id, health);
+
+    return health;
+}
+
+// ============================================================
+// GET CONNECTOR HEALTH REPORT
+// ============================================================
+
+function getConnectorHealthReport(connectorId) {
+    const id = String(connectorId || "").trim();
+
+    if (!id) {
+        return null;
+    }
+
+    const health = connectorHealth.get(id);
+
+    if (!health) {
+        return createConnectorHealthRecord(id);
+    }
+
+    return {
+        ...health,
+        reasons: [...health.reasons]
+    };
+}
+
+// ============================================================
+// GET ALL CONNECTOR HEALTH REPORTS
+// ============================================================
+
+function getAllConnectorHealthReports() {
+    return Array.from(connectorHealth.values()).map((health) => ({
+        ...health,
+        reasons: [...health.reasons]
+    }));
+}
+
+// ============================================================
+// DISCOVER REGISTERED CONNECTORS
+// ============================================================
+
+function discoverRegisteredConnectors() {
+    const connectorIds = connectorRegistry.list();
+
+    for (const connectorId of connectorIds) {
+        getOrCreateConnectorHealth(connectorId);
+    }
+
+    return connectorIds;
+}
+
+
+function refreshRegisteredConnectorHealth(registry = connectorRegistry) {
+    if (
+        !registry ||
+        typeof registry.list !== "function" ||
+        typeof registry.get !== "function"
+    ) {
+        return;
+    }
+
+    const connectorIds = registry.list();
+
+    for (const connectorId of connectorIds) {
+        const socket = registry.get(connectorId);
+
+        if (!socket) {
+            updateConnectorHealth(connectorId, {
+                connection_status: "DISCONNECTED",
+                responsiveness: "UNKNOWN",
+                operation_status: "UNKNOWN",
+                tally_status: "UNKNOWN",
+                heartbeat_status: "MISSING",
+                health_status: "UNHEALTHY",
+                last_error: "Connector socket not found",
+                reasons: ["Connector socket not found in registry"]
+            });
+
+            continue;
+        }
+
+        const lastHeartbeat = Number(socket.lastHeartbeat || 0);
+        const heartbeatAge = lastHeartbeat > 0
+            ? Date.now() - lastHeartbeat
+            : Infinity;
+
+        const heartbeatFresh =
+            socket.connected === true &&
+            heartbeatAge >= 0 &&
+            heartbeatAge < HEARTBEAT_TIMEOUT_MS;
+
+        const reasons = [];
+
+        if (socket.connected !== true) {
+            reasons.push("Connector socket is not connected");
+        }
+
+        if (!lastHeartbeat) {
+            reasons.push("Heartbeat is missing");
+        } else if (!heartbeatFresh) {
+            reasons.push("Heartbeat is stale");
+        }
+
+        if (socket.tallyStatus !== "ONLINE") {
+            reasons.push("Tally is not confirmed online");
+        }
+
+        updateConnectorHealth(connectorId, {
+            connection_status:
+                socket.connected === true ? "CONNECTED" : "DISCONNECTED",
+
+            responsiveness: "UNKNOWN",
+
+            operation_status:
+                socket.tallyRequestActive === true ? "BUSY" : "UNKNOWN",
+
+            tally_status:
+                socket.tallyStatus === "ONLINE"
+                    ? "ONLINE"
+                    : socket.tallyStatus === "OFFLINE"
+                        ? "OFFLINE"
+                        : "UNKNOWN",
+
+            heartbeat_status:
+                !lastHeartbeat
+                    ? "MISSING"
+                    : heartbeatFresh
+                        ? "FRESH"
+                        : "STALE",
+
+            health_status:
+                heartbeatFresh && socket.tallyStatus === "ONLINE"
+                    ? "HEALTHY"
+                    : "DEGRADED",
+
+            last_error: reasons.length
+                ? reasons.join("; ")
+                : null,
+
+            reasons
+        });
+    }
+}
 
 
 /* 211026
@@ -146,7 +439,9 @@ async function checkConnectorWatchdog({
     watchdogRunning = true;
 
     try {
+discoverRegisteredConnectors();
 
+refreshRegisteredConnectorHealth(registry || connectorRegistry);
         // ----------------------------------------------------
         // 1. Get batches that need connector monitoring
         //
@@ -351,6 +646,68 @@ if (
 
                 const socket =
                     registry.get(connectorId);
+
+
+                    // Update global connector health from socket state
+if (!socket) {
+    updateConnectorHealth(connectorId, {
+        connection_status: "DISCONNECTED",
+        responsiveness: "UNKNOWN",
+        operation_status: "UNKNOWN",
+        tally_status: "UNKNOWN",
+        heartbeat_status: "MISSING",
+        health_status: "UNHEALTHY",
+        last_error: "Connector socket not found",
+        reasons: ["Connector socket not found in registry"]
+    });
+} else {
+    const lastHeartbeat = Number(socket.lastHeartbeat || 0);
+    const heartbeatAge = lastHeartbeat > 0
+        ? Date.now() - lastHeartbeat
+        : Infinity;
+
+    const heartbeatFresh =
+        socket.connected === true &&
+        heartbeatAge >= 0 &&
+        heartbeatAge < HEARTBEAT_TIMEOUT_MS;
+
+    updateConnectorHealth(connectorId, {
+        connection_status: socket.connected === true
+            ? "CONNECTED"
+            : "DISCONNECTED",
+        responsiveness: "UNKNOWN",
+        operation_status: socket.tallyRequestActive === true
+            ? "BUSY"
+            : "UNKNOWN",
+        tally_status: socket.tallyStatus === "ONLINE"
+            ? "ONLINE"
+            : socket.tallyStatus === "OFFLINE"
+                ? "OFFLINE"
+                : "UNKNOWN",
+        heartbeat_status: !lastHeartbeat
+            ? "MISSING"
+            : heartbeatFresh
+                ? "FRESH"
+                : "STALE",
+        health_status: heartbeatFresh &&
+            socket.tallyStatus === "ONLINE"
+                ? "HEALTHY"
+                : "DEGRADED",
+        reasons: [
+            !socket.connected
+                ? "Connector socket is not connected"
+                : null,
+            !lastHeartbeat
+                ? "Heartbeat is missing"
+                : !heartbeatFresh
+                    ? "Heartbeat is stale"
+                    : null,
+            socket.tallyStatus !== "ONLINE"
+                ? "Tally is not confirmed online"
+                : null
+        ].filter(Boolean)
+    });
+}
 
                 // =================================================
                 // CASE A
@@ -1405,5 +1762,8 @@ module.exports = {
     stopConnectorWatchdog,
     checkConnectorWatchdog,
     monitorSyncBatchStatus,
-    startSyncBatchStatusMonitor
+    startSyncBatchStatusMonitor,
+
+    getConnectorHealthReport,
+    getAllConnectorHealthReports
 };
