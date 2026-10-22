@@ -222,6 +222,9 @@ async function closeConnectorHealthStore() {
 
     await redis.quit();
 }
+
+
+
 async function claimConnectorSocketOwnership(
     connectorId,
     socketId,
@@ -253,10 +256,12 @@ async function claimConnectorSocketOwnership(
             record = cjson.decode(current)
 
             local currentSocket = record["socket_id"]
+            local currentStatus = record["connection_status"]
 
             if currentSocket
                 and currentSocket ~= ""
-                and currentSocket ~= ARGV[2] then
+                and currentSocket ~= ARGV[2]
+                and currentStatus ~= "DISCONNECTED" then
                 return 0
             end
         end
@@ -288,6 +293,8 @@ async function claimConnectorSocketOwnership(
         health: JSON.parse(result)
     };
 }
+
+
 async function updateConnectorHealthIfSocketOwner(
     connectorId,
     socketId,
