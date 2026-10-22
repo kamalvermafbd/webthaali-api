@@ -469,12 +469,23 @@ async function retryLatestConnectorLossBatchForCompanies(companyGuids) {
                 continue;
             }
 
-            // Closed or any non-connector failure must not retry.
+                       // Only retry the latest failed connector-loss batch.
+            const retryError = String(
+                latestBatch.error_message || ""
+            ).trim();
+
+            const isConnectorLossError =
+                retryError.startsWith("CONNECTOR_LOSS:") ||
+                (
+                    latestBatch.current_stage === "WAITING_CONNECTOR" &&
+                    retryError.toLowerCase() ===
+                        "connector offline / heartbeat timeout"
+                );
+
             if (
                 latestBatch.batch_status !== "FAILED" ||
                 latestBatch.worker_status !== "FAILED" ||
-                !String(latestBatch.error_message || "")
-                    .startsWith("CONNECTOR_LOSS:")
+                !isConnectorLossError
             ) {
                 console.log(
                     "CONNECTOR RETRY SKIPPED: LATEST BATCH NOT ELIGIBLE",
