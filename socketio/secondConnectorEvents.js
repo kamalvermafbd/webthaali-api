@@ -5,6 +5,10 @@ const {
     dispatchConnectorLossRetry
 } = require("../workers/secondQueueExistingBatch");
 
+const {
+    publishConnectorHealth
+} = require("./connectorHealth");
+
 // 060926 start
 const crypto = require("crypto");
 // 060926 end
@@ -867,7 +871,7 @@ const connectorIds = [
             .filter(Boolean)
     )
 ];
-
+/* 221026
 for (const connectorId of connectorIds) {
 
     const registered =
@@ -888,6 +892,39 @@ for (const connectorId of connectorIds) {
 
     }
 }
+    */
+
+
+for (const connectorId of connectorIds) {
+    const registered = registry.register(
+        connectorId,
+        socket
+    );
+
+    if (registered) {
+        publishConnectorHealth(connectorId, {
+            connection_status: "CONNECTED",
+            socket_id: socket.id,
+            operation_status:
+                socket.tallyRequestActive === true
+                    ? "BUSY"
+                    : "FREE",
+            last_heartbeat_at:
+                socket.lastHeartbeat
+                    ? new Date(socket.lastHeartbeat).toISOString()
+                    : null
+        });
+
+        console.log(
+            "✅ EXISTING CONNECTOR AUTO REGISTERED",
+            {
+                socket_id: socket.id,
+                connector_id: connectorId
+            }
+        );
+    }
+}
+
 
 // ==========================================
 // RECOVER WAITING BATCHES
@@ -970,6 +1007,21 @@ if (!registered) {
 
     return;
 }
+
+publishConnectorHealth(data.connector_id, {
+    connection_status: "CONNECTED",
+    socket_id: socket.id,
+    operation_status:
+        socket.tallyRequestActive === true
+            ? "BUSY"
+            : "FREE",
+    last_heartbeat_at:
+        socket.lastHeartbeat
+            ? new Date(socket.lastHeartbeat).toISOString()
+            : null
+});
+
+
 });
 
 /*020926
