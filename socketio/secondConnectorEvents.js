@@ -6,8 +6,15 @@ const {
 } = require("../workers/secondQueueExistingBatch");
 
 const {
-    publishConnectorHealth
+publishConnectorHealth,
+updateConnectorHealth,
+getSharedConnectorHealth
 } = require("./connectorHealth");
+
+const {
+claimConnectorSocketOwnership,
+updateConnectorHealthIfSocketOwner
+} = require("./connectorHealthStore");
 
 // 060926 start
 const crypto = require("crypto");
