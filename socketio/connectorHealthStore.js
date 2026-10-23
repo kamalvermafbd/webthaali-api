@@ -548,6 +548,78 @@ const result = await redis.eval(
 }
 
 
+async function getConnectorOperationStatus(connectorId) {
+
+    const id = normalizeConnectorId(connectorId);
+
+    await ensureConnected();
+
+    const key =
+        `billey:connector:operation-lock:${id}`;
+
+    const result = await redis.multi()
+        .get(key)
+        .pttl(key)
+        .exec();
+
+    if (
+        !result ||
+        result.some(([error]) => error)
+    ) {
+        throw new Error(
+            "Failed to read connector operation status"
+        );
+    }
+
+    const ownerToken = result[0][1];
+    const ttlMs = Number(result[1][1]);
+
+    return {
+        connector_id: id,
+        status: ownerToken !== null ? "BUSY" : "FREE",
+        busy: ownerToken !== null,
+        ttl_ms: ownerToken !== null ? ttlMs : 0
+    };
+
+}
+
+
+async function getConnectorWatchdogStatus(connectorId) {
+
+    const id = normalizeConnectorId(connectorId);
+
+    const [health, operation] = await Promise.all([
+        getConnectorHealth(id),
+        getConnectorOperationStatus(id)
+    ]);
+
+    const connected =
+        health?.connection_status === "CONNECTED";
+
+    return {
+        connector_id: id,
+
+        connection_status: connected
+            ? "CONNECTED"
+            : "DISCONNECTED",
+
+        operation_status: operation.status,
+
+        busy: operation.busy,
+
+        available: connected && !operation.busy,
+
+        lock_ttl_ms: operation.ttl_ms,
+
+        socket_id: health?.socket_id || null,
+
+        last_updated_at:
+            health?.shared_updated_at || null
+    };
+
+}
+
+
 module.exports = {
     setConnectorHealth,
     getConnectorHealth,
@@ -559,7 +631,10 @@ module.exports = {
     updateConnectorHealthIfSocketOwner,
         renewConnectorSocketLease,
     renewConnectorOperationLock,
+ 
     acquireConnectorOperationLock,
-    
-    releaseConnectorOperationLock
+
+    releaseConnectorOperationLock,
+getConnectorOperationStatus,
+getConnectorWatchdogStatus
 };
