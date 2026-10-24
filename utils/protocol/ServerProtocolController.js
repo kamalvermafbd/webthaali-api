@@ -10,7 +10,11 @@ class ServerProtocolController {
 
     }
 
-    async receiveAll() {
+    async receiveAll(requestId) {
+
+    if (!requestId) {
+        throw new Error("Protocol receiveAll requires requestId");
+    }
 
         const result = {};
 
@@ -21,32 +25,39 @@ class ServerProtocolController {
                 `READY -> ${collection.key}`
 
             );
-/*181026
-            this.receiver.sendReady(
 
-                collection.event
-
-            );
-
-         const rows =
-             await this.receiver.waitForCollection();
-*/
 
 
 const rowsPromise =
     this.receiver.waitForCollection();
 
-this.receiver.sendReady(
-    collection.event
-);
+let rows;
 
-const rows = await rowsPromise;
+try {
+
+    this.receiver.sendReady(
+    collection.event,
+    requestId
+);
+    rows = await rowsPromise;
+
+} catch (error) {
+
+    this.receiver.cancelCollection(
+        `Protocol collection failed: ${collection.event}`
+    );
+
+    await rowsPromise.catch(() => {});
+
+    throw error;
+
+}
 
             result[
                 collection.key
             ] = rows;
 
-            const fs = require("fs");
+       
 
             /*
 fs.writeFileSync(

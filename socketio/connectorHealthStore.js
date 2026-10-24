@@ -59,6 +59,89 @@ function getHealthKey(connectorId) {
         normalizeConnectorId(connectorId);
 }
 
+// ==========================================
+// GLOBAL CONNECTOR RECOVERY QUARANTINE
+// ==========================================
+
+const CONNECTOR_QUARANTINE_PREFIX =
+    "billey:connector:quarantine:";
+
+function getConnectorQuarantineKey(connectorId) {
+    return CONNECTOR_QUARANTINE_PREFIX +
+        normalizeConnectorId(connectorId);
+}
+
+function getSocketQuarantineKey(socketId) {
+    const sid = String(socketId || "").trim();
+
+    if (!sid) {
+        throw new Error("socketId is required");
+    }
+
+    return `billey:socket:quarantine:${sid}`;
+}
+
+// ==========================================
+// PERSISTENT ACTIVE OPERATION MARKERS
+// ==========================================
+
+function getConnectorActiveOperationKey(connectorId) {
+    return `billey:connector:operation-active:${normalizeConnectorId(connectorId)}`;
+}
+
+function getSocketActiveOperationKey(socketId) {
+    const sid = String(socketId || "").trim();
+
+    if (!sid) {
+        throw new Error("socketId is required");
+    }
+
+    return `billey:socket:operation-active:${sid}`;
+}
+// ==========================================
+// QUARANTINE CONNECTOR + SOCKET ATOMICALLY
+// ==========================================
+
+async function quarantineConnectorAndSocket(
+    connectorId,
+    socketId,
+    reason
+) {
+    const id = normalizeConnectorId(connectorId);
+    const sid = String(socketId || "").trim();
+
+    if (!sid) {
+        throw new Error("socketId is required");
+    }
+
+    const record = JSON.stringify({
+        connector_id: id,
+        socket_id: sid,
+        reason: String(reason || "OPERATION_STATE_UNKNOWN"),
+        quarantined_at: new Date().toISOString()
+    });
+
+    await ensureConnected();
+
+    await redis.eval(
+        `
+        redis.call("SET", KEYS[1], ARGV[1], "NX")
+        redis.call("SET", KEYS[2], ARGV[1], "NX")
+        return 1
+        `,
+        2,
+        getConnectorQuarantineKey(id),
+        getSocketQuarantineKey(sid),
+        record
+    );
+
+    return {
+        connector_id: id,
+        socket_id: sid,
+        quarantined: true
+    };
+}
+
 async function setConnectorHealth(
     connectorId,
     health,
@@ -246,43 +329,54 @@ async function claimConnectorSocketOwnership(
     }
 
     await ensureConnected();
+const result = await redis.eval(
+    `
+    -- Do not change socket ownership while an operation is active
+    -- or the connector is quarantined.
+    if redis.call("EXISTS", KEYS[2]) == 1
+        or redis.call("EXISTS", KEYS[3]) == 1
+        or redis.call("EXISTS", KEYS[4]) == 1 then
+        return 0
+    end
 
-    const result = await redis.eval(
-        `
-        local current = redis.call("GET", KEYS[1])
-        local record = {}
+    local current = redis.call("GET", KEYS[1])
+    local record = {}
 
-        if current then
-            record = cjson.decode(current)
+    if current then
+        record = cjson.decode(current)
 
-            local currentSocket = record["socket_id"]
-            local currentStatus = record["connection_status"]
+        local currentSocket = record["socket_id"]
+        local currentStatus = record["connection_status"]
 
-            if currentSocket
-                and currentSocket ~= ""
-                and currentSocket ~= ARGV[2]
-                and currentStatus ~= "DISCONNECTED" then
-                return 0
-            end
+        if currentSocket
+            and currentSocket ~= ""
+            and currentSocket ~= ARGV[2]
+            and currentStatus ~= "DISCONNECTED" then
+            return 0
         end
+    end
 
-        record["connector_id"] = ARGV[1]
-        record["socket_id"] = ARGV[2]
-        record["connection_status"] = "CONNECTED"
-        record["shared_updated_at"] = ARGV[3]
+    record["connector_id"] = ARGV[1]
+    record["socket_id"] = ARGV[2]
+    record["connection_status"] = "CONNECTED"
+    record["shared_updated_at"] = ARGV[3]
 
-        local updated = cjson.encode(record)
-        redis.call("SET", KEYS[1], updated, "EX", ARGV[4])
+    local updated = cjson.encode(record)
 
-        return updated
-        `,
-        1,
-        getHealthKey(id),
-        id,
-        sid,
-        new Date().toISOString(),
-        String(ttlSeconds)
-    );
+    redis.call("SET", KEYS[1], updated, "EX", ARGV[4])
+
+    return updated
+    `,
+    4,
+    getHealthKey(id),
+    `billey:connector:operation-lock:${id}`,
+    getConnectorActiveOperationKey(id),
+    getConnectorQuarantineKey(id),
+    id,
+    sid,
+    new Date().toISOString(),
+    String(ttlSeconds)
+);
 
     if (result === 0) {
         return { claimed: false, health: null };
@@ -462,15 +556,33 @@ async function acquireConnectorOperationLock(
 
     await ensureConnected();
 
-    const result = await redis.set(
-        `billey:connector:operation-lock:${id}`,
-        token,
-        "PX",
-        ttlMs,
-        "NX"
-    );
+   const result = await redis.eval(
+    `
+    if redis.call("EXISTS", KEYS[1]) == 1
+        or redis.call("EXISTS", KEYS[2]) == 1
+        or redis.call("EXISTS", KEYS[3]) == 1 then
+        return 0
+    end
 
-    return result === "OK";
+    redis.call(
+        "SET",
+        KEYS[1],
+        ARGV[1],
+        "PX",
+        ARGV[2]
+    )
+
+    return 1
+    `,
+    3,
+    `billey:connector:operation-lock:${id}`,
+    getConnectorQuarantineKey(id),
+    getConnectorActiveOperationKey(id),
+    token,
+    String(ttlMs)
+);
+
+return Number(result) === 1;
 }
 
 async function releaseConnectorOperationLock(
@@ -549,52 +661,136 @@ const result = await redis.eval(
 
 
 async function getConnectorOperationStatus(connectorId) {
+    const watchdog = await getConnectorWatchdogStatus(connectorId);
 
+    return {
+        connector_id: watchdog.connector_id,
+        status: watchdog.operation_status,
+        busy: watchdog.busy,
+        ttl_ms: watchdog.lock_ttl_ms
+    };
+}
+
+async function getConnectorWatchdogStatus(connectorId) {
     const id = normalizeConnectorId(connectorId);
 
     await ensureConnected();
 
-    const key =
+    const health = await getConnectorHealth(id);
+
+    const socketId = String(health?.socket_id || "").trim();
+
+    const connectorLockKey =
         `billey:connector:operation-lock:${id}`;
 
-    const result = await redis.multi()
-        .get(key)
-        .pttl(key)
-        .exec();
+    const keys = [
+        connectorLockKey,
+        getConnectorQuarantineKey(id),
+        getConnectorActiveOperationKey(id)
+    ];
 
-    if (
-        !result ||
-        result.some(([error]) => error)
-    ) {
-        throw new Error(
-            "Failed to read connector operation status"
+    if (socketId) {
+        keys.push(
+            `billey:socket:operation-lock:${socketId}`,
+            getSocketQuarantineKey(socketId),
+            getSocketActiveOperationKey(socketId)
         );
     }
 
-    const ownerToken = result[0][1];
-    const ttlMs = Number(result[1][1]);
+    const values = await redis.mget(...keys);
 
-    return {
-        connector_id: id,
-        status: ownerToken !== null ? "BUSY" : "FREE",
-        busy: ownerToken !== null,
-        ttl_ms: ownerToken !== null ? ttlMs : 0
-    };
+    const connectorLock = values[0];
+    const connectorQuarantine = values[1];
+    const connectorActive = values[2];
 
-}
+    const socketLock = socketId ? values[3] : null;
+    const socketQuarantine = socketId ? values[4] : null;
+    const socketActive = socketId ? values[5] : null;
+
+    const quarantined =
+        connectorQuarantine !== null ||
+        socketQuarantine !== null;
+
+    const activeOperation =
+        connectorActive !== null ||
+        socketActive !== null;
+
+   const connectorLocked = connectorLock !== null;
+const socketLocked = socketLock !== null;
+
+const locked = connectorLocked || socketLocked;
 
 
-async function getConnectorWatchdogStatus(connectorId) {
+const inconsistentGlobalLock =
+    Boolean(socketId) &&
+    (
+        // One global lock exists but the other is missing.
+        (
+            activeOperation &&
+            connectorLocked !== socketLocked
+        ) ||
 
-    const id = normalizeConnectorId(connectorId);
+        // Both locks exist but their owners differ.
+        (
+            connectorLocked &&
+            socketLocked &&
+            connectorLock !== socketLock
+        ) ||
 
-    const [health, operation] = await Promise.all([
-        getConnectorHealth(id),
-        getConnectorOperationStatus(id)
-    ]);
+        // Global locks exist but one or both markers are missing.
+        (
+            connectorLocked &&
+            socketLocked &&
+            (
+                connectorActive === null ||
+                socketActive === null
+            )
+        ) ||
 
-    const connected =
-        health?.connection_status === "CONNECTED";
+        // Connector lock and marker ownership mismatch.
+        (
+            connectorActive !== null &&
+            connectorLocked &&
+            connectorActive !== connectorLock
+        ) ||
+
+        // Socket lock and marker ownership mismatch.
+        (
+            socketActive !== null &&
+            socketLocked &&
+            socketActive !== socketLock
+        ) ||
+
+        // Persistent markers disagree.
+        (
+            connectorActive !== null &&
+            socketActive !== null &&
+            connectorActive !== socketActive
+        )
+    );
+
+const connected =
+    health?.connection_status === "CONNECTED";
+const missingSocketMapping =
+    !socketId &&
+    (
+        connectorLocked ||
+        connectorActive !== null
+    );
+
+const operationStatus =
+    quarantined ||
+    missingSocketMapping ||
+    (activeOperation && !locked) ||
+    inconsistentGlobalLock
+        ? "QUARANTINED"
+        : locked || activeOperation
+            ? "BUSY"
+            : "FREE";
+
+    const ttlMs = connectorLock !== null
+        ? await redis.pttl(connectorLockKey)
+        : 0;
 
     return {
         connector_id: id,
@@ -603,22 +799,417 @@ async function getConnectorWatchdogStatus(connectorId) {
             ? "CONNECTED"
             : "DISCONNECTED",
 
-        operation_status: operation.status,
+        operation_status: operationStatus,
 
-        busy: operation.busy,
+        busy: operationStatus !== "FREE",
 
-        available: connected && !operation.busy,
+        available:
+            connected && operationStatus === "FREE",
 
-        lock_ttl_ms: operation.ttl_ms,
+        quarantined:
+            operationStatus === "QUARANTINED",
 
-        socket_id: health?.socket_id || null,
+        active_operation: activeOperation,
+
+        lock_ttl_ms: ttlMs,
+
+        socket_id: socketId || null,
 
         last_updated_at:
             health?.shared_updated_at || null
     };
-
 }
 
+// ==========================================
+// GLOBAL SOCKET OPERATION LOCK
+// ==========================================
+
+async function acquireSocketOperationLock(
+    socketId,
+    ownerToken,
+    options = {}
+) {
+    const sid = String(socketId || "").trim();
+    const token = String(ownerToken || "").trim();
+
+    if (!sid) {
+        throw new Error("socketId is required");
+    }
+
+    if (!token) {
+        throw new Error("ownerToken is required");
+    }
+
+    const ttlMs = Number(options.ttlMs || 120000);
+
+    if (!Number.isInteger(ttlMs) || ttlMs <= 0) {
+        throw new Error("ttlMs must be a positive integer");
+    }
+
+    await ensureConnected();
+const result = await redis.eval(
+    `
+    if redis.call("EXISTS", KEYS[1]) == 1
+        or redis.call("EXISTS", KEYS[2]) == 1
+        or redis.call("EXISTS", KEYS[3]) == 1 then
+        return 0
+    end
+
+    redis.call(
+        "SET",
+        KEYS[1],
+        ARGV[1],
+        "PX",
+        ARGV[2]
+    )
+
+    return 1
+    `,
+    3,
+    `billey:socket:operation-lock:${sid}`,
+    getSocketQuarantineKey(sid),
+    getSocketActiveOperationKey(sid),
+    token,
+    String(ttlMs)
+);
+
+return Number(result) === 1;
+}
+
+// ==========================================
+// RELEASE GLOBAL SOCKET OPERATION LOCK
+// ==========================================
+
+async function releaseSocketOperationLock(
+    socketId,
+    ownerToken
+) {
+    const sid = String(socketId || "").trim();
+    const token = String(ownerToken || "").trim();
+
+    if (!sid) {
+        throw new Error("socketId is required");
+    }
+
+    if (!token) {
+        throw new Error("ownerToken is required");
+    }
+
+    await ensureConnected();
+
+    const result = await redis.eval(
+        `
+        if redis.call("GET", KEYS[1]) == ARGV[1] then
+            return redis.call("DEL", KEYS[1])
+        end
+
+        return 0
+        `,
+        1,
+        `billey:socket:operation-lock:${sid}`,
+        token
+    );
+
+    return Number(result) === 1;
+}
+
+// ==========================================
+// RENEW GLOBAL SOCKET OPERATION LOCK
+// ==========================================
+
+async function renewSocketOperationLock(
+    socketId,
+    ownerToken,
+    ttlMs = 120000
+) {
+    const sid = String(socketId || "").trim();
+    const token = String(ownerToken || "").trim();
+    const ttl = Number(ttlMs);
+
+    if (!sid) {
+        throw new Error("socketId is required");
+    }
+
+    if (!token) {
+        throw new Error("ownerToken is required");
+    }
+
+    if (!Number.isInteger(ttl) || ttl <= 0) {
+        throw new Error("ttlMs must be a positive integer");
+    }
+
+    await ensureConnected();
+
+    const result = await redis.eval(
+        `
+        if redis.call("GET", KEYS[1]) == ARGV[1] then
+            return redis.call("PEXPIRE", KEYS[1], ARGV[2])
+        end
+
+        return 0
+        `,
+        1,
+        `billey:socket:operation-lock:${sid}`,
+        token,
+        String(ttl)
+    );
+
+    return Number(result) === 1;
+}
+
+// ==========================================
+// GET GLOBAL SOCKET OPERATION STATUS
+// ==========================================
+async function getSocketOperationStatus(socketId) {
+    const sid = String(socketId || "").trim();
+
+    if (!sid) {
+        throw new Error("socketId is required");
+    }
+
+    await ensureConnected();
+
+    const key = `billey:socket:operation-lock:${sid}`;
+
+    const values = await redis.mget(
+        key,
+        getSocketQuarantineKey(sid),
+        getSocketActiveOperationKey(sid)
+    );
+
+    const socketLock = values[0];
+const socketQuarantine = values[1];
+const socketActive = values[2];
+
+const locked = socketLock !== null;
+const quarantined = socketQuarantine !== null;
+const activeOperation = socketActive !== null;
+
+const ownershipMismatch =
+    locked &&
+    activeOperation &&
+    socketLock !== socketActive;
+
+const status =
+    quarantined ||
+    (activeOperation && !locked) ||
+    ownershipMismatch
+        ? "QUARANTINED"
+        : locked || activeOperation
+            ? "BUSY"
+            : "FREE";
+
+    const ttlMs = locked
+        ? await redis.pttl(key)
+        : 0;
+
+    return {
+        socket_id: sid,
+        status,
+        busy: status !== "FREE",
+        ttl_ms: ttlMs
+    };
+}
+
+// ==========================================
+// ATOMIC CONNECTOR + SOCKET LOCK
+// ==========================================
+
+async function acquireConnectorAndSocketLock(
+    connectorId,
+    socketId,
+    ownerToken,
+    options = {}
+) {
+    const id = normalizeConnectorId(connectorId);
+    const sid = String(socketId || "").trim();
+    const token = String(ownerToken || "").trim();
+    const ttlMs = Number(options.ttlMs || 120000);
+
+    if (!sid || !token) {
+        throw new Error("socketId and ownerToken are required");
+    }
+
+    if (!Number.isInteger(ttlMs) || ttlMs <= 0) {
+        throw new Error("ttlMs must be a positive integer");
+    }
+
+    await ensureConnected();
+
+    const connectorKey =
+        `billey:connector:operation-lock:${id}`;
+
+    const socketKey =
+        `billey:socket:operation-lock:${sid}`;
+
+    const result = await redis.eval(
+    `
+    -- Reject existing connector/socket locks.
+    if redis.call("EXISTS", KEYS[1]) == 1
+        or redis.call("EXISTS", KEYS[2]) == 1 then
+        return 0
+    end
+
+    -- Reject quarantined connector/socket.
+    if redis.call("EXISTS", KEYS[3]) == 1
+        or redis.call("EXISTS", KEYS[4]) == 1 then
+        return 0
+    end
+
+    -- Reject unfinished operations, even after lease expiry.
+    if redis.call("EXISTS", KEYS[5]) == 1
+        or redis.call("EXISTS", KEYS[6]) == 1 then
+        return 0
+    end
+
+    -- Expiring leases.
+    redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2])
+    redis.call("SET", KEYS[2], ARGV[1], "PX", ARGV[2])
+
+    -- Persistent operation markers: no TTL.
+    redis.call("SET", KEYS[5], ARGV[1])
+    redis.call("SET", KEYS[6], ARGV[1])
+
+    return 1
+    `,
+    6,
+    connectorKey,
+    socketKey,
+    getConnectorQuarantineKey(id),
+    getSocketQuarantineKey(sid),
+    getConnectorActiveOperationKey(id),
+    getSocketActiveOperationKey(sid),
+    token,
+    String(ttlMs)
+);
+
+    return Number(result) === 1;
+}
+
+// ==========================================
+// ATOMIC CONNECTOR + SOCKET LOCK RELEASE
+// ==========================================
+
+async function releaseConnectorAndSocketLock(
+    connectorId,
+    socketId,
+    ownerToken
+) {
+    const id = normalizeConnectorId(connectorId);
+    const sid = String(socketId || "").trim();
+    const token = String(ownerToken || "").trim();
+
+    if (!sid || !token) {
+        throw new Error("socketId and ownerToken are required");
+    }
+
+    await ensureConnected();
+
+    const connectorKey =
+        `billey:connector:operation-lock:${id}`;
+
+    const socketKey =
+        `billey:socket:operation-lock:${sid}`;
+
+    const result = await redis.eval(
+    `
+    -- Verify ownership of both locks and markers.
+    if redis.call("GET", KEYS[1]) ~= ARGV[1]
+    or redis.call("GET", KEYS[2]) ~= ARGV[1]
+    or redis.call("GET", KEYS[3]) ~= ARGV[1]
+    or redis.call("GET", KEYS[4]) ~= ARGV[1] then
+    return 0
+end
+
+if redis.call("EXISTS", KEYS[5]) == 1
+    or redis.call("EXISTS", KEYS[6]) == 1 then
+    return 0
+end
+
+    -- Atomically release locks and active markers.
+    redis.call("DEL", KEYS[1])
+    redis.call("DEL", KEYS[2])
+    redis.call("DEL", KEYS[3])
+    redis.call("DEL", KEYS[4])
+
+    return 1
+    `,
+ 6,
+connectorKey,
+socketKey,
+getConnectorActiveOperationKey(id),
+getSocketActiveOperationKey(sid),
+getConnectorQuarantineKey(id),
+getSocketQuarantineKey(sid),
+token
+);
+
+    return Number(result) === 1;
+}
+
+// ==========================================
+// ATOMIC CONNECTOR + SOCKET LOCK RENEWAL
+// ==========================================
+
+async function renewConnectorAndSocketLock(
+    connectorId,
+    socketId,
+    ownerToken,
+    ttlMs = 120000
+) {
+    const id = normalizeConnectorId(connectorId);
+    const sid = String(socketId || "").trim();
+    const token = String(ownerToken || "").trim();
+    const ttl = Number(ttlMs);
+
+    if (!sid || !token) {
+        throw new Error("socketId and ownerToken are required");
+    }
+
+    if (!Number.isInteger(ttl) || ttl <= 0) {
+        throw new Error("ttlMs must be a positive integer");
+    }
+
+    await ensureConnected();
+
+    const connectorKey =
+        `billey:connector:operation-lock:${id}`;
+
+    const socketKey =
+        `billey:socket:operation-lock:${sid}`;
+
+    const result = await redis.eval(
+        `
+        if redis.call("GET", KEYS[1]) ~= ARGV[1]
+    or redis.call("GET", KEYS[2]) ~= ARGV[1]
+    or redis.call("GET", KEYS[3]) ~= ARGV[1]
+    or redis.call("GET", KEYS[4]) ~= ARGV[1] then
+    return 0
+end
+
+if redis.call("EXISTS", KEYS[5]) == 1
+    or redis.call("EXISTS", KEYS[6]) == 1 then
+    return 0
+end
+
+        redis.call("PEXPIRE", KEYS[1], ARGV[2])
+        redis.call("PEXPIRE", KEYS[2], ARGV[2])
+
+        return 1
+        `,
+   6,
+connectorKey,
+socketKey,
+getConnectorActiveOperationKey(id),
+getSocketActiveOperationKey(sid),
+getConnectorQuarantineKey(id),
+getSocketQuarantineKey(sid),
+token,
+String(ttl)
+    );
+
+    return Number(result) === 1;
+}
 
 module.exports = {
     setConnectorHealth,
@@ -629,12 +1220,20 @@ module.exports = {
     closeConnectorHealthStore,
     claimConnectorSocketOwnership,
     updateConnectorHealthIfSocketOwner,
-        renewConnectorSocketLease,
+    renewConnectorSocketLease,
     renewConnectorOperationLock,
  
     acquireConnectorOperationLock,
 
     releaseConnectorOperationLock,
-getConnectorOperationStatus,
-getConnectorWatchdogStatus
+    getConnectorOperationStatus,
+   getConnectorWatchdogStatus,
+    acquireSocketOperationLock,
+    releaseSocketOperationLock,
+   renewSocketOperationLock,
+  getSocketOperationStatus,
+acquireConnectorAndSocketLock,
+releaseConnectorAndSocketLock,
+renewConnectorAndSocketLock,
+quarantineConnectorAndSocket
 };

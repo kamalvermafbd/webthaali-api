@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 
 const { buildChunks } = require("./ChunkBuilder");
+const { withGlobalConnectorLock } = require("../socketio/connectorOperationCoordinator");
 
 /*
 const ServerProtocolReceiver =
@@ -11,6 +12,14 @@ const ServerProtocolReceiver =
 
 const ServerProtocolController =
     require("./protocol/ServerProtocolController");
+
+/*241026
+const {
+    acquireConnectorOperationLock,
+    renewConnectorOperationLock,
+    releaseConnectorOperationLock
+} = require("../socketio/connectorHealthStore");
+*/
 
 const {
     saveSyncSnapshotChunk,
@@ -25,7 +34,189 @@ async function sendChunkedToConnector(
     payload
 ) {
 
-    return new Promise((resolve, reject) => {
+        const connectorId = String(
+        socket?.connectorId || ""
+    ).trim();
+
+    if (!connectorId) {
+        throw new Error(
+            "CONNECTOR_ID_MISSING: Cannot start Tally operation"
+        );
+    }
+    return withGlobalConnectorLock(
+    connectorId,
+    async (lockedSocket, signal) => {
+        if (lockedSocket !== socket || signal.aborted) {
+            throw new Error(
+                `CONNECTOR_SOCKET_CHANGED_OR_ABORTED: ${connectorId}`
+            );
+        }
+
+        return executeChunkedTransfer(lockedSocket, event, payload, signal);
+    }
+);
+}
+
+async function executeChunkedTransfer(
+    socket,
+    event,
+    payload,
+    signal
+) {
+    const connectorId = String(
+        socket?.connectorId || ""
+    ).trim();
+
+    /* 241026
+   const ownerToken = crypto.randomUUID();
+const activeChunkTasks = new Set();
+let activeCompletionTask = null;
+let lockAcquired = false;
+
+while (!lockAcquired) {
+
+    if (!socket.connected) {
+        throw new Error(
+            `CONNECTOR_DISCONNECTED_WHILE_WAITING: ${connectorId}`
+        );
+    }
+
+    lockAcquired = await acquireConnectorOperationLock(
+        connectorId,
+        ownerToken,
+        { ttlMs: 120000 }
+    );
+
+    if (lockAcquired) {
+        console.log(
+            "🔓 CONNECTOR LOCK ACQUIRED:",
+            connectorId,
+            event
+        );
+        break;
+    }
+
+    console.log(
+        "⏳ CONNECTOR BUSY — WAITING:",
+        connectorId,
+        event
+    );
+
+    await new Promise(resolve =>
+        setTimeout(resolve, 2000)
+    );
+}
+    */
+const activeChunkTasks = new Set();
+let activeCompletionTask = null;
+let activeProtocolTask = null;
+let activeRequestTransferTask = null;
+/* 241026
+let lockLost = false;
+let renewing = false;
+let rejectActiveOperation = null;
+
+const renewalTimer = setInterval(async () => {
+    if (renewing || lockLost) return;
+
+    renewing = true;
+
+    try {
+        const renewed = await renewConnectorOperationLock(
+            connectorId,
+            ownerToken,
+            120000
+        );
+
+        if (!renewed) {
+    lockLost = true;
+
+    console.error(
+        "CONNECTOR LOCK LOST:",
+        connectorId
+    );
+
+    rejectActiveOperation?.();
+}
+   } catch (error) {
+    lockLost = true;
+
+    console.error(
+        "CONNECTOR LOCK RENEW FAILED:",
+        connectorId,
+        error
+    );
+
+    rejectActiveOperation?.();
+
+} finally {
+    renewing = false;
+}
+}, 30000);
+
+renewalTimer.unref?.();
+*/
+
+let lockLost = signal.aborted;
+let rejectActiveOperation = null;
+
+function onGlobalLockAbort() {
+    lockLost = true;
+
+    console.error(
+        "GLOBAL CONNECTOR LOCK ABORTED:",
+        connectorId,
+        event
+    );
+
+    if (event === "getMasters") {
+        socket.protocolReceiver?.cancelCollection(
+            `Global connector lock aborted: ${connectorId}`
+        );
+    }
+
+    rejectActiveOperation?.();
+}
+signal.addEventListener(
+    "abort",
+    onGlobalLockAbort,
+    { once: true }
+);
+
+try {
+    return await new Promise((resolve, reject) => {
+
+        let operationSettled = false;
+const pendingAckCleanups = new Set();
+
+        function rejectOnLockLost() {
+    if (operationSettled) return;
+
+    operationSettled = true;
+
+    // cleanup() cancels all pending ACK waits
+cleanup();
+
+    reject(
+        new Error(
+            `CONNECTOR_LOCK_LOST: ${connectorId}`
+        )
+    );
+}
+
+        
+
+if (lockLost || signal.aborted) {
+    operationSettled = true;
+
+    reject(
+        new Error(
+            `CONNECTOR_LOCK_LOST: ${connectorId}`
+        )
+    );
+
+    return;
+}
 
         const requestId = crypto.randomUUID();
 
@@ -37,34 +228,19 @@ async function sendChunkedToConnector(
         let receivedItems = 0;
 
         let completed = false;
+let completionStarted = false;
 
+let responseBatchId = null;
+const receivedChunkIndexes = new Set();
+const processingChunkIndexes = new Set();
 
-        let responseBatchId = null;
-        const receivedChunkIndexes = new Set();
+let chunkProcessingError = null;
 
-        const resultEvent = `${event}Result`;
+const resultEvent = `${event}Result`;
         const chunkEvent = `${event}Chunk`;
         const ackEvent = `${event}ChunkAck`;
         const completeEvent = `${event}Complete`;
-    /*
-        let timer;
-
-    function resetTimeout() {
-        }
-    */
-/*
-        const timer = setTimeout(() => {
-
-            cleanup();
-
-            reject(
-                new Error(
-                    `${event} timeout`
-                )
-            );
-
-        }, timeout);
-*/
+    
         function cleanup() {
 
             //clearTimeout(timer);
@@ -72,12 +248,16 @@ async function sendChunkedToConnector(
             socket.off(resultEvent, onResult);
             socket.off(chunkEvent, onChunk);
             socket.off(completeEvent, onComplete);
-            socket.off(
-                    "disconnect",
-                    onDisconnect
-            );
+          socket.off(
+    "disconnect",
+    onDisconnect
+);
 
-        }
+for (const cancelAck of [...pendingAckCleanups]) {
+    cancelAck();
+}
+
+}
 
         function waitForAck(
         batchId,
@@ -129,10 +309,12 @@ function resetAckTimeout() {
                 socket.tallyRequestActive
         });
 
-        socket.off(ackEvent, onAck);
-        socket.off("disconnect", onDisconnect);
+      socket.off(ackEvent, onAck);
+socket.off("disconnect", onDisconnect);
 
-        reject(
+pendingAckCleanups.delete(cancelPendingAck);
+
+reject(
             new Error(
                 `ACK timeout for chunk ${chunkIndex}`
             )
@@ -143,13 +325,31 @@ function resetAckTimeout() {
 
 resetAckTimeout();
 
-        function onAck(data) {
+function cancelPendingAck() {
+    clearTimeout(ackTimeout);
 
-    if (
-        !data ||
-        data.batchId !== batchId ||
-        data.chunkIndex !== chunkIndex
-    ) {
+    socket.off(ackEvent, onAck);
+    socket.off("disconnect", onDisconnect);
+
+    pendingAckCleanups.delete(cancelPendingAck);
+
+    reject(
+        new Error(
+            `CONNECTOR_LOCK_LOST: ${connectorId}`
+        )
+    );
+}
+
+pendingAckCleanups.add(cancelPendingAck);
+
+function onAck(data) {
+
+   if (
+    !data ||
+    data.batchId !== batchId ||
+    data.requestId !== requestId ||
+    data.chunkIndex !== chunkIndex
+) {
         console.error("CHUNK ACK MISMATCH:", {
             event: ackEvent,
             expectedBatchId: batchId,
@@ -172,13 +372,14 @@ resetAckTimeout();
             );
 
              
-            socket.off(
-                "disconnect",
-                onDisconnect
-            );
+        socket.off(
+    "disconnect",
+    onDisconnect
+);
 
+pendingAckCleanups.delete(cancelPendingAck);
 
-            if (data.success === false) {
+if (data.success === false) {
                 return reject(
                     new Error(data.error || "Chunk rejected")
                 );
@@ -197,17 +398,18 @@ resetAckTimeout();
             onAck
         );
 
-        socket.off(
-            "disconnect",
-            onDisconnect
-        );
+      socket.off(
+    "disconnect",
+    onDisconnect
+);
 
-        reject(
-            new Error(
-                `Connector disconnected: ${reason}`
-            )
-        );
+pendingAckCleanups.delete(cancelPendingAck);
 
+reject(
+    new Error(
+        `Connector disconnected: ${reason}`
+    )
+);
     }
 
     socket.on(
@@ -288,44 +490,60 @@ function waitForCompleteAck(batchId) {
                     return;
                 }
 
-                socket.off(
-                    completeAckEvent,
-                    onCompleteAck
-                );
+              socket.off(
+                            completeAckEvent,
+                            onCompleteAck
+                        );
 
-                socket.off(
-                    "disconnect",
-                    onDisconnect
-                );
+                        socket.off(
+                            "disconnect",
+                            onDisconnect
+                        );
 
-                reject(
-                    new Error("Complete ACK timeout")
-                );
+                        pendingAckCleanups.delete(cancelPendingCompleteAck);
+
+                        reject(
+                            new Error("Complete ACK timeout")
+                        );
 
             }, ACK_TIMEOUT);
         }
 
-        resetCompleteAckTimeout();
+       resetCompleteAckTimeout();
 
-        function onCompleteAck(data) {
-/* 191026
-            if (
-                !data ||
-                data.batchId !== batchId
-            ) {
-                return;
-            }
-*/
+function cancelPendingCompleteAck() {
+    clearTimeout(timeout);
+
+    socket.off(completeAckEvent, onCompleteAck);
+    socket.off("disconnect", onDisconnect);
+
+    pendingAckCleanups.delete(cancelPendingCompleteAck);
+
+    reject(
+        new Error(
+            `CONNECTOR_LOCK_LOST: ${connectorId}`
+        )
+    );
+}
+
+pendingAckCleanups.add(cancelPendingCompleteAck);
+
+function onCompleteAck(data) {
 
 
 if (
     !data ||
     data.batchId !== batchId ||
-    (
-        event === "voucherByGuid" &&
-        data.requestId !== requestId
-    )
+    data.requestId !== requestId
 ) {
+    console.warn("Ignoring mismatched Complete ACK:", {
+        event,
+        expectedBatchId: batchId,
+        receivedBatchId: data?.batchId,
+        expectedRequestId: requestId,
+        receivedRequestId: data?.requestId
+    });
+
     return;
 }
 
@@ -337,11 +555,13 @@ if (
             );
 
             socket.off(
-                "disconnect",
-                onDisconnect
-            );
+    "disconnect",
+    onDisconnect
+);
 
-            if (data.success === false) {
+pendingAckCleanups.delete(cancelPendingCompleteAck);
+
+if (data.success === false) {
 
                 return reject(
                     new Error(
@@ -365,17 +585,18 @@ if (
                 onCompleteAck
             );
 
-            socket.off(
-                "disconnect",
-                onDisconnect
-            );
+       socket.off(
+    "disconnect",
+    onDisconnect
+);
 
-            reject(
-                new Error(
-                    `Connector disconnected: ${reason}`
-                )
-            );
+pendingAckCleanups.delete(cancelPendingCompleteAck);
 
+reject(
+    new Error(
+        `Connector disconnected: ${reason}`
+    )
+);
         }
 
         socket.on(
@@ -402,50 +623,18 @@ if (
         `Sending ${chunks.length} request chunks`
     );
 
-    for (const chunk of chunks) {
+for (const chunk of chunks) {
 
-        console.log(
-            `Sending chunk ${chunk.chunkIndex}/${chunk.totalChunks}`
+    if (lockLost || signal.aborted) {
+        throw new Error(
+            `CONNECTOR_LOCK_LOST: ${connectorId}`
         );
-/* 181026
-       socket.emit(
-    `${event}Chunk`,
-            {
+    }
 
-                batchId,
+    console.log(
+        `Sending chunk ${chunk.chunkIndex}/${chunk.totalChunks}`
+    );
 
-                company: payload.company,
-
-                sync_batch_id: payload.sync_batch_id,
-
-                tally_owner: payload.tally_owner,
-
-                module: payload.module,
-
-                entity_type: payload.entity_type,
-
-                fromDate: payload.fromDate,
-                toDate: payload.toDate,
-
-                booksBeginningFrom:
-                payload.booksBeginningFrom,
-
-                chunkIndex: chunk.chunkIndex,
-
-                totalChunks: chunk.totalChunks,
-
-                payloadSize: chunk.payloadSize,
-
-                data: chunk.data
-
-            }
-        );
-
-        await waitForAck(
-            batchId,
-            chunk.chunkIndex
-        );
-*/
 const ackPromise = waitForAck(batchId, chunk.chunkIndex);
 
 socket.emit(
@@ -469,17 +658,29 @@ socket.emit(
 );
 
 await ackPromise;
+
+if (lockLost || signal.aborted) {
+    throw new Error(
+        `CONNECTOR_LOCK_LOST: ${connectorId}`
+    );
+}
         console.log(
             `ACK received for chunk ${chunk.chunkIndex}/${chunk.totalChunks}`
         );
 
     }
 
-    const completeAckPromise =
-        waitForCompleteAck(batchId);
+    if (lockLost || signal.aborted) {
+    throw new Error(
+        `CONNECTOR_LOCK_LOST: ${connectorId}`
+    );
+}
 
-    socket.emit(
-        `${event}Complete`,
+const completeAckPromise =
+    waitForCompleteAck(batchId);
+
+socket.emit(
+    `${event}Complete`,
             {
 
             batchId,
@@ -526,8 +727,12 @@ const protocolController =
 
 async function onResult(data) {
 
+    if (lockLost || operationSettled) {
+        return;
+    }
+
     try {
-console.log("CHUNK RESULT DEBUG:", {
+        console.log("CHUNK RESULT DEBUG:", {
     event,
     requestId,
     receivedRequestId: data?.requestId,
@@ -535,16 +740,16 @@ console.log("CHUNK RESULT DEBUG:", {
     collectionName: data?.collectionName
 });
 
-        if (
-            event === "voucherByGuid" &&
-            data?.requestId !== requestId
-        ) {
-            console.warn("Ignoring mismatched voucherByGuid result:", {
-                expectedRequestId: requestId,
-                receivedRequestId: data?.requestId
-            });
-            return;
-        }
+     if (data?.requestId !== requestId) {
+
+    console.warn("Ignoring mismatched connector result:", {
+        event,
+        expectedRequestId: requestId,
+        receivedRequestId: data?.requestId
+    });
+
+    return;
+}
         if (!data) {
             return;
         }
@@ -558,9 +763,11 @@ console.log("CHUNK RESULT DEBUG:", {
 
         if (data.success === false) {
 
-            cleanup();
+    operationSettled = true;
 
-            return reject(
+    cleanup();
+
+    return reject(
                 new Error(
                     data.error || "Unknown error"
                 )
@@ -583,8 +790,12 @@ console.log("CHUNK RESULT DEBUG:", {
             "Receiving master collections..."
         );
 
-        const collections =
-         await protocolController.receiveAll();
+activeProtocolTask = protocolController.receiveAll(requestId);
+
+const collections = await activeProtocolTask;
+        if (lockLost || operationSettled) {
+            return;
+        }
 
         Object.assign(
             masterResult,
@@ -595,45 +806,65 @@ console.log("CHUNK RESULT DEBUG:", {
             "All master collections received"
         );
 
-        cleanup();
+      operationSettled = true;
 
-        resolve(masterResult);
+cleanup();
 
-        return;
+resolve(masterResult);
+
+return;
 
     }
     catch (error) {
 
-        cleanup();
+    operationSettled = true;
 
-        reject(error);
+    cleanup();
 
-    }
+    reject(error);
+
+}
 
 }
 
 async function onChunk(data) {
 
-    console.log("SNAPSHOT FLAG:", payload.snapshot);
-console.log("MODULE:", payload.module);
-console.log("ENTITY:", payload.entity_type);
-
-    if (!data) {
-     return;
-    }
-
-        if (
-        event === "voucherByGuid" &&
-        data.requestId !== requestId
-    ) {
-        console.warn("Ignoring mismatched voucherByGuid chunk:", {
-            expectedRequestId: requestId,
-            receivedRequestId: data.requestId,
-            batchId: data.batchId,
-            chunkIndex: data.chunkIndex
-        });
+    if (lockLost || operationSettled || completionStarted) {
         return;
     }
+
+    let finishChunkTask;
+
+const chunkTask = {
+    promise: new Promise(resolve => {
+        finishChunkTask = resolve;
+    })
+};
+
+activeChunkTasks.add(chunkTask);
+
+    try {
+
+    console.log("SNAPSHOT FLAG:", payload.snapshot);
+    console.log("MODULE:", payload.module);
+    console.log("ENTITY:", payload.entity_type);
+
+    if (!data) {
+        return;
+    }
+
+       if (data.requestId !== requestId) {
+
+    console.warn("Ignoring mismatched connector chunk:", {
+        event,
+        expectedRequestId: requestId,
+        receivedRequestId: data.requestId,
+        batchId: data.batchId,
+        chunkIndex: data.chunkIndex
+    });
+
+    return;
+}
 
             if (
             event === "getMasters"
@@ -658,6 +889,7 @@ console.log("ENTITY:", payload.entity_type);
                     ackEvent,
                     {
                         batchId: data.batchId,
+                        requestId,
                         chunkIndex: data.chunkIndex,
                         success: false,
                         error: "Invalid chunk"
@@ -678,20 +910,26 @@ if (data.batchId !== responseBatchId) {
     return;
 }
 
+if (processingChunkIndexes.has(data.chunkIndex)) {
+    console.log(
+        `Chunk already processing: ${data.chunkIndex}`
+    );
+    return;
+}
 if (receivedChunkIndexes.has(data.chunkIndex)) {
     console.log(
         `Duplicate chunk ignored: ${data.chunkIndex}`
     );
 
-    socket.emit(
-        ackEvent,
-        {
-            batchId: data.batchId,
-            chunkIndex: data.chunkIndex,
-            success: true
-        }
-    );
-
+   socket.emit(
+    ackEvent,
+    {
+        batchId: data.batchId,
+        requestId,
+        chunkIndex: data.chunkIndex,
+        success: true
+    }
+);
     return;
 }
 
@@ -702,15 +940,16 @@ if (
     data.chunkIndex < 1 ||
     data.chunkIndex > data.totalChunks
 ) {
-    socket.emit(
-        ackEvent,
-        {
-            batchId: data.batchId,
-            chunkIndex: data.chunkIndex,
-            success: false,
-            error: "Invalid chunk metadata"
-        }
-    );
+   socket.emit(
+    ackEvent,
+    {
+        batchId: data.batchId,
+        requestId,
+        chunkIndex: data.chunkIndex,
+        success: false,
+        error: "Invalid chunk metadata"
+    }
+);
 
     return;
 }
@@ -722,82 +961,61 @@ if (expectedChunks === null) {
 }
 
 if (data.totalChunks !== expectedChunks) {
-    socket.emit(
-        ackEvent,
-        {
-            batchId: data.batchId,
-            chunkIndex: data.chunkIndex,
-            success: false,
-            error: "Inconsistent totalChunks"
-        }
-    );
+   socket.emit(
+    ackEvent,
+    {
+        batchId: data.batchId,
+        requestId,
+        chunkIndex: data.chunkIndex,
+        success: false,
+        error: "Inconsistent totalChunks"
+    }
+);
 
-    return;
-}    
+      return;
+}
 
-
+processingChunkIndexes.add(data.chunkIndex);
+chunkTask.reservedIndex = data.chunkIndex;
 
 if (payload.snapshot === true) {
-
    
 console.log("EVENT :", event);
 console.log("SNAPSHOT :", payload.snapshot);
 console.log("ENTITY :", payload.entity_type);
 console.log("ROWS :", data.data.length);
 console.log("========================");
-/* 181026 comment
-collectionList.push(
-    ...data.data
-);
 
-    await saveSyncSnapshotChunk({
-
-
-        sync_batch_id:
-            payload.sync_batch_id,
-
-        company_code:
-            payload.company_code,
-
-        tally_owner:
-            payload.tally_owner,
-
-        module:
-            payload.module,
-
-        entity_type:
-            payload.entity_type,
-
-        rows:
-            data.data
-
-    });
-
-
-    receivedItems += data.data.length;
-*/
     try {
-    await saveSyncSnapshotChunk({
-        sync_batch_id: payload.sync_batch_id,
-        company_code: payload.company_code,
-        tally_owner: payload.tally_owner,
-        module: payload.module,
-        entity_type: payload.entity_type,
-        rows: data.data
-    });
+await saveSyncSnapshotChunk({
+    sync_batch_id: payload.sync_batch_id,
+    company_code: payload.company_code,
+    tally_owner: payload.tally_owner,
+    module: payload.module,
+    entity_type: payload.entity_type,
+    rows: data.data
+});
+
+if (lockLost || operationSettled) {
+    return;
+}
+
 } catch (error) {
+
+    chunkProcessingError = error;
+
     console.error("SNAPSHOT CHUNK SAVE FAILED:", {
         batchId: data.batchId,
         chunkIndex: data.chunkIndex,
         error: error.message
     });
-
-    socket.emit(ackEvent, {
-        batchId: data.batchId,
-        chunkIndex: data.chunkIndex,
-        success: false,
-        error: error.message || "Snapshot chunk save failed"
-    });
+   socket.emit(ackEvent, {
+    batchId: data.batchId,
+    requestId,
+    chunkIndex: data.chunkIndex,
+    success: false,
+    error: error.message || "Snapshot chunk save failed"
+});
 
     return;
 }
@@ -827,21 +1045,63 @@ receivedItems += data.data.length;
 
         receivedChunkIndexes.add(data.chunkIndex);
         
-        socket.emit(
-            ackEvent,
-            {
-                batchId: data.batchId,
-                chunkIndex: data.chunkIndex,
-                success: true
-            }
-        );
+      socket.emit(
+    ackEvent,
+    {
+        batchId: data.batchId,
+        requestId,
+        chunkIndex: data.chunkIndex,
+        success: true
+    }
+);
 
-        console.log(
-            `ACK sent for chunk ${data.chunkIndex}/${data.totalChunks}`
-        );
+         console.log(
+        `ACK sent for chunk ${data.chunkIndex}/${data.totalChunks}`
+    );
+
+   } catch (error) {
+
+    chunkProcessingError = error;
+
+    if (operationSettled) {
+        return;
     }
 
+    operationSettled = true;
+        console.error(
+            "CONNECTOR CHUNK HANDLER FAILED:",
+            connectorId,
+            event,
+            error
+        );
+
+               cleanup();
+
+        reject(error);
+} finally {
+
+    if (
+    data &&
+    Number.isInteger(data.chunkIndex) &&
+    chunkTask.reservedIndex === data.chunkIndex
+) {
+    processingChunkIndexes.delete(data.chunkIndex);
+}
+
+    activeChunkTasks.delete(chunkTask);
+
+    finishChunkTask();
+
+    }
+}
+
 async function onComplete(data) {
+
+    if (lockLost || operationSettled) {
+        return;
+    }
+
+    try {
 
     console.log("CHUNK COMPLETE DEBUG:", {
     event,
@@ -853,18 +1113,17 @@ async function onComplete(data) {
 
     //resetTimeout();
 
-        if (
-        event === "voucherByGuid" &&
-        data?.requestId !== requestId
-    ) {
-        console.warn("Ignoring mismatched voucherByGuid Complete:", {
-            expectedRequestId: requestId,
-            receivedRequestId: data?.requestId,
-            batchId: data?.batchId
-        });
-        return;
-    }
+        if (data?.requestId !== requestId) {
 
+    console.warn("Ignoring mismatched connector Complete:", {
+        event,
+        expectedRequestId: requestId,
+        receivedRequestId: data?.requestId,
+        batchId: data?.batchId
+    });
+
+    return;
+}
     if (
             event === "getMasters"
         ) {
@@ -872,6 +1131,8 @@ async function onComplete(data) {
         }
 
         if (!data?.batchId) {
+    operationSettled = true;
+
     cleanup();
 
     return reject(
@@ -885,7 +1146,10 @@ if (
     responseBatchId &&
     data.batchId !== responseBatchId
 ) {
+    operationSettled = true;
+
     cleanup();
+
     return reject(
         new Error(
             `Complete batch mismatch. Expected ${responseBatchId}, Received ${data.batchId}`
@@ -894,16 +1158,60 @@ if (
 }
 
             if (completed) {
-                return;
-            }
+                    return;
+                }
 
-            completed = true;
+completed = true;
+completionStarted = true;
 
-            if (!masterResult) {
+// Wait for all in-flight chunk processing
+while (activeChunkTasks.size > 0) {
 
-                cleanup();
+    await Promise.all(
+        [...activeChunkTasks].map(task => task.promise)
+    );
 
-                return reject(
+}
+
+// Lock/disconnect may have settled the operation while waiting
+if (lockLost || operationSettled) {
+    return;
+}
+if (chunkProcessingError) {
+    operationSettled = true;
+    cleanup();
+    return reject(chunkProcessingError);
+}
+
+// Verify all expected chunks were received
+if (
+    !Number.isInteger(data.totalChunks) ||
+    data.totalChunks < 0 ||
+    receivedChunkIndexes.size !== data.totalChunks ||
+    (
+        expectedChunks !== null &&
+        expectedChunks !== data.totalChunks
+    )
+) {
+    operationSettled = true;
+
+    cleanup();
+
+    return reject(
+        new Error(
+            `INCOMPLETE_CHUNK_TRANSFER: Expected ${data.totalChunks}, Received ${receivedChunkIndexes.size}`
+        )
+    );
+}
+
+
+
+if (!masterResult) {
+    operationSettled = true;
+
+    cleanup();
+
+    return reject(
                     new Error(
     `${event}: Master payload not received; ` +
     `requestId=${requestId}, ` +
@@ -913,10 +1221,12 @@ if (
 
             }
 
-            if (
+           if (
     !Number.isInteger(data.totalItems) ||
     data.totalItems < 0
 ) {
+    operationSettled = true;
+
     cleanup();
 
     return reject(
@@ -929,14 +1239,16 @@ if (
             expectedItems =
                 data.totalItems;
 
-            if (
-                expectedChunks !== null &&
-                data.totalChunks !== expectedChunks
-            ) {
+           if (
+    expectedChunks !== null &&
+    data.totalChunks !== expectedChunks
+) {
 
-                cleanup();
+    operationSettled = true;
 
-                return reject(
+    cleanup();
+
+    return reject(
                     new Error(
                         "Chunk count mismatch"
                     )
@@ -950,14 +1262,16 @@ if (
                 : collectionList.length;
            
 
-        if (
-            expectedItems !== null &&
-            actualReceived !== expectedItems
-        ) {
+       if (
+    expectedItems !== null &&
+    actualReceived !== expectedItems
+) {
 
-            cleanup();
+    operationSettled = true;
 
-            return reject(
+    cleanup();
+
+    return reject(
                 new Error(
                     `Record count mismatch. Expected ${expectedItems}, Received ${actualReceived}`
                 )
@@ -987,33 +1301,30 @@ if (
 
     try {
 
-        await removeMissingSnapshotGuids({
+        activeCompletionTask = removeMissingSnapshotGuids({
+    sync_batch_id: payload.sync_batch_id,
+    company_code: payload.company_code,
+    tally_owner: payload.tally_owner,
+    module: payload.module,
+    entity_type: payload.entity_type
+});
 
-            sync_batch_id:
-                payload.sync_batch_id,
+await activeCompletionTask;
 
-            company_code:
-                payload.company_code,
-
-            tally_owner:
-                payload.tally_owner,
-
-            module:
-                payload.module,
-
-            entity_type:
-                payload.entity_type
-
-        });
-
+        if (lockLost || operationSettled) {
+    return;
+}
     }
+    
     catch(error) {
 
-        cleanup();
+    operationSettled = true;
 
-        return reject(error);
+    cleanup();
 
-    }
+    return reject(error);
+
+}
 
 }
 
@@ -1023,17 +1334,20 @@ if (
         `${event}CompleteAck`,
         {
             batchId: data.batchId,
+            requestId,
             success: true
         }
     );
 
-    cleanup();
+   operationSettled = true;
 
-    resolve({
+cleanup();
 
-        ...masterResult,
+resolve({
 
-        snapshotSaved: true,
+    ...masterResult,
+
+    snapshotSaved: true,
 
         totalItems: receivedItems,
 
@@ -1048,13 +1362,16 @@ if (
             `${event}CompleteAck`,
             {
                 batchId: data.batchId,
+                requestId,
                 success: true
             }
         );
 
-        cleanup();
+        operationSettled = true;
 
-        resolve({
+cleanup();
+
+resolve({
 
             ...masterResult,
 
@@ -1062,20 +1379,47 @@ if (
 
         });
 
+       }
+
+    } catch (error) {
+
+    if (operationSettled) {
+        return;
     }
-        }
 
-        function onDisconnect(reason) {
+    operationSettled = true;
 
-            cleanup();
+        console.error(
+            "CONNECTOR COMPLETE HANDLER FAILED:",
+            connectorId,
+            event,
+            error
+        );
 
-            reject(
-                new Error(
-                    `Connector disconnected: ${reason}`
-                )
-            );
+        cleanup();
 
-        }
+        reject(error);
+
+    }
+
+}
+
+function onDisconnect(reason) {
+    if (operationSettled) {
+        return;
+    }
+
+    operationSettled = true;
+
+    cleanup();
+
+    reject(
+        new Error(
+            `Connector disconnected: ${reason}`
+        )
+    );
+
+}
 
         socket.on(
             resultEvent,
@@ -1101,15 +1445,32 @@ if (
 
 }
         socket.once(
-            "disconnect",
-            onDisconnect
-        );
+    "disconnect",
+    onDisconnect
+);
+
+// All event names and handlers are initialized.
+// Abort can now safely trigger cleanup().
+rejectActiveOperation = rejectOnLockLost;
+
+if (lockLost || signal.aborted) {
+    rejectOnLockLost();
+    return;
+}
 
     if (Array.isArray(payload.requestItems)) {
 
-    return sendRequestChunks(
+    activeRequestTransferTask = sendRequestChunks(
         payload.requestItems
-    ).catch(error => {
+    );
+
+    activeRequestTransferTask.catch(error => {
+
+        if (operationSettled) {
+            return;
+        }
+
+        operationSettled = true;
 
         cleanup();
 
@@ -1117,6 +1478,11 @@ if (
 
     });
 
+    return;
+}
+if (lockLost || signal.aborted) {
+    rejectOnLockLost();
+    return;
 }
 
 socket.emit(
@@ -1124,11 +1490,90 @@ socket.emit(
     {
         ...payload,
         requestId
-        
     }
 );
 
     });
+} finally {
+
+    // Wait for outgoing request transfer before releasing global lock
+    if (activeRequestTransferTask) {
+        try {
+            await activeRequestTransferTask;
+        } catch (error) {
+            console.error(
+                "REQUEST TRANSFER TASK FAILED:",
+                connectorId,
+                error.message
+            );
+        }
+    }
+
+    // Wait for all in-flight chunk handlers
+    while (activeChunkTasks.size > 0) {
+        await Promise.all(
+            [...activeChunkTasks].map(task => task.promise)
+        );
+    }
+// Wait for FULL snapshot cleanup before releasing connector lock
+if (activeCompletionTask) {
+    try {
+        await activeCompletionTask;
+    } catch (error) {
+        console.error(
+            "SNAPSHOT COMPLETION TASK FAILED:",
+            connectorId,
+            error.message
+        );
+    }
+}
+
+// Wait for getMasters protocol receiving to finish
+// before the global coordinator releases the lock.
+if (activeProtocolTask) {
+    try {
+        await activeProtocolTask;
+    } catch (error) {
+        console.error(
+            "PROTOCOL RECEIVE TASK FAILED:",
+            connectorId,
+            error.message
+        );
+    }
+}
+
+    // Stop renewal only after chunk processing finishes
+    /* 241026
+    clearInterval(renewalTimer);
+
+    // Wait for any already-running Redis lock renewal
+    while (renewing) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    try {
+        await releaseConnectorOperationLock(
+            connectorId,
+            ownerToken
+        );
+    } catch (error) {
+        console.error(
+            "CONNECTOR LOCK RELEASE FAILED:",
+            connectorId,
+            error.message
+        );
+    }
+*/
+    // Global coordinator owns lock renewal and release.
+    // Remove this operation's abort listener after tasks finish.
+    signal.removeEventListener(
+        "abort",
+        onGlobalLockAbort
+    );
+
+    rejectActiveOperation = null;
+
+}
 
 }
 

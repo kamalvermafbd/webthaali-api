@@ -1,33 +1,66 @@
 const CONNECTOR_TIMEOUT = 30000;
 
-function sendToConnector(socket, event, payload) {
 
+
+function sendToConnector(socket, event, payload, options = {}) {
+
+  const signal = options.signal;
+
+  if (signal?.aborted) {
+    return Promise.reject(
+        signal.reason instanceof Error
+            ? signal.reason
+            : new Error(
+                String(signal.reason || "Connector request aborted")
+            )
+    );
+}
   return new Promise((resolve, reject) => {
 
     const responseEvent = event + "Result";
 
-    let timeout;
+let timeout;
+let settled = false;
+
+function cleanup() {
+    clearTimeout(timeout);
+
+    socket.off(responseEvent, onResponse);
+    socket.off(`${event}Progress`, onProgress);
+    socket.off("disconnect", onDisconnect);
+
+    if (signal) {
+        signal.removeEventListener("abort", onAbort);
+    }
+}
+
+function onAbort() {
+    if (settled) return;
+
+    settled = true;
+    cleanup();
+
+   reject(
+    signal.reason instanceof Error
+        ? signal.reason
+        : new Error(
+            String(signal.reason || "Connector request aborted")
+        )
+);
+}
 
     function resetTimeout() {
 
-        clearTimeout(timeout);
-/* 181026
-        timeout = setTimeout(() => {
+    if (settled) return;
 
-            socket.off(responseEvent, onResponse);
+    clearTimeout(timeout);
 
-            socket.off(`${event}Progress`, onProgress);
+    timeout = setTimeout(() => {
 
-            socket.off("disconnect", onDisconnect);
+    if (settled) return;
 
-            reject(new Error("Connector timeout"));
-
-        }, CONNECTOR_TIMEOUT);
-*/
-        timeout = setTimeout(() => {
-
-            const lastHeartbeat =
-                Number(socket.lastHeartbeat || 0);
+    const lastHeartbeat =
+        Number(socket.lastHeartbeat || 0);
 
             const heartbeatFresh =
                 lastHeartbeat > 0 &&
@@ -47,9 +80,8 @@ function sendToConnector(socket, event, payload) {
                 return;
             }
 
-            socket.off(responseEvent, onResponse);
-            socket.off(`${event}Progress`, onProgress);
-            socket.off("disconnect", onDisconnect);
+                      settled = true;
+            cleanup();
 
             reject(new Error("Connector timeout"));
 
@@ -57,61 +89,62 @@ function sendToConnector(socket, event, payload) {
     }
 
     function onResponse(data) {
+    if (settled) return;
 
-      console.log("✅ RESPONSE RECEIVED :", responseEvent);
+    settled = true;
 
-      clearTimeout(timeout);
+    console.log("✅ RESPONSE RECEIVED :", responseEvent);
 
-      socket.off(responseEvent, onResponse);
+    cleanup();
 
-      socket.off(`${event}Progress`, onProgress);
-
-      socket.off("disconnect", onDisconnect);
-
-      resolve(data);
-
-    }
+    resolve(data);
+}
 
     function onProgress(data) {
 
-          if (!data) {
-            return;
-        }
-
-
-        resetTimeout();
-
-        console.log(
-            "💓 Progress:",
-            data.batchId
-        );
-
+    if (settled || !data) {
+        return;
     }
 
+    resetTimeout();
+
+    console.log(
+        "💓 Progress:",
+        data.batchId
+    );
+
+}
+
     function onDisconnect(reason) {
+    if (settled) return;
 
-    clearTimeout(timeout);
+    settled = true;
 
-    socket.off(responseEvent, onResponse);
-    socket.off(`${event}Progress`, onProgress);
+    cleanup();
 
-    socket.off("disconnect", onDisconnect);
-
-      reject(
-          new Error(
-              `Connector disconnected: ${reason}`
-          )
-      );
-
-  }
+    reject(
+        new Error(
+            `Connector disconnected: ${reason}`
+        )
+    );
+}
 
     socket.once(responseEvent, onResponse);
 
-    socket.on(`${event}Progress`, onProgress);
+socket.on(`${event}Progress`, onProgress);
 
-    socket.once("disconnect", onDisconnect);
+socket.once("disconnect", onDisconnect);
 
-    console.log("Waiting for :", responseEvent);
+if (signal) {
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    if (signal.aborted) {
+        onAbort();
+        return;
+    }
+}
+
+console.log("Waiting for :", responseEvent);
 
     resetTimeout();
 
@@ -122,6 +155,13 @@ function sendToConnector(socket, event, payload) {
     socket_company_code: socket?.companyCode,
     payload
 });
+
+    if (settled || signal?.aborted) {
+        if (!settled) {
+            onAbort();
+        }
+        return;
+    }
 
     socket.emit(event, payload);
 

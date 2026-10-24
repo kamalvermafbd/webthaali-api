@@ -1594,10 +1594,16 @@ socket.on("tally:request:error", (data) => {
         // ============================================================
 
         socket.on("disconnect", async (reason) => {
-            console.log("================================");
-            console.log("❌ Connector Disconnected");
-            console.log("Socket ID :", socket.id);
-            console.log("Reason :", reason);
+    console.log("================================");
+    console.log("❌ Connector Disconnected");
+    console.log("Socket ID :", socket.id);
+    console.log("Reason :", reason);
+
+    if (socket.protocolReceiver) {
+        socket.protocolReceiver.cancelCollection(
+            `Connector disconnected: ${reason}`
+        );
+    }
 
             const connectorIds = new Set([
                 ...(socket.connectorIds || []),
