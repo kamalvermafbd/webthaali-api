@@ -1165,12 +1165,14 @@ completed = true;
 completionStarted = true;
 
 // Wait for all in-flight chunk processing
+// Wait until ALL in-flight chunk handlers settle,
+// even if one or more handlers fail.
 while (activeChunkTasks.size > 0) {
+    const pendingTasks = [...activeChunkTasks];
 
-    await Promise.all(
-        [...activeChunkTasks].map(task => task.promise)
+    await Promise.allSettled(
+        pendingTasks.map(task => task.promise)
     );
-
 }
 
 // Lock/disconnect may have settled the operation while waiting
@@ -1510,11 +1512,13 @@ socket.emit(
     }
 
     // Wait for all in-flight chunk handlers
-    while (activeChunkTasks.size > 0) {
-        await Promise.all(
-            [...activeChunkTasks].map(task => task.promise)
-        );
-    }
+  while (activeChunkTasks.size > 0) {
+    const pendingTasks = [...activeChunkTasks];
+
+    await Promise.allSettled(
+        pendingTasks.map(task => task.promise)
+    );
+}
 // Wait for FULL snapshot cleanup before releasing connector lock
 if (activeCompletionTask) {
     try {

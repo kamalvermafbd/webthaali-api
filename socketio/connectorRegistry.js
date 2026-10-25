@@ -93,7 +93,27 @@ if (!socket.pendingConnectorId) {
     }
 */
 
-    connectors.set(connectorId, socket);
+    const existingSocket = connectors.get(connectorId);
+
+if (
+    existingSocket &&
+    existingSocket !== socket &&
+    existingSocket.connected
+) {
+    console.error(
+        "❌ REGISTRY REJECTED: CONNECTOR ALREADY HAS ACTIVE SOCKET",
+        {
+            connector_id: connectorId,
+            existing_socket_id: existingSocket.id,
+            incoming_socket_id: socket.id
+        }
+    );
+
+    socket.connectorIds.delete(connectorId);
+    return false;
+}
+
+connectors.set(connectorId, socket);
 
     console.log("REGISTRY SET TRACE:", {
         connector_id: connectorId,

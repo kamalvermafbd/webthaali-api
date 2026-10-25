@@ -1,0 +1,79 @@
+﻿                connection_status: "CONNECTED",
+                operation_status: "RECOVERING",
+                last_heartbeat_at:
+                    socket.lastHeartbeat
+                        ? new Date(socket.lastHeartbeat).toISOString()
+                        : null
+            });
+
+            console.log("❌ TALLY REQUEST ERROR:", data?.batchId);
+        });
+
+        // ============================================================
+        // DISCONNECT — ONLY THE CURRENT OWNER CAN MARK DISCONNECTED
+        // ============================================================
+
+        socket.on("disconnect", async (reason) => {
+    console.log("================================");
+    console.log("❌ Connector Disconnected");
+    console.log("Socket ID :", socket.id);
+    console.log("Reason :", reason);
+
+    if (socket.protocolReceiver) {
+        socket.protocolReceiver.cancelCollection(
+            `Connector disconnected: ${reason}`
+        );
+    }
+
+            const connectorIds = new Set([
+                ...(socket.connectorIds || []),
+                socket.connectorId
+            ].filter(Boolean));
+
+            for (const connectorId of connectorIds) {
+                try {
+                    const result =
+                        await updateConnectorHealthIfSocketOwner(
+                            connectorId,
+                            socket.id,
+                            {
+                                connection_status: "DISCONNECTED",
+                                operation_status: "UNKNOWN"
+                            }
+                        );
+
+                    if (!result.updated) {
+                        console.log(
+                            "ℹ️ DISCONNECT HEALTH UPDATE SKIPPED: SOCKET NO LONGER OWNS CONNECTOR",
+                            {
+                                socket_id: socket.id,
+                                connector_id: connectorId
+                            }
+                        );
+                    }
+                } catch (error) {
+                    console.error(
+                        "❌ DISCONNECT HEALTH UPDATE FAILED",
+                        {
+                            socket_id: socket.id,
+                            connector_id: connectorId,
+                            error: error.message
+                        }
+                    );
+                }
+
+                registry.remove(connectorId, socket);
+            }
+
+            console.log("================================");
+        });
+
+
+
+    });
+
+}
+
+module.exports = {
+    registerEvents
+};
