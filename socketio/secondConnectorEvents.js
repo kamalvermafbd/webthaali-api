@@ -459,16 +459,19 @@ async function retryLatestConnectorLossBatchForCompanies(companyGuids) {
                 */
 
                 
-            // Select the latest batch FIRST, regardless of status.
-            const { data: latestBatch, error } = await supabase
-                .from("sync_batches")
-                .select("*")
-                .eq("company_code", scope.company_code)
-                .eq("tally_owner", scope.tally_owner)
-                .order("created_at", { ascending: false })
-                .order("id", { ascending: false })
-                .limit(1)
-                .maybeSingle();
+            // Select the oldest eligible connector-loss FAILED batch.
+const { data: latestBatch, error } = await supabase
+    .from("sync_batches")
+    .select("*")
+    .eq("company_code", scope.company_code)
+    .eq("tally_owner", scope.tally_owner)
+    .eq("batch_status", "FAILED")
+    .eq("worker_status", "FAILED")
+    .like("error_message", "CONNECTOR_LOSS:%")
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
 
 
             if (error) {

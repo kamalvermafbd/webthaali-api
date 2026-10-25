@@ -1,7 +1,8 @@
 require("dotenv").config();
 
 const {
-    Worker
+    Worker,
+    DelayedError
 } = require("bullmq");
 
 const {
@@ -169,7 +170,7 @@ const runtimeHeartbeat = setInterval(
 
             worker.queue_name,
 
-            async job => {
+            async (job, token) => {
 
                 console.log(
                     "BULLMQ SYNC JOB RECEIVED:",
@@ -219,8 +220,40 @@ const lockedJob =
 
 if (!lockedJob) {
 
+    const { data: pendingBatch, error: pendingError } =
+        await supabase
+            .from("sync_batches")
+            .select("batch_status, worker_status, worker_id")
+            .eq("id", job.data.batch_db_id)
+            .maybeSingle();
+
+    if (pendingError) {
+        throw new Error(
+            `Batch state verification failed: ${pendingError.message}`
+        );
+    }
+
+    if (
+        pendingBatch?.batch_status === "PENDING" &&
+        pendingBatch?.worker_status === "PENDING" &&
+        pendingBatch?.worker_id === worker.worker_name
+    ) {
+
+        console.log(
+            "BULLMQ BATCH DEFERRED — WAITING FOR FIFO ELIGIBILITY:",
+            job.data.batch_id
+        );
+
+        await job.moveToDelayed(
+            Date.now() + 5000,
+            token
+        );
+
+        throw new DelayedError();
+    }
+
     console.log(
-        "BATCH ALREADY LOCKED OR NO LONGER PENDING:",
+        "BATCH NO LONGER ELIGIBLE — SKIPPING:",
         job.data.batch_id
     );
 

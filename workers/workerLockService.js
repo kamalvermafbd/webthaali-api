@@ -8,62 +8,58 @@ const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_SERVICE_KEY
 );
-
 async function lockJob(job, workerConfig) {
 
-    const { data, error } =
-        await supabase
-            .from("sync_batches")
-            .update({
+    const batchDbId = job?.data?.batch_db_id;
 
-                batch_status:
-                    "PROCESSING",
+    if (!batchDbId || !workerConfig?.worker_name) {
+        throw new Error("Invalid batch ID or worker configuration");
+    }
 
-                worker_status:
-                    "RUNNING",
+    const { data: claimResult, error: claimError } =
+        await supabase.rpc("claim_sync_batch_fifo", {
+            p_batch_db_id: batchDbId,
+            p_worker_name: workerConfig.worker_name
+        });
 
-                worker_id:
-                    workerConfig.worker_name,
-
-                locked_at:
-                    new Date(),
-
-                started_at:
-                    new Date(),
-
-                heartbeat_at:
-                    new Date()
-
-            })
-            .eq(
-                "id",
-                job.data.batch_db_id
-            )
-            .eq(
-                "worker_status",
-                "PENDING"
-            )
-
-            .eq(
-                "worker_id",
-                workerConfig.worker_name
-            )
-            .select()
-            .single();
-
-    if (error) {
-
-        console.error(
-            "Lock failed:",
-            error
+    if (claimError) {
+        throw new Error(
+            `FIFO batch claim failed: ${claimError.message}`
         );
+    }
+
+    const result = Array.isArray(claimResult)
+        ? claimResult[0]
+        : claimResult;
+
+    if (!result?.claimed) {
+
+        console.log("FIFO BATCH CLAIM DEFERRED OR SKIPPED:", {
+            batch_db_id: batchDbId,
+            reason: result?.reason || "UNKNOWN"
+        });
 
         return null;
     }
 
-    return data;
-}
+    const { data: lockedBatch, error: readError } =
+        await supabase
+            .from("sync_batches")
+            .select("*")
+            .eq("id", batchDbId)
+            .eq("batch_status", "PROCESSING")
+            .eq("worker_status", "RUNNING")
+            .eq("worker_id", workerConfig.worker_name)
+            .single();
 
+    if (readError || !lockedBatch) {
+        throw new Error(
+            `Claimed batch read failed: ${readError?.message || "Batch not found"}`
+        );
+    }
+
+    return lockedBatch;
+}
 async function startHeartbeat(
     jobId,
     workerConfig

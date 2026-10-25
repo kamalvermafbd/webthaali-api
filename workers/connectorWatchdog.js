@@ -11,7 +11,8 @@ const BatchStatusManager =
     require("../sync-engine/BatchStatusManager");
 
 const {
-    dispatchBatch
+    dispatchBatch,
+    dispatchConnectorLossRetry
 } = require("./secondQueueExistingBatch");
 
 const connectorRegistry = require("../socketio/connectorRegistry");
@@ -569,8 +570,9 @@ refreshRegisteredConnectorHealth(registry || connectorRegistry);
             await supabase
                 .from("sync_batches")
                 .select(`
-                    id,
+                   id,
                     batch_id,
+                    error_message,
                     company_code,
                     tally_owner,
                     batch_status,
@@ -588,10 +590,11 @@ refreshRegisteredConnectorHealth(registry || connectorRegistry);
                     job_type,
                     worker_type
                 `)
-                .or(
-                    "and(batch_status.eq.PROCESSING,worker_status.eq.RUNNING),and(batch_status.eq.PENDING,worker_status.eq.PENDING,current_stage.eq.WAITING_CONNECTOR)"
-                )
-                .not("batch_status", "in", '("FAILED","CLOSED","COMPLETED")');
+            .or(
+    "and(batch_status.eq.PROCESSING,worker_status.eq.RUNNING),and(batch_status.eq.PENDING,worker_status.eq.PENDING,current_stage.eq.WAITING_CONNECTOR),and(batch_status.eq.FAILED,worker_status.eq.FAILED,error_message.like.CONNECTOR_LOSS:*)"
+)
+.order("created_at", { ascending: true })
+.order("id", { ascending: true });
 
         if (batchError) {
 
@@ -611,9 +614,68 @@ refreshRegisteredConnectorHealth(registry || connectorRegistry);
         // 2. Check every batch
         // ----------------------------------------------------
 
-        for (const batch of batches) {
+      for (const batch of batches) {
 
-            try {
+    try {
+
+       // FAILED connector-loss batches: separate safe retry flow.
+if (
+    batch.batch_status === "FAILED" &&
+    batch.worker_status === "FAILED"
+) {
+    const companyCode = String(batch.company_code || "").trim();
+    const tallyOwner = String(batch.tally_owner || "").trim().toUpperCase();
+
+    if (!companyCode || !["CA", "USER"].includes(tallyOwner)) {
+        continue;
+    }
+
+    const connectorField =
+        tallyOwner === "CA" ? "ca_connector_id" : "client_connector_id";
+
+    const { data: company, error: companyError } = await supabase
+        .from("company")
+        .select(connectorField)
+        .eq("company_code", companyCode)
+        .maybeSingle();
+
+    if (companyError || !company) {
+        if (companyError) throw companyError;
+        continue;
+    }
+
+    const connectorId = String(company[connectorField] || "").trim();
+    if (!connectorId) continue;
+
+    const socket = registry.get(connectorId);
+    const lastHeartbeat = Number(socket?.lastHeartbeat || 0);
+    const heartbeatAge = Date.now() - lastHeartbeat;
+
+    if (
+        !socket ||
+        socket.connected !== true ||
+        socket.tallyStatus !== "ONLINE" ||
+        !lastHeartbeat ||
+        heartbeatAge < 0 ||
+        heartbeatAge >= HEARTBEAT_TIMEOUT_MS ||
+        socket.tallyRequestActive === true
+    ) {
+        continue;
+    }
+
+    const globalWatchdog =
+        await connectorHealthStore.getConnectorWatchdogStatus(connectorId);
+
+    if (
+        globalWatchdog.operation_status !== "FREE" ||
+        globalWatchdog.available !== true
+    ) {
+        continue;
+    }
+
+    await dispatchConnectorLossRetry(batch);
+    continue;
+}
 
                 const companyCode =
                     String(
@@ -1198,24 +1260,45 @@ const waitingAge =
         continue;
     }
 
-    // Heartbeat is fresh, but the previous Tally request
-    // is still active. Do not restart it.
-    if (socket.tallyRequestActive === true) {
-        console.log(
-            "⏳ CONNECTOR WATCHDOG: TALLY REQUEST STILL ACTIVE",
-            {
-                batch_id: batch.batch_id
-            }
-        );
-
-        continue;
-    }
-
-
-    waitingConnectorSince.delete(
-        batch.batch_id
+ // Heartbeat is fresh, but the previous Tally request
+// is still active. Do not restart it.
+if (socket.tallyRequestActive === true) {
+    console.log(
+        "⏳ CONNECTOR WATCHDOG: TALLY REQUEST STILL ACTIVE",
+        {
+            batch_id: batch.batch_id
+        }
     );
 
+    continue;
+}
+
+// Verify global Redis connector state before batch restart.
+const globalWatchdog =
+    await connectorHealthStore.getConnectorWatchdogStatus(
+        connectorId
+    );
+
+if (
+    globalWatchdog.operation_status !== "FREE" ||
+    !globalWatchdog.available
+) {
+    console.log(
+        "⏳ CONNECTOR WATCHDOG: GLOBAL CONNECTOR NOT FREE",
+        {
+            batch_id: batch.batch_id,
+            connector_id: connectorId,
+            operation_status: globalWatchdog.operation_status,
+            lock_ttl_ms: globalWatchdog.lock_ttl_ms
+        }
+    );
+
+    continue;
+}
+
+waitingConnectorSince.delete(
+    batch.batch_id
+);
     console.log(
         "🔄 CONNECTOR + TALLY BACK: RESTARTING BATCH",
         {
@@ -1277,12 +1360,12 @@ const waitingAge =
         .select()
         .maybeSingle();
 
-    if (resetError) {
+    if (resetError || !resetBatch) {
 
         console.error(
             "❌ CONNECTOR WATCHDOG RESET ERROR:",
             batch.batch_id,
-            resetError.message
+            resetError?.message || "Batch already handled or state changed"
         );
 
         continue;

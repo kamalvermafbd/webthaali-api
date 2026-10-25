@@ -163,7 +163,42 @@ async function dispatchConnectorLossRetry(batch) {
     }
 
     // Resolve worker using the existing routing configuration.
-   const workerConfig = await resolveWorkerForBatch(batch);
+    // Do not retry while another batch of this company
+// and Tally owner is actively processing.
+const { data: runningBatch, error: runningError } = await supabase
+    .from("sync_batches")
+    .select("id, batch_id")
+    .eq("company_code", batch.company_code)
+    .eq("tally_owner", batch.tally_owner)
+    .eq("batch_status", "PROCESSING")
+    .eq("worker_status", "RUNNING")
+    .neq("id", batch.id)
+    .limit(1)
+    .maybeSingle();
+
+if (runningError) {
+    throw new Error(
+        `Retry running-batch check failed: ${runningError.message}`
+    );
+}
+
+if (runningBatch) {
+    console.log(
+        "CONNECTOR LOSS RETRY DEFERRED: ANOTHER BATCH RUNNING",
+        {
+            retry_batch_id: batch.batch_id,
+            running_batch_id: runningBatch.batch_id
+        }
+    );
+
+    return {
+        success: false,
+        reason: "ANOTHER_BATCH_RUNNING"
+    };
+}
+   const workerConfig = await resolveWorkerForBatch(batch, {
+    connectorLossRetry: true
+});
 
     if (!workerConfig?.worker_name || !workerConfig?.queue_name) {
         throw new Error(
