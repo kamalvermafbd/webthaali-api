@@ -39153,6 +39153,7 @@ app.get("/getMasters", async (req, res) => {
   let sync_batch_id;
   let httpWorkerId;
   let socket;
+  let connector_id;
   let batchCompletedSuccessfully = false;
 
   try {
@@ -39478,8 +39479,8 @@ if (workerBatchId) {
             ? "ca_connector_id"
             : "client_connector_id";
 
-    const connector_id =
-        companyData?.[connectorField];
+    connector_id =
+    companyData?.[connectorField];
 
     console.log(
         "GET MASTERS CONNECTOR ID :",
@@ -39827,8 +39828,9 @@ const result = await sendChunkedToConnector(
         lastStockAlterId,
         lastLedgerAlterId,
         syncMode,
-        batchId: sync_batch_id,
-    }
+                batchId: sync_batch_id,
+    },
+    connector_id
 );
 
 console.log("===== TALLY MASTER COUNTS =====");
@@ -40078,10 +40080,10 @@ voucherGuidResult =
 
             module:"VOUCHER",
 
-            entity_type:"VOUCHER"
-        }
+                      entity_type:"VOUCHER"
+        },
+        connector_id
     );
-
     groupGuidResult =
     await sendChunkedToConnector(
         socket,
@@ -40101,8 +40103,9 @@ voucherGuidResult =
 
             module:"MASTER",
 
-            entity_type:"GROUP"
-        }
+                       entity_type:"GROUP"
+        },
+        connector_id
     );
 
 
@@ -40130,8 +40133,9 @@ ledgerGuidResult =
 
             module:"MASTER",
 
-            entity_type:"LEDGER"
-        }
+                        entity_type:"LEDGER"
+        },
+        connector_id
     );
 
 
@@ -40160,8 +40164,9 @@ stockGroupGuidResult =
 
             module:"MASTER",
 
-            entity_type:"STOCK_GROUP"
-        }
+                       entity_type:"STOCK_GROUP"
+        },
+        connector_id
     );
 
 
@@ -40190,8 +40195,9 @@ stockGuidResult =
 
             module:"MASTER",
 
-            entity_type:"STOCK"
-        }
+                        entity_type:"STOCK"
+        },
+        connector_id
     );
 
 
@@ -40220,8 +40226,9 @@ unitGuidResult =
 
             module:"MASTER",
 
-            entity_type:"UNIT"
-        }
+                      entity_type:"UNIT"
+        },
+        connector_id
     );
 
 
@@ -40250,8 +40257,9 @@ godownGuidResult =
 
             module:"MASTER",
 
-            entity_type:"GODOWN"
-        }
+                       entity_type:"GODOWN"
+        },
+        connector_id
     );
 
 
@@ -40280,8 +40288,9 @@ costCentreGuidResult =
 
             module:"MASTER",
 
-            entity_type:"COST_CENTRE"
-        }
+                      entity_type:"COST_CENTRE"
+        },
+        connector_id
     );
 
 
@@ -40724,13 +40733,13 @@ if(ledgerReconciliation?.missingGuids?.length){
             sync_batch_id,
             tally_owner,
 
-            requestItems:
+                     requestItems:
                 ledgerReconciliation.missingGuids.map(
                     item => item.guid
                 )
-        }
+        },
+        connector_id
     );
-
 
     if(!missingResult.success){
     await failHttpBatch(missingResult);
@@ -41171,11 +41180,12 @@ if(stockReconciliation?.missingGuids?.length){
             sync_batch_id,
             tally_owner,
 
-            requestItems:
+                       requestItems:
                 stockReconciliation.missingGuids.map(
                     item => item.guid
                 )
-        }
+        },
+        connector_id
     );
 
     if(!missingResult.success){
@@ -41523,9 +41533,10 @@ fs.appendFileSync(
 
        //     toDate,
 
-            requestItems:
-               recoveredVoucherGuids
-        }
+                       requestItems:
+                recoveredVoucherGuids
+        },
+        connector_id
     );
 
     fs.appendFileSync(
@@ -42233,13 +42244,12 @@ let childMissingResult = {
                 booksBeginningFrom:
                     result.summary?.booksBeginningFrom,
 
-                requestItems:
+                             requestItems:
                     uncachedMissingVoucherGuids
 
-            }
-
+            },
+            connector_id
         );
-
 
     if (!childMissingResult.success) {
 

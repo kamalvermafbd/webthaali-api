@@ -27,15 +27,14 @@ const {
 } = require("../services/sync/SyncSnapshotService");
 
 const ACK_TIMEOUT = 15 * 60 * 1000;
-
 async function sendChunkedToConnector(
     socket,
     event,
-    payload
+    payload,
+    connectorIdInput
 ) {
-
-        const connectorId = String(
-        socket?.connectorId || ""
+    const connectorId = String(
+        connectorIdInput || ""
     ).trim();
 
     if (!connectorId) {
@@ -43,30 +42,34 @@ async function sendChunkedToConnector(
             "CONNECTOR_ID_MISSING: Cannot start Tally operation"
         );
     }
-    return withGlobalConnectorLock(
-    connectorId,
-    async (lockedSocket, signal) => {
-        if (lockedSocket !== socket || signal.aborted) {
-            throw new Error(
-                `CONNECTOR_SOCKET_CHANGED_OR_ABORTED: ${connectorId}`
-            );
-        }
 
-        return executeChunkedTransfer(lockedSocket, event, payload, signal);
-    }
+    return withGlobalConnectorLock(
+        connectorId,
+        async (lockedSocket, signal) => {
+            if (lockedSocket !== socket || signal.aborted) {
+                throw new Error(
+                    `CONNECTOR_SOCKET_CHANGED_OR_ABORTED: ${connectorId}`
+                );
+            }
+
+            return executeChunkedTransfer(
+    lockedSocket,
+    event,
+    payload,
+    signal,
+    connectorId
 );
+        }
+    );
 }
 
 async function executeChunkedTransfer(
     socket,
     event,
     payload,
-    signal
+    signal,
+    connectorId
 ) {
-    const connectorId = String(
-        socket?.connectorId || ""
-    ).trim();
-
     /* 241026
    const ownerToken = crypto.randomUUID();
 const activeChunkTasks = new Set();
