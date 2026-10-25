@@ -105,7 +105,8 @@ function getSocketActiveOperationKey(socketId) {
 async function quarantineConnectorAndSocket(
     connectorId,
     socketId,
-    reason
+    reason,
+    ownerToken = null
 ) {
     const id = normalizeConnectorId(connectorId);
     const sid = String(socketId || "").trim();
@@ -115,11 +116,14 @@ async function quarantineConnectorAndSocket(
     }
 
     const record = JSON.stringify({
-        connector_id: id,
-        socket_id: sid,
-        reason: String(reason || "OPERATION_STATE_UNKNOWN"),
-        quarantined_at: new Date().toISOString()
-    });
+    connector_id: id,
+    socket_id: sid,
+    owner_token: ownerToken
+        ? String(ownerToken).trim()
+        : null,
+    reason: String(reason || "OPERATION_STATE_UNKNOWN"),
+    quarantined_at: new Date().toISOString()
+});
 
     await ensureConnected();
 
@@ -1211,6 +1215,90 @@ String(ttl)
     return Number(result) === 1;
 }
 
+// ============================================================
+// VERIFIED CONNECTOR RECOVERY — ATOMIC REDIS CLEANUP
+// ============================================================
+
+async function clearVerifiedConnectorRecovery({
+    connectorId,
+    socketId,
+    ownerToken,
+    verified
+}) {
+    const id = normalizeConnectorId(connectorId);
+    const sid = String(socketId || "").trim();
+    const token = String(ownerToken || "").trim();
+
+    if (!sid || !token) {
+        throw new Error("socketId and ownerToken are required");
+    }
+
+    if (verified !== true) {
+        throw new Error(
+            "Recovery requires verified remote operation state"
+        );
+    }
+
+    await ensureConnected();
+
+    const result = await redis.eval(
+        `
+        local connectorQuarantine = redis.call("GET", KEYS[1])
+        local socketQuarantine = redis.call("GET", KEYS[2])
+
+        if not connectorQuarantine then
+            return 0
+        end
+
+        local record = cjson.decode(connectorQuarantine)
+
+        if record["connector_id"] ~= ARGV[1]
+            or record["socket_id"] ~= ARGV[2] then
+            return 0
+        end
+
+        if socketQuarantine then
+            local socketRecord = cjson.decode(socketQuarantine)
+
+            if socketRecord["connector_id"] ~= ARGV[1]
+                or socketRecord["socket_id"] ~= ARGV[2] then
+                return 0
+            end
+        end
+
+        if redis.call("GET", KEYS[3]) ~= ARGV[3]
+            or redis.call("GET", KEYS[4]) ~= ARGV[3] then
+            return 0
+        end
+
+        -- Never clear markers while a lock exists.
+        if redis.call("EXISTS", KEYS[5]) == 1
+            or redis.call("EXISTS", KEYS[6]) == 1 then
+            return 0
+        end
+
+        redis.call("DEL", KEYS[1], KEYS[2], KEYS[3], KEYS[4])
+
+        return 1
+        `,
+        6,
+        getConnectorQuarantineKey(id),
+        getSocketQuarantineKey(sid),
+        getConnectorActiveOperationKey(id),
+        getSocketActiveOperationKey(sid),
+        `billey:connector:operation-lock:${id}`,
+        `billey:socket:operation-lock:${sid}`,
+        id,
+        sid,
+        token
+    );
+
+    return {
+        recovered: Number(result) === 1,
+        connector_id: id
+    };
+}
+
 module.exports = {
     setConnectorHealth,
     getConnectorHealth,
@@ -1235,5 +1323,6 @@ module.exports = {
 acquireConnectorAndSocketLock,
 releaseConnectorAndSocketLock,
 renewConnectorAndSocketLock,
-quarantineConnectorAndSocket
+quarantineConnectorAndSocket,
+clearVerifiedConnectorRecovery
 };

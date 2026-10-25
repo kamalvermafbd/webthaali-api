@@ -1514,6 +1514,29 @@ socket.on("tally:request:error", (data) => {
         // PROTOCOL HEARTBEAT
         // ============================================================
 
+        socket.on("tally:status", (data = {}) => {
+    const status = data.status;
+
+    if (status !== "ONLINE" && status !== "OFFLINE") {
+        return;
+    }
+
+    // Verified Tally status received from connector monitor.
+    socket.tallyStatus = status;
+    socket.lastTallyStatusAt = Date.now();
+
+    socket.tallyCompanies =
+        status === "ONLINE" && Array.isArray(data.companies)
+            ? data.companies
+            : [];
+
+    console.log(
+        "[TALLY STATUS]",
+        "socket:", socket.id,
+        "status:", status
+    );
+});
+
         socket.on("protocol:heartbeat", async () => {
             socket.lastHeartbeat = Date.now();
 

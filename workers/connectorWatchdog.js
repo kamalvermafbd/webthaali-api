@@ -651,15 +651,14 @@ if (
     const lastHeartbeat = Number(socket?.lastHeartbeat || 0);
     const heartbeatAge = Date.now() - lastHeartbeat;
 
-      if (
-        !socket ||
-        socket.connected !== true ||
-        socket.tallyStatus !== "ONLINE" ||
-        !lastHeartbeat ||
-        heartbeatAge < 0 ||
-        heartbeatAge >= HEARTBEAT_TIMEOUT_MS ||
-        socket.tallyRequestActive === true
-    ) {
+    if (
+    !socket ||
+    socket.connected !== true ||
+    socket.tallyStatus !== "ONLINE" ||
+    !lastHeartbeat ||
+    heartbeatAge < 0 ||
+    heartbeatAge >= HEARTBEAT_TIMEOUT_MS
+) {
         const { error: resetReadyError } = await supabase
             .from("sync_batches")
             .update({
@@ -680,55 +679,40 @@ if (
     }
 
   
-    const globalWatchdog =
-        await connectorHealthStore.getConnectorWatchdogStatus(connectorId);
+    // Connector and Tally are healthy.
+// Retry eligibility is independent of whether another request is BUSY.
+const { error: retryReadyError } = await supabase
+    .from("sync_batches")
+    .update({
+        connector_retry_ready: true
+    })
+    .eq("id", batch.id)
+    .eq("batch_status", "FAILED")
+    .eq("worker_status", "FAILED")
+    .like("error_message", "CONNECTOR_LOSS:%");
 
-    if (
-        globalWatchdog.operation_status !== "FREE" ||
-        globalWatchdog.available !== true
-    ) {
-        const { error: resetReadyError } = await supabase
-            .from("sync_batches")
-            .update({
-                connector_retry_ready: false
-            })
-            .eq("id", batch.id)
-            .eq("batch_status", "FAILED")
-            .eq("worker_status", "FAILED")
-            .eq("connector_retry_ready", true);
+if (retryReadyError) {
+    console.error(
+        "[CONNECTOR WATCHDOG] Retry readiness update failed:",
+        batch.batch_id,
+        retryReadyError.message
+    );
+    continue;
+}
 
-        if (resetReadyError) {
-            throw new Error(
-                `Connector retry readiness reset failed: ${resetReadyError.message}`
-            );
-        }
+// BUSY prevents dispatch, but does not remove retry eligibility.
+const globalWatchdog =
+    await connectorHealthStore.getConnectorWatchdogStatus(connectorId);
 
-        continue;
-    }
+if (
+    globalWatchdog.operation_status !== "FREE" ||
+    globalWatchdog.available !== true ||
+    socket.tallyRequestActive === true
+) {
+    continue;
+}
 
-
-        // Connector online, Tally healthy aur global watchdog FREE.
-    // Mark this FAILED CONNECTOR_LOSS batch as retry-ready.
-    const { error: retryReadyError } = await supabase
-        .from("sync_batches")
-        .update({
-            connector_retry_ready: true
-        })
-        .eq("id", batch.id)
-        .eq("batch_status", "FAILED")
-        .eq("worker_status", "FAILED")
-        .like("error_message", "CONNECTOR_LOSS:%");
-
-    if (retryReadyError) {
-        console.error(
-            "[CONNECTOR WATCHDOG] Retry readiness update failed:",
-            batch.batch_id,
-            retryReadyError.message
-        );
-        continue;
-    }
-
-    await dispatchConnectorLossRetry(batch);
+await dispatchConnectorLossRetry(batch);
     continue;
 }
 

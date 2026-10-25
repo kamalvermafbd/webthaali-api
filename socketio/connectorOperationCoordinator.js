@@ -66,11 +66,12 @@ if (
     !socket.protocolReceiver ||
     registry.get(id) !== socket
 ) {
-    await quarantineConnectorAndSocket(
-        id,
-        socket.id,
-        "CONNECTOR_CHANGED_DURING_LOCK_ACQUISITION"
-    );
+  await quarantineConnectorAndSocket(
+    id,
+    socket.id,
+    "CONNECTOR_CHANGED_DURING_LOCK_ACQUISITION",
+    ownerToken
+);
 
     // Keep persistent markers for verified recovery.
     // Do not release lock after uncertain socket transition.
@@ -178,11 +179,12 @@ operationAbortController.signal.addEventListener(
     operationAbortController.abort(error);
 
     try {
-        await quarantineConnectorAndSocket(
-            lock.connectorId,
-            lock.socketId,
-            "GLOBAL_LOCK_OWNERSHIP_LOST"
-        );
+       await quarantineConnectorAndSocket(
+    lock.connectorId,
+    lock.socketId,
+    "GLOBAL_LOCK_OWNERSHIP_LOST",
+    lock.ownerToken
+);
     } catch (quarantineError) {
         console.error(
             `[GLOBAL LOCK] Quarantine failed: ${lock.connectorId}`,
@@ -205,11 +207,12 @@ operationAbortController.signal.addEventListener(
     operationAbortController.abort(error);
 
     try {
-        await quarantineConnectorAndSocket(
-            lock.connectorId,
-            lock.socketId,
-            "GLOBAL_LOCK_RENEWAL_ERROR"
-        );
+      await quarantineConnectorAndSocket(
+    lock.connectorId,
+    lock.socketId,
+    "GLOBAL_LOCK_RENEWAL_ERROR",
+    lock.ownerToken
+);
     } catch (quarantineError) {
         console.error(
             `[GLOBAL LOCK] Renewal quarantine failed: ${lock.connectorId}`,
@@ -232,11 +235,12 @@ operationAbortController.signal.addEventListener(
 ) {
     lockLost = true;
 
-    await quarantineConnectorAndSocket(
-        lock.connectorId,
-        lock.socketId,
-        "CONNECTOR_UNAVAILABLE_BEFORE_OPERATION"
-    );
+   await quarantineConnectorAndSocket(
+    lock.connectorId,
+    lock.socketId,
+    "CONNECTOR_UNAVAILABLE_BEFORE_OPERATION",
+    lock.ownerToken
+);
 
     throw new Error(
         `Connector unavailable before operation: ${lock.connectorId}`
@@ -262,11 +266,12 @@ const result = await new Promise((resolve, reject) => {
 
     operationAbortController.abort(error);
 
-    quarantineConnectorAndSocket(
-        lock.connectorId,
-        lock.socketId,
-        "CONNECTOR_DISCONNECTED_DURING_OPERATION"
-    ).then(
+   quarantineConnectorAndSocket(
+    lock.connectorId,
+    lock.socketId,
+    "CONNECTOR_DISCONNECTED_DURING_OPERATION",
+    lock.ownerToken
+).then(
         () => reject(error),
         (quarantineError) => {
             console.error(
@@ -336,10 +341,11 @@ const result = await new Promise((resolve, reject) => {
     cleanup();
 
     quarantineConnectorAndSocket(
-        lock.connectorId,
-        lock.socketId,
-        "OPERATION_FAILED_REMOTE_STATE_UNKNOWN"
-    ).then(
+    lock.connectorId,
+    lock.socketId,
+    "OPERATION_FAILED_REMOTE_STATE_UNKNOWN",
+    lock.ownerToken
+).then(
         () => reject(error),
         (quarantineError) => {
             console.error(
@@ -520,11 +526,12 @@ if (operationPromise) {
         await new Promise(resolve => setTimeout(resolve, 50));
     }
 
-    await quarantineConnectorAndSocket(
-        lock.connectorId,
-        lock.socketId,
-        "OPERATION_SETTLE_TIMEOUT"
-    );
+   await quarantineConnectorAndSocket(
+    lock.connectorId,
+    lock.socketId,
+    "OPERATION_SETTLE_TIMEOUT",
+    lock.ownerToken
+);
 
     throw error;
 }
@@ -586,11 +593,12 @@ if (
     );
 
     try {
-        await quarantineConnectorAndSocket(
-            lock.connectorId,
-            lock.socketId,
-            "GLOBAL_LOCK_RELEASE_FAILED"
-        );
+       await quarantineConnectorAndSocket(
+    lock.connectorId,
+    lock.socketId,
+    "GLOBAL_LOCK_RELEASE_FAILED",
+    lock.ownerToken
+);
     } catch (quarantineError) {
         console.error(
             `[GLOBAL LOCK] Release quarantine failed: ${lock.connectorId}`,
