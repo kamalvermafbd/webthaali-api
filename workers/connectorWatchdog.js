@@ -651,7 +651,7 @@ if (
     const lastHeartbeat = Number(socket?.lastHeartbeat || 0);
     const heartbeatAge = Date.now() - lastHeartbeat;
 
-    if (
+      if (
         !socket ||
         socket.connected !== true ||
         socket.tallyStatus !== "ONLINE" ||
@@ -660,9 +660,26 @@ if (
         heartbeatAge >= HEARTBEAT_TIMEOUT_MS ||
         socket.tallyRequestActive === true
     ) {
+        const { error: resetReadyError } = await supabase
+            .from("sync_batches")
+            .update({
+                connector_retry_ready: false
+            })
+            .eq("id", batch.id)
+            .eq("batch_status", "FAILED")
+            .eq("worker_status", "FAILED")
+            .eq("connector_retry_ready", true);
+
+        if (resetReadyError) {
+            throw new Error(
+                `Connector retry readiness reset failed: ${resetReadyError.message}`
+            );
+        }
+
         continue;
     }
 
+  
     const globalWatchdog =
         await connectorHealthStore.getConnectorWatchdogStatus(connectorId);
 
@@ -670,6 +687,44 @@ if (
         globalWatchdog.operation_status !== "FREE" ||
         globalWatchdog.available !== true
     ) {
+        const { error: resetReadyError } = await supabase
+            .from("sync_batches")
+            .update({
+                connector_retry_ready: false
+            })
+            .eq("id", batch.id)
+            .eq("batch_status", "FAILED")
+            .eq("worker_status", "FAILED")
+            .eq("connector_retry_ready", true);
+
+        if (resetReadyError) {
+            throw new Error(
+                `Connector retry readiness reset failed: ${resetReadyError.message}`
+            );
+        }
+
+        continue;
+    }
+
+
+        // Connector online, Tally healthy aur global watchdog FREE.
+    // Mark this FAILED CONNECTOR_LOSS batch as retry-ready.
+    const { error: retryReadyError } = await supabase
+        .from("sync_batches")
+        .update({
+            connector_retry_ready: true
+        })
+        .eq("id", batch.id)
+        .eq("batch_status", "FAILED")
+        .eq("worker_status", "FAILED")
+        .like("error_message", "CONNECTOR_LOSS:%");
+
+    if (retryReadyError) {
+        console.error(
+            "[CONNECTOR WATCHDOG] Retry readiness update failed:",
+            batch.batch_id,
+            retryReadyError.message
+        );
         continue;
     }
 
