@@ -279,7 +279,12 @@ const result = await new Promise((resolve, reject) => {
                 quarantineError
             );
 
-            reject(quarantineError);
+            // Preserve original disconnect error.
+            if (error && typeof error === "object") {
+                error.quarantineError = quarantineError;
+            }
+
+            reject(error);
         }
     );
 };
@@ -352,7 +357,14 @@ const result = await new Promise((resolve, reject) => {
                 `[GLOBAL LOCK] Failure quarantine failed: ${lock.connectorId}`,
                 quarantineError
             );
-            reject(quarantineError);
+
+            // Preserve the original operation error and its
+            // requestDispatched metadata.
+            if (error && typeof error === "object") {
+                error.quarantineError = quarantineError;
+            }
+
+            reject(error);
         }
     );
 }

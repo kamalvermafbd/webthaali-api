@@ -2,37 +2,7 @@ const {
     getSyncQueue
 } = require("./secondSyncQueue");
 
-/*211026
-async function removeFailedJobIfSafe(syncQueue, batchId) {
-    const existingJob = await syncQueue.getJob(batchId);
 
-    if (!existingJob) {
-        return true;
-    }
-
-    const state = await existingJob.getState();
-
-    console.log(
-        "EXISTING BULLMQ JOB CHECK:",
-        batchId,
-        state
-    );
-
-    if (state === "failed") {
-        await existingJob.remove();
-
-        console.log(
-            "OLD FAILED BULLMQ JOB REMOVED:",
-            batchId
-        );
-
-        return true;
-    }
-
-    // Never remove an active or waiting job.
-    return false;
-}
-*/
 
 
 async function removeFailedJobIfSafe(
@@ -40,9 +10,15 @@ async function removeFailedJobIfSafe(
     batch,
     workerConfig
 ) {
-    const existingJob = await syncQueue.getJob(
-        batch.batch_id
-    );
+    const retryToken = batch.retry_claim_token ?? null;
+
+const bullJobId = retryToken
+    ? `${batch.batch_id}-retry-${retryToken}`
+    : batch.batch_id;
+
+const existingJob = await syncQueue.getJob(
+    bullJobId
+);
 
     if (!existingJob) {
         return true;
@@ -55,7 +31,7 @@ async function removeFailedJobIfSafe(
         batch.batch_id,
         state
     );
-
+/* 261026
     if (state === "failed") {
         await existingJob.remove();
 
@@ -66,7 +42,7 @@ async function removeFailedJobIfSafe(
 
         return true;
     }
-
+*/
     const jobData = existingJob.data || {};
 
     const sameAssignment =
@@ -77,6 +53,23 @@ async function removeFailedJobIfSafe(
     jobData.server_id === workerConfig.server_id &&
     (jobData.retry_claim_token ?? null) ===
         (batch.retry_claim_token ?? null);
+
+        if (state === "failed") {
+    if (!sameAssignment) {
+        throw new Error(
+            `Failed BullMQ job ownership mismatch: ${batch.batch_id}; worker=${jobData.worker_name || "UNKNOWN"}`
+        );
+    }
+
+    await existingJob.remove();
+
+    console.log(
+        "VERIFIED FAILED BULLMQ JOB REMOVED:",
+        batch.batch_id
+    );
+
+    return true;
+}
 
     if (
         [
@@ -240,6 +233,7 @@ async function addBatchToQueue(
 */
 
 
+
 async function addBatchToQueue(
     batch,
     workerConfig
@@ -259,6 +253,12 @@ async function addBatchToQueue(
     if (!workerConfig?.server_id) {
         throw new Error("server_id missing");
     }
+
+        const retryToken = batch.retry_claim_token ?? null;
+
+    const bullJobId = retryToken
+        ? `${batch.batch_id}-retry-${retryToken}`
+        : batch.batch_id;
 
     const syncQueue = getSyncQueue(
         workerConfig.queue_name
@@ -302,9 +302,9 @@ async function addBatchToQueue(
                 server_category: workerConfig.server_category,
                 http_url: workerConfig.http_url
             },
-            {
-                jobId: batch.batch_id
-            }
+        {
+    jobId: bullJobId
+}
         );
 
         console.log(

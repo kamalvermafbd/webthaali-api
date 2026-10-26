@@ -1,9 +1,9 @@
 require("dotenv").config();
 
 const {
-    Worker
+    Worker,
+    DelayedError
 } = require("bullmq");
-
 const {
     createClient
 } = require("@supabase/supabase-js");
@@ -148,7 +148,7 @@ const runtimeHeartbeat = setInterval(
 
             worker.queue_name,
 
-            async job => {
+            async (job, token) => {
 
                 console.log(
                     "BULLMQ SYNC JOB RECEIVED:",
@@ -198,16 +198,45 @@ const lockedJob =
 
 if (!lockedJob) {
 
+    const deferReasons = new Set([
+        "EARLIER_BATCH_PENDING",
+        "EARLIER_CONNECTOR_LOSS_RETRY_READY",
+        "ANOTHER_BATCH_RUNNING"
+    ]);
+
+    const claimReason = String(
+        lockInput.claimRejectionReason || "UNKNOWN"
+    ).trim().toUpperCase();
+
+    if (deferReasons.has(claimReason)) {
+
+        console.log(
+            "BULLMQ BATCH DEFERRED - WAITING FOR FIFO:",
+            job.data.batch_id,
+            claimReason
+        );
+
+        await job.moveToDelayed(
+            Date.now() + 5000,
+            token
+        );
+
+        throw new DelayedError();
+    }
+
     console.log(
-        "BATCH ALREADY LOCKED OR NO LONGER PENDING:",
-        job.data.batch_id
+        "BATCH CLAIM REJECTED - SKIPPING:",
+        job.data.batch_id,
+        claimReason
     );
 
     return {
         success: true,
-        skipped: true
+        skipped: true,
+        reason: claimReason
     };
 }
+
 
 const heartbeat =
     await startHeartbeat(

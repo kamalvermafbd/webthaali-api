@@ -128,6 +128,9 @@ const app = express();
 const { sendToConnector } =
   require("./socketio/sendToConnector");
 
+const sendToConnectorWithGlobalLock =
+  require("./socketio/sendToConnectorWithGlobalLock");
+
 const registry =
   require("./socketio/connectorRegistry");
 
@@ -31318,9 +31321,18 @@ if (!connectorSocket) {
     error: "Connector is offline"
   });
 }
-
+/* 261026
 const companyInfo = await sendToConnector(
   connectorSocket,
+  "getTallyCompanyInfo",
+  {
+    company: tally_company
+  }
+);
+*/
+
+const companyInfo = await sendToConnectorWithGlobalLock(
+  connectorId,
   "getTallyCompanyInfo",
   {
     company: tally_company

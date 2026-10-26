@@ -681,38 +681,27 @@ async markFailed({
                 ? error
                 : error?.message || "Unknown Error"
     });
-/* 191026
-    return this.updateFields({
 
-        batch_id,
 
-        fields: {
+const originalError =
+    typeof error === "string"
+        ? error
+        : error?.message || "Unknown Error";
 
-            batch_status:
-                BATCH_STATUS.FAILED,
+const isUncertainOutcome =
+    error?.requestDispatched === true &&
+    error?.connectorResponseReceived !== true;
 
-            worker_status:
-                "FAILED",
-
-            error_message:
-                typeof error === "string"
-                    ? error
-                    : error?.message || "Unknown Error"
-        }
-
-    });
-*/
-
+const finalErrorMessage = isUncertainOutcome
+    ? `CONNECTOR_OUTCOME_UNKNOWN: ${originalError}`
+    : originalError;
 
 const { data, error: updateError } = await supabase
     .from(TABLES.SYNC_BATCHES)
     .update({
         batch_status: BATCH_STATUS.FAILED,
         worker_status: "FAILED",
-        error_message:
-            typeof error === "string"
-                ? error
-                : error?.message || "Unknown Error"
+        error_message: finalErrorMessage
     })
     .eq("batch_id", batch_id)
     .neq("batch_status", "COMPLETED")

@@ -43,7 +43,13 @@ async function sendChunkedToConnector(
         );
     }
 
-    return withGlobalConnectorLock(
+        // Shared across the transfer and global lock coordinator.
+    const dispatchState = {
+        dispatched: false
+    };
+
+    try {
+    return await withGlobalConnectorLock(
         connectorId,
         async (lockedSocket, signal) => {
             if (lockedSocket !== socket || signal.aborted) {
@@ -51,16 +57,25 @@ async function sendChunkedToConnector(
                     `CONNECTOR_SOCKET_CHANGED_OR_ABORTED: ${connectorId}`
                 );
             }
-
-            return executeChunkedTransfer(
+return executeChunkedTransfer(
     lockedSocket,
     event,
     payload,
     signal,
-    connectorId
+    connectorId,
+    dispatchState
 );
         }
-    );
+      );
+} catch (error) {
+    if (error && typeof error === "object") {
+        error.requestDispatched =
+            error.requestDispatched === true ||
+            dispatchState.dispatched === true;
+    }
+
+    throw error;
+}
 }
 
 async function executeChunkedTransfer(
@@ -68,7 +83,8 @@ async function executeChunkedTransfer(
     event,
     payload,
     signal,
-    connectorId
+    connectorId,
+    dispatchState
 ) {
     /* 241026
    const ownerToken = crypto.randomUUID();
@@ -162,6 +178,10 @@ renewalTimer.unref?.();
 
 let lockLost = signal.aborted;
 let rejectActiveOperation = null;
+
+// Tracks whether any part of this request was emitted to the connector.
+// Once true, a transport failure may leave the Tally outcome unknown.
+let requestDispatched = false;
 
 function onGlobalLockAbort() {
     lockLost = true;
@@ -383,10 +403,14 @@ function onAck(data) {
 pendingAckCleanups.delete(cancelPendingAck);
 
 if (data.success === false) {
-                return reject(
-                    new Error(data.error || "Chunk rejected")
-                );
-            }
+    const connectorError = new Error(
+        data.error || "Chunk rejected"
+    );
+
+    connectorError.connectorResponseReceived = true;
+
+    return reject(connectorError);
+}
 
             resolve();
 
@@ -565,16 +589,14 @@ if (
 pendingAckCleanups.delete(cancelPendingCompleteAck);
 
 if (data.success === false) {
+    const connectorError = new Error(
+        data.error || "Complete rejected"
+    );
 
-                return reject(
-                    new Error(
-                        data.error ||
-                        "Complete rejected"
-                    )
-                );
+    connectorError.connectorResponseReceived = true;
 
-            }
-
+    return reject(connectorError);
+}
             resolve();
 
         }
@@ -640,6 +662,10 @@ for (const chunk of chunks) {
 
 const ackPromise = waitForAck(batchId, chunk.chunkIndex);
 
+// Request chunk is about to be dispatched to connector.
+requestDispatched = true;
+dispatchState.dispatched = true;
+
 socket.emit(
     `${event}Chunk`,
     {
@@ -681,6 +707,11 @@ if (lockLost || signal.aborted) {
 
 const completeAckPromise =
     waitForCompleteAck(batchId);
+
+// Complete event can also be the first emitted request
+// when requestItems is empty.
+requestDispatched = true;
+dispatchState.dispatched = true;
 
 socket.emit(
     `${event}Complete`,
@@ -764,19 +795,20 @@ async function onResult(data) {
             JSON.stringify(data, null, 2)
         );
 
-        if (data.success === false) {
+       if (data.success === false) {
 
     operationSettled = true;
 
     cleanup();
 
-    return reject(
-                new Error(
-                    data.error || "Unknown error"
-                )
-            );
+    const connectorError = new Error(
+        data.error || "Unknown error"
+    );
 
-        }
+    connectorError.connectorResponseReceived = true;
+
+    return reject(connectorError);
+}
 
         masterResult = data;
 
@@ -1490,6 +1522,10 @@ if (lockLost || signal.aborted) {
     return;
 }
 
+// Normal request is about to be dispatched to connector.
+requestDispatched = true;
+dispatchState.dispatched = true;
+
 socket.emit(
     event,
     {
@@ -1499,6 +1535,15 @@ socket.emit(
 );
 
     });
+} catch (error) {
+    if (error && typeof error === "object") {
+        error.requestDispatched =
+            error.requestDispatched === true ||
+            requestDispatched === true ||
+            dispatchState.dispatched === true;
+    }
+
+    throw error;
 } finally {
 
     // Wait for outgoing request transfer before releasing global lock

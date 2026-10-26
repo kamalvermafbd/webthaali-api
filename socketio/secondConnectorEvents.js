@@ -2,17 +2,17 @@ const registry = require("./connectorRegistry");
 
 const {
     dispatchBatch,
-    dispatchConnectorLossRetry
 } = require("../workers/secondQueueExistingBatch");
 
 const {
-publishConnectorHealth,
-updateConnectorHealth,
-getSharedConnectorHealth
+    publishConnectorHealth,
+    updateConnectorHealth
 } = require("./connectorHealth");
+
 const {
     claimConnectorSocketOwnership,
-    updateConnectorHealthIfSocketOwner
+    updateConnectorHealthIfSocketOwner,
+    getConnectorWatchdogStatus
 } = require("./connectorHealthStore");
 
 // 060926 start
@@ -45,6 +45,12 @@ async function recoverWaitingBatchesForCompanies({
     companyGuids,
     socket
 }) {
+
+    if (socket.waitingBatchRecoveryRunning === true) {
+        return;
+    }
+
+    socket.waitingBatchRecoveryRunning = true;
 
     try {
 
@@ -140,9 +146,11 @@ async function recoverWaitingBatchesForCompanies({
                     row.ca_connector_id
             }))
 
-        ].filter(
-            row => row.connector_id
-        );
+       ].filter(row =>
+    row.connector_id &&
+    socket.connectorIds?.has(String(row.connector_id)) &&
+    registry.get(String(row.connector_id)) === socket
+);
 
         if (companies.length === 0) {
             return;
@@ -178,11 +186,12 @@ async function recoverWaitingBatchesForCompanies({
                     "worker_status",
                     "PENDING"
                 )
-                .eq(
-                    "current_stage",
-                    "WAITING_CONNECTOR"
-                )
-                .order(
+              .eq(
+    "current_stage",
+    "WAITING_CONNECTOR"
+)
+.is("worker_id", null)
+.order(
                     "created_at",
                     {
                         ascending: true
@@ -219,10 +228,64 @@ async function recoverWaitingBatchesForCompanies({
             // Restart every waiting batch for this company
             // ------------------------------------------------
 
-            for (const batch of batches) {
+          for (const batch of batches) {
 
-                try {
+    try {
 
+        // Never auto-recover a batch with uncertain Tally outcome.
+        if (
+            String(batch.error_message || "")
+                .startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+        ) {
+            console.warn(
+                "[WAITING BATCH RECOVERY] UNCERTAIN OUTCOME — MANUAL REVIEW:",
+                batch.batch_id
+            );
+            continue;
+        }
+
+        const watchdog = await getConnectorWatchdogStatus(
+                String(company.connector_id)
+            );
+
+            if (
+                !watchdog ||
+                watchdog.available !== true ||
+                watchdog.connection_status !== "CONNECTED" ||
+                watchdog.operation_status !== "FREE"
+            ) {
+                console.log(
+                    "⏳ WAITING BATCH RECOVERY DEFERRED: WATCHDOG NOT AVAILABLE",
+        {
+            batch_id: batch.batch_id,
+            connector_id: company.connector_id,
+            connection_status: watchdog?.connection_status,
+            operation_status: watchdog?.operation_status,
+            busy: watchdog?.busy,
+            quarantined: watchdog?.quarantined,
+            active_operation: watchdog?.active_operation,
+            lock_ttl_ms: watchdog?.lock_ttl_ms
+        }
+    );
+
+    break;
+}
+
+        if (
+            !socket.connected ||
+            socket.tallyStatus !== "ONLINE" ||
+            !socket.connectorIds?.has(String(company.connector_id)) ||
+            registry.get(String(company.connector_id)) !== socket
+        ) {
+            console.warn(
+                "⚠️ WAITING BATCH RECOVERY STOPPED: CONNECTOR NOT READY",
+                {
+                    batch_id: batch.batch_id,
+                    connector_id: company.connector_id
+                }
+            );
+            break;
+        }
                     console.log(
                         "🔄 TALLY COMPANY BACK: RECOVERING WAITING BATCH",
                         {
@@ -297,10 +360,11 @@ async function recoverWaitingBatchesForCompanies({
                             "worker_status",
                             "PENDING"
                         )
-                        .eq(
+                       .eq(
                             "current_stage",
                             "WAITING_CONNECTOR"
                         )
+                        .is("worker_id", null)
                         .select()
                         .maybeSingle();
 
@@ -334,13 +398,111 @@ async function recoverWaitingBatchesForCompanies({
                         continue;
                     }
 
-                    // ----------------------------------------
-                    // Dispatch SAME batch
-                    // ----------------------------------------
+                   // ----------------------------------------
+// Dispatch SAME batch
+// ----------------------------------------
 
-                    await dispatchBatch(
-                        resetBatch
-                    );
+if (
+    !socket.connected ||
+    socket.tallyStatus !== "ONLINE" ||
+    !socket.connectorIds?.has(String(company.connector_id)) ||
+    registry.get(String(company.connector_id)) !== socket
+) {
+    const { data: restoredBatch, error: restoreError } = await supabase
+        .from("sync_batches")
+        .update({
+            current_stage: "WAITING_CONNECTOR"
+        })
+        .eq("id", resetBatch.id)
+        .eq("batch_status", "PENDING")
+        .eq("worker_status", "PENDING")
+        .eq("current_stage", "PENDING")
+        .is("worker_id", null)
+        .select("id")
+        .maybeSingle();
+
+    if (restoreError || !restoredBatch) {
+        console.error(
+            "❌ WAITING BATCH RESTORE FAILED:",
+            {
+                batch_id: batch.batch_id,
+                error: restoreError?.message || "Batch state changed"
+            }
+        );
+    } else {
+        console.warn(
+            "⏳ WAITING BATCH RESTORED: CONNECTOR NOT READY",
+            {
+                batch_id: batch.batch_id,
+                connector_id: company.connector_id
+            }
+        );
+    }
+
+    break;
+}
+
+try {
+    const dispatchResult = await dispatchBatch(resetBatch);
+
+if (!dispatchResult?.success || dispatchResult.queued !== true) {
+    const dispatchError = new Error(
+        `WAITING_BATCH_DISPATCH_NOT_QUEUED: ${batch.batch_id}`
+    );
+
+    dispatchError.code = "WAITING_BATCH_DISPATCH_NOT_QUEUED";
+
+    throw dispatchError;
+}
+} catch (dispatchError) {
+
+    if (dispatchError.code !== "BATCH_QUEUE_CONFIRMED_NOT_FOUND") {
+        console.error(
+            "❌ WAITING BATCH DISPATCH STATE UNCERTAIN — RESTORE SKIPPED:",
+            {
+                batch_id: batch.batch_id,
+                error: dispatchError.message
+            }
+        );
+
+        // BullMQ job may exist. Preserve current DB reservation.
+        break;
+    }
+
+    const { data: restoredBatch, error: restoreError } = await supabase
+        .from("sync_batches")
+        .update({
+            current_stage: "WAITING_CONNECTOR"
+        })
+        .eq("id", resetBatch.id)
+        .eq("batch_status", "PENDING")
+        .eq("worker_status", "PENDING")
+        .eq("current_stage", "PENDING")
+        .is("worker_id", null)
+        .select("id")
+        .maybeSingle();
+
+    if (restoreError || !restoredBatch) {
+        console.error(
+            "❌ DISPATCH FAILURE BATCH RESTORE FAILED:",
+            {
+                batch_id: batch.batch_id,
+                dispatch_error: dispatchError.message,
+                restore_error: restoreError?.message || "Batch state changed"
+            }
+        );
+    } else {
+        console.warn(
+            "⏳ DISPATCH FAILED: BATCH RESTORED TO WAITING_CONNECTOR",
+            {
+                batch_id: batch.batch_id,
+                error: dispatchError.message
+            }
+        );
+    }
+
+    break;
+}
 
                     console.log(
                         "✅ WAITING BATCH RESTARTED:",
@@ -378,140 +540,15 @@ async function recoverWaitingBatchesForCompanies({
 
         }
 
-    } catch (error) {
+       } catch (error) {
 
         console.error(
             "❌ COMPANY BATCH RECOVERY ERROR:",
             error
         );
 
-    }
-
-}
-
-
-async function retryLatestConnectorLossBatchForCompanies(companyGuids) {
-    if (!Array.isArray(companyGuids) || !companyGuids.length) {
-        return;
-    }
-
-    const cleanGuids = [
-        ...new Set(
-            companyGuids
-                .map(guid => String(guid).trim())
-                .filter(Boolean)
-        )
-    ];
-
-    const [clientResult, caResult] = await Promise.all([
-        supabase
-            .from("company")
-            .select("company_code, client_tally_company_guid")
-            .in("client_tally_company_guid", cleanGuids),
-
-        supabase
-            .from("company")
-            .select("company_code, ca_tally_company_guid")
-            .in("ca_tally_company_guid", cleanGuids)
-    ]);
-
-    if (clientResult.error || caResult.error) {
-        throw new Error(
-            clientResult.error?.message ||
-            caResult.error?.message
-        );
-    }
-
-    const companyScopes = new Map();
-
-    for (const row of clientResult.data || []) {
-        companyScopes.set(
-            `${row.company_code}:USER`,
-            {
-                company_code: row.company_code,
-                tally_owner: "USER"
-            }
-        );
-    }
-
-    for (const row of caResult.data || []) {
-        companyScopes.set(
-            `${row.company_code}:CA`,
-            {
-                company_code: row.company_code,
-                tally_owner: "CA"
-            }
-        );
-    }
-
-    for (const scope of companyScopes.values()) {
-        try {
-            // Select the latest batch FIRST, regardless of status.
-            /* 211026
-            const { data: latestBatch, error } = await supabase
-                .from("sync_batches")
-                .select("*")
-                .eq("company_code", scope.company_code)
-                .eq("tally_owner", scope.tally_owner)
-                .order("created_at", { ascending: false })
-                .limit(1)
-                .maybeSingle();
-                */
-
-                
-            // Select the oldest eligible connector-loss FAILED batch.
-const { data: latestBatch, error } = await supabase
-    .from("sync_batches")
-    .select("*")
-    .eq("company_code", scope.company_code)
-    .eq("tally_owner", scope.tally_owner)
-    .eq("batch_status", "FAILED")
-    .eq("worker_status", "FAILED")
-    .like("error_message", "CONNECTOR_LOSS:%")
-    .order("created_at", { ascending: true })
-    .order("id", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-
-            if (error) {
-                throw error;
-            }
-
-            if (!latestBatch) {
-                continue;
-            }
-
-                                   // Only retry the latest FAILED batch.
-            if (
-                latestBatch.batch_status !== "FAILED" ||
-                latestBatch.worker_status !== "FAILED"
-            ) {
-                console.log(
-                    "FAILED RETRY SKIPPED: LATEST BATCH NOT ELIGIBLE",
-                    {
-                        company_code: scope.company_code,
-                        tally_owner: scope.tally_owner,
-                        batch_id: latestBatch.batch_id,
-                        batch_status: latestBatch.batch_status,
-                        worker_status: latestBatch.worker_status
-                    }
-                );
-
-                continue;
-            }
-
-            await dispatchConnectorLossRetry(latestBatch);
-        } catch (error) {
-            console.error(
-                "LATEST CONNECTOR RETRY FAILED:",
-                {
-                    company_code: scope.company_code,
-                    tally_owner: scope.tally_owner,
-                    error: error.message
-                }
-            );
-        }
+    } finally {
+        socket.waitingBatchRecoveryRunning = false;
     }
 }
 
@@ -555,182 +592,7 @@ console.log(
             );
 
         socket.protocolReceiver.start();
-/* 030926 comented
-        // Connector Identity Resolve
-socket.on("identifyConnector", async (data) => {
 
-    try {
-
-        const company_guids =
-            Array.isArray(data?.company_guids)
-                ? [...new Set(
-                    data.company_guids
-                        .map(guid => String(guid).trim())
-                        .filter(Boolean)
-                )]
-                : [];
-
-        console.log(
-            "IDENTIFY CONNECTOR GUIDS:",
-            company_guids
-        );
-
-        if (!company_guids.length) {
-
-            console.error(
-                "❌ No Tally company GUIDs received"
-            );
-
-            return;
-        }
-
-        const [
-            clientResult,
-            caResult
-        ] = await Promise.all([
-
-            supabase
-                .from("company")
-                .select(
-                    "company_code, client_tally_company_guid, client_connector_id"
-                )
-                .in(
-                    "client_tally_company_guid",
-                    company_guids
-                ),
-
-            supabase
-                .from("company")
-                .select(
-                    "company_code, ca_tally_company_guid, ca_connector_id"
-                )
-                .in(
-                    "ca_tally_company_guid",
-                    company_guids
-                )
-
-        ]);
-
-        if (
-            clientResult.error ||
-            caResult.error
-        ) {
-
-            throw new Error(
-                clientResult.error?.message ||
-                caResult.error?.message
-            );
-
-        }
-
-        const matches = [
-
-            ...(clientResult.data || []).map(row => ({
-                company_code:
-                    row.company_code,
-
-                company_guid:
-                    row.client_tally_company_guid,
-
-                connector_id:
-                    row.client_connector_id
-            })),
-
-            ...(caResult.data || []).map(row => ({
-                company_code:
-                    row.company_code,
-
-                company_guid:
-                    row.ca_tally_company_guid,
-
-                connector_id:
-                    row.ca_connector_id
-            }))
-
-        ].filter(
-            row => row.connector_id
-        );
-
-        const uniqueMatches =
-            new Map();
-
-        for (const match of matches) {
-
-            uniqueMatches.set(
-                `${match.company_code}:${match.connector_id}`,
-                match
-            );
-
-        }
-
-        if (uniqueMatches.size !== 1) {
-
-            console.error(
-                "❌ CONNECTOR IDENTITY NOT UNIQUE",
-                {
-                    socket_id: socket.id,
-                    matches: [...uniqueMatches.values()]
-                }
-            );
-
-            return;
-        }
-
-        const identity =
-            [...uniqueMatches.values()][0];
-
-        socket.companyCode =
-            identity.company_code;
-
-        socket.companyGuid =
-            identity.company_guid;
-
-        socket.connectorId =
-            identity.connector_id;
-
-        const registered =
-            registry.register(
-                identity.connector_id,
-                socket
-            );
-
-        if (!registered) {
-
-            console.error(
-                "❌ CONNECTOR AUTO REGISTRATION REJECTED",
-                identity
-            );
-
-            return;
-        }
-
-        console.log(
-            "✅ CONNECTOR AUTO REGISTERED",
-            {
-                socket_id: socket.id,
-                company_code:
-                    identity.company_code,
-                connector_id:
-                    identity.connector_id,
-                company_guid:
-                    identity.company_guid
-            }
-        );
-
-    } catch (err) {
-
-        console.error(
-            "❌ CONNECTOR IDENTITY ERROR:",
-            err
-        );
-
-    }
-
-});
-*/
-//030926 added
-
-// Connector Identity Resolve
 socket.on("identifyConnector", async (data) => {
 
     try {
@@ -851,42 +713,10 @@ socket.reportedTallyQueueStatus = tallyQueueStatus;
                     row.ca_connector_id
             }))
 
-        ].filter(
-            row => row.connector_id
-        );
+    ].filter(
+    row => row.connector_id
+);
 
-
-        // ==========================================
-        // ONE CONNECTOR CAN SERVE MULTIPLE COMPANIES
-        // ==========================================
-/*
-        const connectorIds =
-            [
-                ...new Set(
-                    matches.map(
-                        row => row.connector_id
-                    )
-                )
-            ];
-
-
-        if (connectorIds.length !== 1) {
-
-            console.error(
-                "❌ CONNECTOR IDENTITY NOT RESOLVED",
-                {
-                    socket_id: socket.id,
-                    connector_ids: connectorIds,
-                    matches
-                }
-            );
-
-            return;
-        }
-
-*/
-      // Connector is not assigned during startup.
-// Startup only records which Tally companies are available.
     
    socket.companyGuids =
     company_guids;
@@ -910,29 +740,6 @@ const connectorIds = [
             .filter(Boolean)
     )
 ];
-/* 221026
-for (const connectorId of connectorIds) {
-
-    const registered =
-        registry.register(
-            connectorId,
-            socket
-        );
-
-    if (registered) {
-
-        console.log(
-            "✅ EXISTING CONNECTOR AUTO REGISTERED",
-            {
-                socket_id: socket.id,
-                connector_id: connectorId
-            }
-        );
-
-    }
-}
-    */
-
 
 
 for (const connectorId of connectorIds) {
@@ -1095,10 +902,6 @@ for (const connectorId of connectorIds) {
 // ==========================================
 
 
-        // ==========================================
-        // RECOVER WAITING BATCHES — VALID OWNER ONLY
-        // ==========================================
-
         const hasOwnedConnector =
             connectorIds.some(connectorId =>
                 socket.connectorIds?.has(connectorId) &&
@@ -1106,14 +909,17 @@ for (const connectorId of connectorIds) {
             );
 
         if (hasOwnedConnector) {
-            await recoverWaitingBatchesForCompanies({
-                companyGuids: company_guids,
-                socket
-            });
-
-            await retryLatestConnectorLossBatchForCompanies(
-                company_guids
-            );
+    if (socket.tallyStatus === "ONLINE") {
+        await recoverWaitingBatchesForCompanies({
+            companyGuids: company_guids,
+            socket
+        });
+    } else {
+        console.log(
+            "⏳ WAITING BATCH RECOVERY DEFERRED: TALLY NOT CONFIRMED ONLINE",
+            { socket_id: socket.id, tally_status: socket.tallyStatus || "UNKNOWN" }
+        );
+    }
         } else {
             console.warn(
                 "⚠️ BATCH RECOVERY SKIPPED: SOCKET OWNS NO REGISTERED CONNECTOR",
@@ -1137,67 +943,7 @@ for (const connectorId of connectorIds) {
 
 
 // Connector Register
-/* 221026
-socket.on("register", (data) => {
 
-            console.log(
-                "Register Request :",
-                data
-            );
-
-                socket.companyCode =
-                data.company_code;
-
-            socket.companyGuid =
-                data.company_guid;
-
-            socket.connectorId =
-                data.connector_id;
-
-            console.log("REGISTER TRACE:", {
-                socket_id: socket.id,
-                connector_id: data.connector_id,
-                company_code: data.company_code,
-                computer_name: data.computer_name
-            });
-
-
-const registered =
-    registry.register(
-        data.connector_id,
-        socket
-    );
-
-if (!registered) {
-
-    console.error(
-        "❌ CONNECTOR REGISTRATION REJECTED",
-        {
-            socket_id: socket.id,
-            connector_id: data.connector_id,
-            company_code: data.company_code
-        }
-    );
-
-    return;
-}
-
-publishConnectorHealth(data.connector_id, {
-    connection_status: "CONNECTED",
-    socket_id: socket.id,
-    operation_status:
-        socket.tallyRequestActive === true
-            ? "BUSY"
-            : "FREE",
-    last_heartbeat_at:
-        socket.lastHeartbeat
-            ? new Date(socket.lastHeartbeat).toISOString()
-            : null
-});
-
-
-});
-*/
 
         // Connector Register
         socket.on("register", async (data) => {
@@ -1444,61 +1190,6 @@ socket.on("getMastersProgress", async (data) => {
 
 
 
-/* 221026
-        socket.on("protocol:heartbeat", () => {
-            socket.lastHeartbeat = Date.now();
-        });
-
-        socket.on("tally:request:start", (data) => {
-    socket.tallyRequestActive = true;
-    socket.tallyRequestStartedAt = data.timestamp || Date.now();
-    socket.lastTallyActivity = Date.now();
-
-    console.log("🟢 TALLY REQUEST START:", data.batchId);
-});
-
-socket.on("tally:request:end", (data) => {
-    socket.tallyRequestActive = false;
-    socket.tallyRequestStartedAt = 0;
-    socket.lastTallyActivity = Date.now();
-
-    console.log("✅ TALLY REQUEST END:", data.batchId);
-});
-
-socket.on("tally:request:error", (data) => {
-    socket.tallyRequestActive = false;
-    socket.tallyRequestStartedAt = 0;
-    socket.lastTallyActivity = Date.now();
-
-    console.log("❌ TALLY REQUEST ERROR:", data.batchId);
-});
-
-        socket.on("disconnect", (reason) => {
-
-            console.log("================================");
-            console.log("❌ Connector Disconnected");
-            console.log("Socket ID :", socket.id);
-            console.log("Reason :", reason);
-
-
-            if (socket.connectorIds) {
-
-                for (const connectorId of socket.connectorIds) {
-
-                    registry.remove(
-                        connectorId,
-                        socket
-                    );
-
-                }
-
-            }
-            console.log("================================");
-
-        });
-
-*/
-
         // ============================================================
         // SHARED HEALTH UPDATES — CURRENT SOCKET OWNER ONLY
         // ============================================================
@@ -1560,11 +1251,27 @@ socket.on("tally:request:error", (data) => {
             ? data.companies
             : [];
 
-    console.log(
+      console.log(
         "[TALLY STATUS]",
         "socket:", socket.id,
         "status:", status
     );
+
+    if (
+        status === "ONLINE" &&
+        Array.isArray(socket.companyGuids) &&
+        socket.companyGuids.length > 0
+    ) {
+        recoverWaitingBatchesForCompanies({
+            companyGuids: socket.companyGuids,
+            socket
+        }).catch(error => {
+            console.error(
+                "❌ TALLY ONLINE WAITING BATCH RECOVERY FAILED:",
+                error
+            );
+        });
+    }
 });
 
         socket.on("protocol:heartbeat", async () => {
@@ -1573,12 +1280,24 @@ socket.on("tally:request:error", (data) => {
             await updateOwnedSocketHealth({
                 connection_status: "CONNECTED",
                 operation_status:
-                    socket.tallyRequestActive === true
-                        ? "BUSY"
-                        : "FREE",
+    socket.tallyRequestActive === true
+        ? "BUSY"
+        : "UNKNOWN",
                 last_heartbeat_at:
                     new Date(socket.lastHeartbeat).toISOString()
             });
+
+            if (
+    socket.tallyRequestActive !== true &&
+    socket.tallyStatus === "ONLINE" &&
+    Array.isArray(socket.companyGuids) &&
+    socket.companyGuids.length > 0
+) {
+    await recoverWaitingBatchesForCompanies({
+        companyGuids: socket.companyGuids,
+        socket
+    });
+}
         });
 
         // ============================================================
@@ -1622,6 +1341,21 @@ socket.on("tally:request:error", (data) => {
             });
 
             console.log("✅ TALLY REQUEST END:", data?.batchId);
+            if (
+    socket.tallyStatus === "ONLINE" &&
+    Array.isArray(socket.companyGuids) &&
+    socket.companyGuids.length > 0
+) {
+    recoverWaitingBatchesForCompanies({
+        companyGuids: socket.companyGuids,
+        socket
+    }).catch(error => {
+        console.error(
+            "❌ CONNECTOR FREE WAITING BATCH RECOVERY FAILED:",
+            error
+        );
+    });
+}
         });
 
         // ============================================================
@@ -1641,6 +1375,8 @@ socket.on("tally:request:error", (data) => {
                         ? new Date(socket.lastHeartbeat).toISOString()
                         : null
             });
+
+
 
             console.log("❌ TALLY REQUEST ERROR:", data?.batchId);
         });

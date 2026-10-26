@@ -37,14 +37,23 @@ const { data: claimResult, error: claimError } =
 
     if (!result?.claimed) {
 
-        console.log("FIFO BATCH CLAIM DEFERRED OR SKIPPED:", {
+    const reason = String(
+        result?.reason || "UNKNOWN"
+    ).trim().toUpperCase();
+
+    // Preserve rejection reason for BullMQ worker.
+    job.claimRejectionReason = reason;
+
+    console.log(
+        "FIFO BATCH CLAIM DECLINED:",
+        {
             batch_db_id: batchDbId,
-            reason: result?.reason || "UNKNOWN"
-        });
+            reason
+        }
+    );
 
-        return null;
-    }
-
+    return null;
+}
     const { data: lockedBatch, error: readError } =
         await supabase
             .from("sync_batches")

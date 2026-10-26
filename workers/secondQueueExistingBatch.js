@@ -115,10 +115,16 @@ async function inspectConnectorRetryJob(
     const { getSyncQueue } = require("./secondSyncQueue");
     const syncQueue = getSyncQueue(queueName);
 
-    try {
-        const job = await syncQueue.getJob(batch.batch_id);
+  try {
+    const retryToken = batch.retry_claim_token ?? null;
 
-        if (!job) {
+    const bullJobId = retryToken
+        ? `${batch.batch_id}-retry-${retryToken}`
+        : batch.batch_id;
+
+    const job = await syncQueue.getJob(bullJobId);
+
+    if (!job) {
             return {
                 state: "NOT_FOUND",
                 matches: false
@@ -359,11 +365,12 @@ const { data: claimResult, error: claimError } = await supabase
             workerConfig.worker_name
         );
 
-        return {
-            success: true,
-            batch: claimed,
-            worker: workerConfig
-        };
+       return {
+    success: true,
+    queued: true,
+    batch: claimed,
+    worker: workerConfig
+};
     
     
     } catch (queueError) {
@@ -457,11 +464,65 @@ const { data: claimResult, error: claimError } = await supabase
 
 }
 
+async function inspectNormalBatchJob(
+    batch,
+    workerConfig
+) {
+    const { getSyncQueue } = require("./secondSyncQueue");
+
+    const syncQueue = getSyncQueue(workerConfig.queue_name);
+
+    try {
+        const job = await syncQueue.getJob(batch.batch_id);
+
+        if (!job) {
+            return {
+                state: "NOT_FOUND",
+                matches: false
+            };
+        }
+
+        const state = await job.getState();
+        const data = job.data || {};
+
+        const matches =
+            data.batch_id === batch.batch_id &&
+            String(data.batch_db_id) === String(batch.id) &&
+            data.worker_name === workerConfig.worker_name &&
+            String(data.worker_id) === String(workerConfig.id) &&
+            data.server_id === workerConfig.server_id &&
+            (data.retry_claim_token ?? null) === null;
+
+        return {
+            state,
+            matches
+        };
+    } finally {
+        await syncQueue.close();
+    }
+}
 
 async function dispatchBatch(batch) {
 
     if (!batch) {
         throw new Error("Batch is required");
+    }
+
+    // Never dispatch a batch with uncertain Tally outcome.
+    if (
+        String(batch.error_message || "")
+            .startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+    ) {
+        console.error(
+            "[BATCH DISPATCH] UNCERTAIN OUTCOME — MANUAL REVIEW:",
+            batch.batch_id
+        );
+
+        return {
+            success: false,
+            queued: false,
+            reason: "CONNECTOR_OUTCOME_UNKNOWN"
+        };
     }
 
     const workerConfig =
@@ -476,19 +537,21 @@ async function dispatchBatch(batch) {
         );
     }
 
-    const {
-        data: reserved,
-        error: reserveError
-    } = await supabase
-        .from("sync_batches")
-      .update({
-    worker_id: workerConfig.worker_name,
-    locked_at: new Date(),
-    sync_mode: batch.sync_mode,
-    sync_period: batch.sync_period,
-    job_type: batch.job_type,
-    worker_type: batch.worker_type
-})
+   const reservationLockedAt = new Date().toISOString();
+
+const {
+    data: reserved,
+    error: reserveError
+} = await supabase
+    .from("sync_batches")
+    .update({
+        worker_id: workerConfig.worker_name,
+        locked_at: reservationLockedAt,
+        sync_mode: batch.sync_mode,
+        sync_period: batch.sync_period,
+        job_type: batch.job_type,
+        worker_type: batch.worker_type
+    })
         .eq(
             "id",
             batch.id
@@ -497,9 +560,13 @@ async function dispatchBatch(batch) {
             "batch_status",
             "PENDING"
         )
-        .eq(
+             .eq(
             "worker_status",
             "PENDING"
+        )
+              // Allow NULL errors; reject the exact uncertain-outcome prefix.
+        .or(
+            "error_message.is.null,error_message.not.like.CONNECTOR\\_OUTCOME\\_UNKNOWN:%"
         )
         .is(
             "worker_id",
@@ -535,41 +602,137 @@ async function dispatchBatch(batch) {
             workerConfig.worker_name
         );
 
-        return {
-            success: true,
-            batch: reserved,
-            worker: workerConfig
-        };
+       return {
+    success: true,
+    queued: true,
+    batch: reserved,
+    worker: workerConfig
+};
 
-    } catch (queueError) {
+   } catch (queueError) {
 
-        await supabase
-            .from("sync_batches")
-            .update({
-                worker_id: null,
-                locked_at: null
-            })
-            .eq(
-                "id",
-                batch.id
-            )
-            .eq(
-                "batch_status",
-                "PENDING"
-            )
-            .eq(
-                "worker_status",
-                "PENDING"
-            )
-            .eq(
-                "worker_id",
-                workerConfig.worker_name
+    let queueCheck;
+
+    try {
+        queueCheck = await inspectNormalBatchJob(
+            reserved,
+            workerConfig
+        );
+    } catch (inspectError) {
+        console.error(
+            "❌ NORMAL BATCH QUEUE INSPECTION FAILED:",
+            {
+                batch_id: batch.batch_id,
+                queue_error: queueError.message,
+                inspect_error: inspectError.message
+            }
+        );
+
+        // Queue state unknown: do not release reservation.
+        const uncertainError = new Error(
+    `BATCH_QUEUE_STATE_UNCERTAIN: ${batch.batch_id}: ${queueError.message}`
+);
+
+uncertainError.code = "BATCH_QUEUE_STATE_UNCERTAIN";
+uncertainError.cause = queueError;
+
+throw uncertainError;
+    }
+
+    const activeStates = [
+        "waiting",
+        "active",
+        "delayed",
+        "prioritized",
+        "waiting-children"
+    ];
+
+    if (activeStates.includes(queueCheck.state)) {
+        if (queueCheck.matches) {
+            console.warn(
+                "⚠️ NORMAL BATCH JOB ALREADY QUEUED:",
+                {
+                    batch_id: batch.batch_id,
+                    queue_state: queueCheck.state
+                }
             );
 
-        throw queueError;
-    }
+            return {
+                success: true,
+                queued: true,
+                reason: "JOB_ALREADY_EXISTS",
+                batch: reserved,
+                worker: workerConfig
+            };
+        }
+
+        // Conflicting job exists: never rollback.
+const uncertainError = new Error(
+    `BATCH_QUEUE_STATE_UNCERTAIN: ${batch.batch_id}: conflicting BullMQ job (${queueCheck.state})`
+);
+
+uncertainError.code = "BATCH_QUEUE_STATE_UNCERTAIN";
+uncertainError.cause = queueError;
+
+throw uncertainError;
 }
 
+if (queueCheck.state !== "NOT_FOUND") {
+    // Existing job state needs separate handling.
+    const uncertainError = new Error(
+        `BATCH_QUEUE_STATE_UNCERTAIN: ${batch.batch_id}: BullMQ state=${queueCheck.state}`
+    );
+
+    uncertainError.code = "BATCH_QUEUE_STATE_UNCERTAIN";
+    uncertainError.cause = queueError;
+
+    throw uncertainError;
+}
+
+   const { data: rolledBack, error: rollbackError } = await supabase
+    .from("sync_batches")
+    .update({
+        worker_id: null,
+        locked_at: null
+    })
+    .eq("id", batch.id)
+    .eq("batch_status", "PENDING")
+    .eq("worker_status", "PENDING")
+    .eq("worker_id", workerConfig.worker_name)
+    .eq("locked_at", reserved.locked_at)
+    .select("id")
+    .maybeSingle();
+
+if (rollbackError || !rolledBack) {
+    console.error(
+        "❌ NORMAL BATCH RESERVATION ROLLBACK NOT CONFIRMED:",
+        {
+            batch_id: batch.batch_id,
+            error: rollbackError?.message || "Reservation changed"
+        }
+    );
+
+    const uncertainError = new Error(
+        `BATCH_QUEUE_STATE_UNCERTAIN: ${batch.batch_id}: rollback not confirmed`
+    );
+
+    uncertainError.code = "BATCH_QUEUE_STATE_UNCERTAIN";
+    uncertainError.cause = queueError;
+
+    throw uncertainError;
+}
+
+const confirmedError = new Error(
+    `BATCH_QUEUE_CONFIRMED_NOT_FOUND: ${batch.batch_id}: ${queueError.message}`
+);
+
+confirmedError.code = "BATCH_QUEUE_CONFIRMED_NOT_FOUND";
+confirmedError.cause = queueError;
+
+throw confirmedError;
+}
+}
+/* 261026
 async function dispatchPendingBatches() {
 
     if (dispatcherRunning) {
@@ -634,12 +797,7 @@ async function dispatchPendingBatches() {
                     continue;
                 }
 
-                /*
-                 * Atomic reservation.
-                 *
-                 * worker_status stays PENDING because
-                 * syncBullWorker -> lockJob() expects PENDING.
-                 */
+              
 
                 const {
                     data: reserved,
@@ -745,6 +903,7 @@ async function dispatchPendingBatches() {
         dispatcherRunning = false;
     }
 }
+*/
 
 /* 02092026
 function startBatchQueueDispatcher() {

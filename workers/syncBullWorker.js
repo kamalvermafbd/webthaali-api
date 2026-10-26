@@ -220,28 +220,22 @@ const lockedJob =
 
 if (!lockedJob) {
 
-    const { data: pendingBatch, error: pendingError } =
-        await supabase
-            .from("sync_batches")
-            .select("batch_status, worker_status, worker_id")
-            .eq("id", job.data.batch_db_id)
-            .maybeSingle();
+    const deferReasons = new Set([
+        "EARLIER_BATCH_PENDING",
+        "EARLIER_CONNECTOR_LOSS_RETRY_READY",
+        "ANOTHER_BATCH_RUNNING"
+    ]);
 
-    if (pendingError) {
-        throw new Error(
-            `Batch state verification failed: ${pendingError.message}`
-        );
-    }
+    const claimReason = String(
+        lockInput.claimRejectionReason || "UNKNOWN"
+    ).trim().toUpperCase();
 
-    if (
-        pendingBatch?.batch_status === "PENDING" &&
-        pendingBatch?.worker_status === "PENDING" &&
-        pendingBatch?.worker_id === worker.worker_name
-    ) {
+    if (deferReasons.has(claimReason)) {
 
         console.log(
-            "BULLMQ BATCH DEFERRED — WAITING FOR FIFO ELIGIBILITY:",
-            job.data.batch_id
+            "BULLMQ BATCH DEFERRED - WAITING FOR FIFO:",
+            job.data.batch_id,
+            claimReason
         );
 
         await job.moveToDelayed(
@@ -253,13 +247,15 @@ if (!lockedJob) {
     }
 
     console.log(
-        "BATCH NO LONGER ELIGIBLE — SKIPPING:",
-        job.data.batch_id
+        "BATCH CLAIM REJECTED - SKIPPING:",
+        job.data.batch_id,
+        claimReason
     );
 
     return {
         success: true,
-        skipped: true
+        skipped: true,
+        reason: claimReason
     };
 }
 

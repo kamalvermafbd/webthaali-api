@@ -592,6 +592,32 @@ if (expiredRetryError) {
 } else {
 for (const reservation of expiredRetryReservations || []) {
     try {
+
+                // Recover expired DB reservation independently of Redis.
+        // The RPC validates the exact token, lease and batch state
+        // under the same advisory lock used by worker claims.
+        const { data: recoveryResult, error: recoveryError } =
+            await supabase.rpc("recover_expired_connector_retry", {
+                p_batch_id: reservation.batch_id,
+                p_retry_claim_token: reservation.retry_claim_token
+            });
+
+        if (recoveryError) {
+            console.error(
+                "[CONNECTOR WATCHDOG] EXPIRED RETRY RECOVERY FAILED:",
+                reservation.batch_id,
+                recoveryError.message
+            );
+        } else {
+            console.log(
+                "[CONNECTOR WATCHDOG] EXPIRED RETRY RECOVERY RESULT:",
+                {
+                    batch_id: reservation.batch_id,
+                    result: recoveryResult
+                }
+            );
+        }
+        
         const { data: assignedWorker, error: workerError } =
             await supabase
                 .from("workers")
@@ -614,10 +640,15 @@ for (const reservation of expiredRetryReservations || []) {
 
         const queue = getSyncQueue(assignedWorker.queue_name);
 
-        try {
-            const job = await queue.getJob(reservation.batch_id);
-            const jobState = job ? await job.getState() : "NOT_FOUND";
+       try {
+    const retryToken = reservation.retry_claim_token;
 
+    const bullJobId = retryToken
+        ? `${reservation.batch_id}-retry-${retryToken}`
+        : reservation.batch_id;
+
+    const job = await queue.getJob(bullJobId);
+    const jobState = job ? await job.getState() : "NOT_FOUND";
             const tokenMatches =
                 job !== undefined &&
                 job !== null &&
@@ -645,38 +676,14 @@ if (!job) {
     jobState === "prioritized"
 ) {
     recoveryDecision = "EXPIRED_QUEUED_JOB";
-} else if (
-    jobState === "failed" ||
-    jobState === "completed"
-) {
-    recoveryDecision = "TERMINAL_JOB";
+    // Expired reservation: candidate for token-fenced recovery.
+    // Do not remove the BullMQ job here.
+} else if (jobState === "failed") {
+    recoveryDecision = "FAILED_JOB";
+} else if (jobState === "completed") {
+    recoveryDecision = "COMPLETED_JOB";
 }
 
-// Recover only when BullMQ has no job for this batch.
-// The RPC rechecks the exact retry token, lease and batch state.
-if (recoveryDecision === "JOB_NOT_FOUND") {
-    const { data: recoveryResult, error: recoveryError } =
-        await supabase.rpc("recover_expired_connector_retry", {
-            p_batch_id: reservation.batch_id,
-            p_retry_claim_token: reservation.retry_claim_token
-        });
-
-    if (recoveryError) {
-        console.error(
-            "[CONNECTOR WATCHDOG] EXPIRED RETRY RECOVERY FAILED:",
-            reservation.batch_id,
-            recoveryError.message
-        );
-    } else {
-        console.log(
-            "[CONNECTOR WATCHDOG] EXPIRED RETRY RECOVERY RESULT:",
-            {
-                batch_id: reservation.batch_id,
-                result: recoveryResult
-            }
-        );
-    }
-}
             console.warn(
                 "[CONNECTOR WATCHDOG] EXPIRED RETRY BULLMQ INSPECTION:",
                 {
@@ -731,10 +738,11 @@ if (recoveryDecision === "JOB_NOT_FOUND") {
                     sync_mode,
                     sync_period,
                     job_type,
-                    worker_type
+                    worker_type,
+                    retry_count
                 `)
             .or(
-    "and(batch_status.eq.PROCESSING,worker_status.eq.RUNNING),and(batch_status.eq.PENDING,worker_status.eq.PENDING,current_stage.eq.WAITING_CONNECTOR),and(batch_status.eq.FAILED,worker_status.eq.FAILED,error_message.like.CONNECTOR_LOSS:*)"
+    "and(batch_status.eq.PROCESSING,worker_status.eq.RUNNING),and(batch_status.eq.PENDING,worker_status.eq.PENDING,current_stage.eq.WAITING_CONNECTOR),and(batch_status.eq.FAILED,worker_status.eq.FAILED)"
 )
 .order("created_at", { ascending: true })
 .order("id", { ascending: true });
@@ -761,11 +769,38 @@ if (recoveryDecision === "JOB_NOT_FOUND") {
 
     try {
 
-       // FAILED connector-loss batches: separate safe retry flow.
+        // Never automatically process a batch with uncertain Tally outcome.
+        // Applies to FAILED, WAITING_CONNECTOR and RUNNING paths.
+        if (
+            String(batch.error_message || "")
+                .startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+        ) {
+            console.warn(
+                "[CONNECTOR WATCHDOG] UNCERTAIN OUTCOME — MANUAL REVIEW:",
+                batch.batch_id
+            );
+
+            continue;
+        }
+
+        // FAILED connector-loss batches: separate safe retry flow.
 if (
     batch.batch_status === "FAILED" &&
     batch.worker_status === "FAILED"
 ) {
+    // Never automatically retry uncertain Tally outcomes.
+    if (
+        String(batch.error_message || "")
+            .startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+    ) {
+        continue;
+    }
+
+    // Maximum 3 automatic retries.
+    // NULL retry_count is treated as 0.
+    if (Number(batch.retry_count ?? 0) >= 3) {
+        continue;
+    }
     const companyCode = String(batch.company_code || "").trim();
     const tallyOwner = String(batch.tally_owner || "").trim().toUpperCase();
 
@@ -823,7 +858,10 @@ if (
 
   
     // Connector and Tally are healthy.
-// Retry eligibility is independent of whether another request is BUSY.
+// All FAILED batches are eligible, regardless of error reason.
+// Maximum 3 automatic retries.
+// BUSY blocks dispatch separately.
+
 const { error: retryReadyError } = await supabase
     .from("sync_batches")
     .update({
@@ -832,7 +870,7 @@ const { error: retryReadyError } = await supabase
     .eq("id", batch.id)
     .eq("batch_status", "FAILED")
     .eq("worker_status", "FAILED")
-    .like("error_message", "CONNECTOR_LOSS:%");
+    .or("retry_count.lt.3,retry_count.is.null");
 
 if (retryReadyError) {
     console.error(
@@ -1250,6 +1288,13 @@ if (
     batch.current_stage ===
     "WAITING_CONNECTOR"
 ) {
+    // Never restart a batch with an uncertain Tally outcome.
+    if (
+        String(batch.error_message || "")
+            .startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+    ) {
+        continue;
+    }
 
     // ------------------------------------------------
     // Connector socket is back, but Tally must also

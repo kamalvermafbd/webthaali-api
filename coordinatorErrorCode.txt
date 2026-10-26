@@ -1,0 +1,150 @@
+﻿        operationAbortController.signal.aborted ||
+        !lock.socket.connected ||
+        !lock.socket.protocolReceiver ||
+        registry.get(lock.connectorId) !== lock.socket
+    ) {
+        throw new Error(
+            `Connector unavailable before callback execution: ${lock.connectorId}`
+        );
+    }
+
+    return operation(
+        lock.socket,
+        operationAbortController.signal
+    );
+});
+        return operationPromise;
+        })
+        .then(
+            (value) => {
+                if (settled) return;
+
+                settled = true;
+                cleanup();
+                resolve(value);
+            },
+           (error) => {
+    if (settled) return;
+
+    settled = true;
+    lockLost = true;
+    cleanup();
+
+    quarantineConnectorAndSocket(
+    lock.connectorId,
+    lock.socketId,
+    "OPERATION_FAILED_REMOTE_STATE_UNKNOWN",
+    lock.ownerToken
+).then(
+        () => reject(error),
+        (quarantineError) => {
+            console.error(
+                `[GLOBAL LOCK] Failure quarantine failed: ${lock.connectorId}`,
+                quarantineError
+            );
+            reject(quarantineError);
+        }
+    );
+}
+        );
+});
+
+        // Keep renewal active until operation cleanup finishes.
+while (renewing) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+}
+    if (
+    lockLost ||
+    operationAbortController.signal.aborted ||
+    !lock.socket.connected ||
+    !lock.socket.protocolReceiver ||
+    registry.get(lock.connectorId) !== lock.socket
+) {
+    lockLost = true;
+
+    throw new Error(
+        `Connector lock or connection lost: ${lock.connectorId}`
+    );
+}
+        let stillOwned = false;
+
+try {
+    stillOwned = await renewConnectorAndSocketLock(
+        lock.connectorId,
+        lock.socketId,
+        lock.ownerToken,
+        LOCK_TTL_MS
+    );
+} catch (error) {
+    lockLost = true;
+
+    console.error(
+        `[GLOBAL LOCK] Final renewal failed: ${lock.connectorId}`,
+        error
+    );
+
+    operationAbortController.abort(error);
+
+    if (lock.socket.connected) {
+        lock.socket.disconnect(true);
+    }
+
+    throw error;
+}
+     if (!stillOwned) {
+    lockLost = true;
+
+    const error = new Error(
+        `Global lock ownership lost: ${lock.connectorId}`
+    );
+
+    console.error(
+        `[GLOBAL LOCK] Final ownership check failed: ${lock.connectorId}`
+    );
+
+    operationAbortController.abort(error);
+
+    if (lock.socket.connected) {
+        lock.socket.disconnect(true);
+    }
+
+    throw error;
+}
+
+      if (renewalTimer) {
+    clearInterval(renewalTimer);
+    renewalTimer = null;
+}
+
+while (renewing) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+}
+
+if (
+    lockLost ||
+    operationAbortController.signal.aborted ||
+    !lock.socket.connected ||
+    !lock.socket.protocolReceiver ||
+    registry.get(lock.connectorId) !== lock.socket
+) {
+    lockLost = true;
+
+    throw new Error(
+        `Connector became unavailable before completion: ${lock.connectorId}`
+    );
+}
+
+operationCompletedSafely = true;
+return result;
+ } finally {
+
+    if (lockLost) {
+    if (renewalTimer) {
+        clearInterval(renewalTimer);
+        renewalTimer = null;
+    }
+}
+
+    while (renewing) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+    }
