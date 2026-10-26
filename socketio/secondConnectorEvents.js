@@ -735,6 +735,36 @@ socket.on("identifyConnector", async (data) => {
 
     try {
 
+        const rawQueueStatus = data?.tally_queue_status;
+
+        const isValidQueueStatus =
+    rawQueueStatus !== null &&
+    typeof rawQueueStatus === "object" &&
+    !Array.isArray(rawQueueStatus) &&
+    typeof rawQueueStatus.idle === "boolean" &&
+    Number.isSafeInteger(rawQueueStatus.pendingOperations) &&
+    rawQueueStatus.pendingOperations >= 0 &&
+    Number.isSafeInteger(rawQueueStatus.runningOperations) &&
+    rawQueueStatus.runningOperations >= 0 &&
+    Number.isSafeInteger(rawQueueStatus.operationGeneration) &&
+    rawQueueStatus.operationGeneration >= 0;
+
+const tallyQueueStatus = isValidQueueStatus
+    ? {
+        idle: rawQueueStatus.idle,
+        pendingOperations: rawQueueStatus.pendingOperations,
+        runningOperations: rawQueueStatus.runningOperations,
+        operationGeneration: rawQueueStatus.operationGeneration
+    }
+    : null;
+
+socket.reportedTallyQueueStatus = tallyQueueStatus;
+
+        console.log("📋 CONNECTOR TALLY QUEUE STATUS:", {
+            socket_id: socket.id,
+            queue_status: tallyQueueStatus
+        });
+
         const company_guids =
             Array.isArray(data?.company_guids)
                 ? [...new Set(
