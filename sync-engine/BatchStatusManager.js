@@ -64,30 +64,18 @@ class BatchStatusManager {
 
         }
 
-        const {
-
-            error
-
-        } = await supabase
-
-            .from(TABLES.SYNC_BATCHES)
-
-            .update({
-
-                ...fields,
-
-                last_activity_at:
-                    new Date().toISOString()
-
-            })
-
-            .eq(
-
-                "batch_id",
-
-                batch_id
-
-            );
+       const { data, error } = await supabase
+    .from(TABLES.SYNC_BATCHES)
+    .update({
+        ...fields,
+        last_activity_at: new Date().toISOString()
+    })
+    .eq("batch_id", batch_id)
+   .or(
+    "error_message.is.null,error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:"
+)
+    .select("batch_id")
+    .maybeSingle();
 
         if (error) {
 
@@ -101,7 +89,7 @@ class BatchStatusManager {
 
         }
 
-        return true;
+      return Boolean(data);
 
     }
 
@@ -455,16 +443,14 @@ async hasCompletedSync({
 
                 })
 
-                .eq("batch_id", batch_id)
-
-                .eq("worker_id", worker_id)
-
-                .eq("worker_status", "HTTP_RUNNING")
-
-                .select("batch_id")
-
-                .maybeSingle();
-
+            .eq("batch_id", batch_id)
+            .eq("worker_id", worker_id)
+            .eq("worker_status", "HTTP_RUNNING")
+            .or(
+                "error_message.is.null,error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:"
+            )
+            .select("batch_id")
+            .maybeSingle();
             if (error) {
 
                 throw new Error(
@@ -703,9 +689,12 @@ const { data, error: updateError } = await supabase
         worker_status: "FAILED",
         error_message: finalErrorMessage
     })
-    .eq("batch_id", batch_id)
+       .eq("batch_id", batch_id)
     .neq("batch_status", "COMPLETED")
     .neq("batch_status", "CLOSED")
+   .or(
+    "error_message.is.null,error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:"
+)
     .select("batch_id")
     .maybeSingle();
 
@@ -731,58 +720,7 @@ async markWaitingConnector({
 
 }) {
 
-    /*191026
-    return this.updateFields({
-
-        batch_id,
-
-        fields: {
-
-            batch_status:
-                BATCH_STATUS.PENDING,
-
-            worker_status:
-                "PENDING",
-
-            current_stage:
-                SYNC_STAGE.WAITING_CONNECTOR,
-
-            error_message:
-                null,
-
-            worker_id:
-                null,
-
-            locked_at:
-                null,
-
-            heartbeat_at:
-                null
-
-        }
-
-    });
-    */
-
-    /* 201026 
-const { data, error } = await supabase
-    .from(TABLES.SYNC_BATCHES)
-    .update({
-        batch_status: BATCH_STATUS.PENDING,
-        worker_status: "PENDING",
-        current_stage: SYNC_STAGE.WAITING_CONNECTOR,
-        error_message: null,
-        worker_id: null,
-        locked_at: null,
-        heartbeat_at: null
-    })
-    .eq("batch_id", batch_id)
-    .neq("batch_status", "COMPLETED")
-    .neq("batch_status", "CLOSED")
-    .select("batch_id")
-    .maybeSingle();
-*/
-
+   
 const { data, error } = await supabase
     .from(TABLES.SYNC_BATCHES)
     .update({
@@ -794,12 +732,14 @@ const { data, error } = await supabase
         locked_at: null,
         heartbeat_at: null
     })
-    .eq("batch_id", batch_id)
+      .eq("batch_id", batch_id)
     .eq("batch_status", "PROCESSING")
     .eq("worker_status", "RUNNING")
+    .or(
+    "error_message.is.null,error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:"
+)
     .select("batch_id")
     .maybeSingle();
-
 
 if (error) {
     throw new Error("Failed to mark batch waiting: " + error.message);

@@ -39737,6 +39737,39 @@ const runningBatch =
 
     });
 
+if (!runningBatch) {
+
+    console.error(
+        "⛔ BATCH NOT FOUND — SYNC BLOCKED:",
+        sync_batch_id
+    );
+
+    return res.status(503).json({
+        success: false,
+        error: "BATCH_LOOKUP_UNAVAILABLE"
+    });
+
+}
+
+if (
+    typeof runningBatch.error_message === "string" &&
+    runningBatch.error_message.startsWith(
+        "CONNECTOR_OUTCOME_UNKNOWN:"
+    )
+) {
+
+    console.error(
+        "⛔ UNCERTAIN BATCH — SERVER RETRY BLOCKED:",
+        sync_batch_id
+    );
+
+    return res.status(409).json({
+        success: false,
+        error: "Batch outcome is uncertain. Automatic retry blocked.",
+        error_code: "CONNECTOR_OUTCOME_UNKNOWN"
+    });
+
+}
 
 const sync =
 
@@ -43049,7 +43082,13 @@ db: {
 
       try {
 
-        if (isTallyOffline) {
+        if (
+    isTallyOffline &&
+    !(
+        err?.requestDispatched === true &&
+        err?.connectorResponseReceived !== true
+    )
+) {
 
           await BatchStatusManager.markWaitingConnector({
             batch_id: sync_batch_id
@@ -43065,11 +43104,23 @@ db: {
           const isConnectorLoss =
             typeof err?.message === "string" &&
             err.message.includes("Connector disconnected");
-
+/*271026
           const failureError = isConnectorLoss
             ? `CONNECTOR_LOSS: ${err.message}`
             : err;
+*/
 
+const failureError = isConnectorLoss
+  ? Object.assign(
+      new Error(`CONNECTOR_LOSS: ${err.message}`),
+      {
+        requestDispatched:
+          err.requestDispatched === true,
+        connectorResponseReceived:
+          err.connectorResponseReceived === true
+      }
+    )
+  : err;
           await BatchStatusManager.markFailed({
             batch_id: sync_batch_id,
             error: failureError
@@ -43097,21 +43148,29 @@ db: {
 
     }
 
-    return res.status(
-      isTallyOffline ? 503 : 500
-    ).json({
+    const isUncertainOutcome =
+  err?.requestDispatched === true &&
+  err?.connectorResponseReceived !== true;
 
-      success: false,
+return res.status(
+  isTallyOffline ? 503 : 500
+).json({
 
-      error:
-        isTallyOffline
-          ? "TALLY_OFFLINE"
-          : (
-              err.response?.data ||
-              err.message
-            )
+  success: false,
 
-    });
+  error:
+    isTallyOffline
+      ? "TALLY_OFFLINE"
+      : (
+          err.response?.data ||
+          err.message
+        ),
+
+  ...(isUncertainOutcome
+    ? { error_code: "CONNECTOR_OUTCOME_UNKNOWN" }
+    : {})
+
+});
 
 }
 

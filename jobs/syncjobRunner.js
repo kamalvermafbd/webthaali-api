@@ -30,63 +30,58 @@ async function runJob(job, serverUrl) {
                 attempt++
             ) {
 
-                try {
+              try {
 
-                    console.log(
-                        `TALLY_SYNC ATTEMPT ${attempt}/${MAX_ATTEMPTS}:`,
-                        job.batch_id
-                    );
-/* 181026
-                    const controller =
-                        new AbortController();
+    let retryBatch;
 
-                    const timeout =
-                        setTimeout(
-                            () => controller.abort(),
-                            5 * 60 * 1000
-                        );
+try {
+    retryBatch =
+        await BatchStatusManager.loadBatch({
+            batch_id: job.batch_id
+        });
+} catch (lookupError) {
+    console.error(
+        "⛔ BATCH LOOKUP FAILED — HTTP DISPATCH BLOCKED:",
+        job.batch_id,
+        lookupError
+    );
 
-                    let response;
+    return;
+}
 
-                    try {
+if (!retryBatch) {
+    console.error(
+        "⛔ BATCH NOT FOUND — HTTP DISPATCH BLOCKED:",
+        job.batch_id
+    );
 
-                        const syncServerUrl =
-    process.env.BILLEY_SYNC_API_URL || "https://sync-api.billey.in";
+    return;
+}
 
-                        response = await fetch(
-                       `${syncServerUrl}/getMasters` +
-                            `?company_code=${encodeURIComponent(job.company_code)}` +
-                            `&tally_owner=${encodeURIComponent(job.tally_owner)}` +
-                           `&sync_mode=${encodeURIComponent(job.sync_mode)}` +
-                            `&sync_period=${encodeURIComponent(job.sync_period)}` +
-                            `&worker_batch_id=${encodeURIComponent(job.batch_id)}`,
-                            {
-                                signal: controller.signal
-                            }
-                        );  
+    if (
+        typeof retryBatch?.error_message === "string" &&
+        retryBatch.error_message.startsWith(
+            "CONNECTOR_OUTCOME_UNKNOWN:"
+        )
+    ) {
+        console.error(
+            "⛔ UNCERTAIN BATCH — HTTP RETRY BLOCKED:",
+            job.batch_id
+        );
 
-                    } finally {
+        return;
+    }
 
-                        clearTimeout(timeout);
-
-                    }
-*/
+    console.log(
+        `TALLY_SYNC ATTEMPT ${attempt}/${MAX_ATTEMPTS}:`,
+        job.batch_id
+    );
 
 let response;
 
 const syncServerUrl =
     process.env.BILLEY_SYNC_API_URL ||
     "https://sync-api.billey.in";
-/* 191026
-response = await fetch(
-    `${syncServerUrl}/getMasters` +
-    `?company_code=${encodeURIComponent(job.company_code)}` +
-    `&tally_owner=${encodeURIComponent(job.tally_owner)}` +
-    `&sync_mode=${encodeURIComponent(job.sync_mode)}` +
-    `&sync_period=${encodeURIComponent(job.sync_period)}` +
-    `&worker_batch_id=${encodeURIComponent(job.batch_id)}`
-);
-*/
 
 
 response = await fetch(
@@ -120,10 +115,22 @@ response = await fetch(
 
                         try {
                             errorData = JSON.parse(text);
-                        } catch {
+                        } 
+                        
+                        catch {
                             // Response is not JSON
                         }
 
+                        if (
+                            errorData?.error_code === "CONNECTOR_OUTCOME_UNKNOWN"
+                        ) {
+                            console.error(
+                                "⛔ UNCERTAIN CONNECTOR OUTCOME — RETRY BLOCKED:",
+                                job.batch_id
+                            );
+
+                            return;
+                        }
                        if (
                             errorData?.error === "Connector offline" ||
                             errorData?.error === "TALLY_OFFLINE" ||
@@ -161,13 +168,24 @@ response = await fetch(
                         );
                     }
 
-                    if (responseData?.success === false) {
+                  if (responseData?.success === false) {
 
-                        throw new Error(
-                            responseData.error ||
-                            "getMasters returned success:false"
+                    if (
+                        responseData?.error_code === "CONNECTOR_OUTCOME_UNKNOWN"
+                    ) {
+                        console.error(
+                            "⛔ UNCERTAIN CONNECTOR OUTCOME — RETRY BLOCKED:",
+                            job.batch_id
                         );
+
+                        return;
                     }
+
+                    throw new Error(
+                        responseData.error ||
+                        "getMasters returned success:false"
+                    );
+                }
 
                     console.log(
                         "TALLY_SYNC REQUEST COMPLETED:",
@@ -251,6 +269,20 @@ response = await fetch(
 
                 return;
             }
+
+            if (
+    typeof currentBatch?.error_message === "string" &&
+    currentBatch.error_message.startsWith(
+        "CONNECTOR_OUTCOME_UNKNOWN:"
+    )
+) {
+    console.error(
+        "⛔ UNCERTAIN BATCH — FAILURE OVERWRITE BLOCKED:",
+        job.batch_id
+    );
+
+    return;
+}
 
             await BatchStatusManager.markFailed({
 
