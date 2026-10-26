@@ -43048,11 +43048,19 @@ db: {
             sync_batch_id
           );
 
-        } else {
+               } else {
+
+          const isConnectorLoss =
+            typeof err?.message === "string" &&
+            err.message.includes("Connector disconnected");
+
+          const failureError = isConnectorLoss
+            ? `CONNECTOR_LOSS: ${err.message}`
+            : err;
 
           await BatchStatusManager.markFailed({
             batch_id: sync_batch_id,
-            error: err
+            error: failureError
           });
 
         }

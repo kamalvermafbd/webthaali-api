@@ -70,11 +70,13 @@ async function removeFailedJobIfSafe(
     const jobData = existingJob.data || {};
 
     const sameAssignment =
-        jobData.batch_id === batch.batch_id &&
-        String(jobData.batch_db_id) === String(batch.id) &&
-        jobData.worker_name === workerConfig.worker_name &&
-        String(jobData.worker_id) === String(workerConfig.id) &&
-        jobData.server_id === workerConfig.server_id;
+    jobData.batch_id === batch.batch_id &&
+    String(jobData.batch_db_id) === String(batch.id) &&
+    jobData.worker_name === workerConfig.worker_name &&
+    String(jobData.worker_id) === String(workerConfig.id) &&
+    jobData.server_id === workerConfig.server_id &&
+    (jobData.retry_claim_token ?? null) ===
+        (batch.retry_claim_token ?? null);
 
     if (
         [
@@ -287,6 +289,7 @@ async function addBatchToQueue(
             {
                 batch_id: batch.batch_id,
                 batch_db_id: batch.id,
+                retry_claim_token: batch.retry_claim_token ?? null,
                 company_code: batch.company_code,
                 tally_owner: batch.tally_owner,
                 job_type: batch.job_type,

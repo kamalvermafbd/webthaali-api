@@ -1,5 +1,5 @@
 require("dotenv").config();
-
+const { randomUUID } = require("crypto");
 const { createClient } =
     require("@supabase/supabase-js");
 
@@ -59,22 +59,30 @@ async function rollbackConnectorLossRetry(batch, workerName, originalError) {
 }
 */
 
-async function rollbackConnectorLossRetry(batch, workerName, originalError) {
+async function rollbackConnectorLossRetry(
+    batch,
+    workerName,
+    originalError,
+    retryClaimToken
+) {
     const { data: rolledBack, error: rollbackError } = await supabase
         .from("sync_batches")
-        .update({
-            batch_status: "FAILED",
-            worker_status: "FAILED",
-            worker_id: null,
-            locked_at: null,
-            heartbeat_at: null,
-            error_message: originalError
-        })
-        .eq("id", batch.id)
-        .eq("batch_status", "PENDING")
-        .eq("worker_status", "PENDING")
-        .eq("worker_id", workerName)
-        .select("id")
+      .update({
+    batch_status: "FAILED",
+    worker_status: "FAILED",
+    worker_id: null,
+    locked_at: null,
+    heartbeat_at: null,
+    retry_claim_token: null,
+    retry_lease_until: null,
+    error_message: originalError
+})
+.eq("id", batch.id)
+.eq("batch_status", "PENDING")
+.eq("worker_status", "PENDING")
+.eq("worker_id", workerName)
+.eq("retry_claim_token", retryClaimToken)
+.select("id")
         .maybeSingle();
 
     if (rollbackError) {
@@ -121,11 +129,13 @@ async function inspectConnectorRetryJob(
         const data = job.data || {};
 
         const matches =
-            data.batch_id === batch.batch_id &&
-            String(data.batch_db_id) === String(batch.id) &&
-            data.worker_name === workerConfig.worker_name &&
-            String(data.worker_id) === String(workerConfig.id) &&
-            data.server_id === workerConfig.server_id;
+    data.batch_id === batch.batch_id &&
+    String(data.batch_db_id) === String(batch.id) &&
+    data.worker_name === workerConfig.worker_name &&
+    String(data.worker_id) === String(workerConfig.id) &&
+    data.server_id === workerConfig.server_id &&
+    (data.retry_claim_token ?? null) ===
+        (batch.retry_claim_token ?? null);
 
         return {
             state,
@@ -249,14 +259,18 @@ if (runningBatch) {
 */
 
 
-    // Atomically verify latest batch and claim connector-loss retry.
-    const { data: claimResult, error: claimError } = await supabase
-        .rpc("claim_latest_connector_loss_retry", {
-            p_company_code: batch.company_code,
-            p_tally_owner: batch.tally_owner,
-            p_expected_batch_id: batch.batch_id,
-            p_worker_name: workerConfig.worker_name
-        });
+   // Unique ownership token for this retry attempt.
+const retryClaimToken = randomUUID();
+
+// Atomically claim the batch with this ownership token.
+const { data: claimResult, error: claimError } = await supabase
+    .rpc("claim_latest_connector_loss_retry", {
+        p_company_code: batch.company_code,
+        p_tally_owner: batch.tally_owner,
+        p_expected_batch_id: batch.batch_id,
+        p_worker_name: workerConfig.worker_name,
+        p_retry_claim_token: retryClaimToken
+    });
 
     if (claimError) {
         throw new Error(
@@ -288,21 +302,24 @@ if (runningBatch) {
 
     // Reload the claimed row so queue payload uses current database state.
     const { data: claimed, error: loadClaimedError } = await supabase
-        .from("sync_batches")
-        .select("*")
-        .eq("batch_id", batch.batch_id)
-        .eq("worker_id", workerConfig.worker_name)
-        .eq("batch_status", "PENDING")
-        .eq("worker_status", "PENDING")
-        .maybeSingle();
+    .from("sync_batches")
+    .select("*")
+    .eq("batch_id", batch.batch_id)
+    .eq("worker_id", workerConfig.worker_name)
+    .eq("batch_status", "PENDING")
+    .eq("worker_status", "PENDING")
+    .eq("retry_claim_token", retryClaimToken)
+    .gt("retry_lease_until", new Date().toISOString())
+    .maybeSingle();
 
 
-    if (loadClaimedError || !claimed) {
-        await rollbackConnectorLossRetry(
-            batch,
-            workerConfig.worker_name,
-            originalError
-        );
+  if (loadClaimedError || !claimed) {
+    await rollbackConnectorLossRetry(
+        batch,
+        workerConfig.worker_name,
+        originalError,
+        retryClaimToken
+    );
 
         throw new Error(
             `Retry claimed but batch reload failed for ${batch.batch_id}: ${
@@ -313,7 +330,25 @@ if (runningBatch) {
 
 
     try {
-        await addBatchToQueue(claimed, workerConfig);
+    const { data: currentClaim, error: ownershipError } =
+        await supabase
+            .from("sync_batches")
+            .select("id")
+            .eq("id", batch.id)
+            .eq("batch_status", "PENDING")
+            .eq("worker_status", "PENDING")
+            .eq("worker_id", workerConfig.worker_name)
+            .eq("retry_claim_token", retryClaimToken)
+            .gt("retry_lease_until", new Date().toISOString())
+            .maybeSingle();
+
+    if (ownershipError || !currentClaim) {
+        throw new Error(
+            `CONNECTOR_RETRY_OWNERSHIP_LOST: ${batch.batch_id}`
+        );
+    }
+
+    await addBatchToQueue(claimed, workerConfig);
 
         console.log(
             "CONNECTOR LOSS RETRY QUEUED:",
@@ -332,7 +367,21 @@ if (runningBatch) {
     
     
     } catch (queueError) {
-        let queueCheck;
+
+    if (
+        String(queueError.message || "").startsWith(
+            "CONNECTOR_RETRY_OWNERSHIP_LOST:"
+        )
+    ) {
+        console.error(
+            "CONNECTOR RETRY ABORTED: OWNERSHIP LOST",
+            batch.batch_id
+        );
+
+        throw queueError;
+    }
+
+    let queueCheck;
 
         try {
             queueCheck = await inspectConnectorRetryJob(
@@ -388,11 +437,12 @@ if (runningBatch) {
             throw queueError;
         }
 
-        const rolledBack = await rollbackConnectorLossRetry(
-            batch,
-            workerConfig.worker_name,
-            originalError
-        );
+      const rolledBack = await rollbackConnectorLossRetry(
+    batch,
+    workerConfig.worker_name,
+    originalError,
+    retryClaimToken
+);
 
         if (!rolledBack) {
             console.error(

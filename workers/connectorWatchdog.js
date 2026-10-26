@@ -20,6 +20,9 @@ const connectorRegistry = require("../socketio/connectorRegistry");
 const connectorHealthStore =
     require("../socketio/connectorHealthStore");
 
+const { getSyncQueue } =
+    require("./secondSyncQueue");
+
 let watchdogTimer = null;
 let watchdogRunning = false;
 const waitingConnectorSince = new Map();
@@ -559,6 +562,146 @@ async function checkConnectorWatchdog({
 discoverRegisteredConnectors(registry || connectorRegistry);
 
 refreshRegisteredConnectorHealth(registry || connectorRegistry);
+
+// Detect expired connector-loss retry reservations.
+// Read-only: do not reset or requeue here.
+const { data: expiredRetryReservations, error: expiredRetryError } =
+    await supabase
+        .from("sync_batches")
+        .select(`
+            id,
+            batch_id,
+            company_code,
+            tally_owner,
+            worker_id,
+            retry_claim_token,
+            retry_lease_until
+        `)
+        .eq("batch_status", "PENDING")
+        .eq("worker_status", "PENDING")
+        .not("retry_claim_token", "is", null)
+        .lt("retry_lease_until", new Date().toISOString())
+        .order("retry_lease_until", { ascending: true })
+        .limit(25);
+
+if (expiredRetryError) {
+    console.error(
+        "[CONNECTOR WATCHDOG] Expired retry lookup failed:",
+        expiredRetryError.message
+    );
+} else {
+for (const reservation of expiredRetryReservations || []) {
+    try {
+        const { data: assignedWorker, error: workerError } =
+            await supabase
+                .from("workers")
+                .select("id, worker_name, queue_name, server_id")
+                .eq("worker_name", reservation.worker_id)
+                .maybeSingle();
+
+        if (workerError) {
+            throw workerError;
+        }
+
+        if (!assignedWorker?.queue_name) {
+            console.warn(
+                "[CONNECTOR WATCHDOG] EXPIRED RETRY — WORKER QUEUE NOT FOUND:",
+                reservation.batch_id,
+                reservation.worker_id
+            );
+            continue;
+        }
+
+        const queue = getSyncQueue(assignedWorker.queue_name);
+
+        try {
+            const job = await queue.getJob(reservation.batch_id);
+            const jobState = job ? await job.getState() : "NOT_FOUND";
+
+            const tokenMatches =
+                job !== undefined &&
+                job !== null &&
+                String(job.data?.batch_db_id) === String(reservation.id) &&
+                job.data?.worker_name === assignedWorker.worker_name &&
+                String(job.data?.worker_id) === String(assignedWorker.id) &&
+                String(job.data?.server_id) === String(assignedWorker.server_id) &&
+                (job.data?.retry_claim_token ?? null) ===
+                    reservation.retry_claim_token;
+
+                    // Read-only recovery decision.
+// Do not modify database or BullMQ jobs here.
+let recoveryDecision = "MANUAL_REVIEW";
+
+if (!job) {
+    recoveryDecision = "JOB_NOT_FOUND";
+} else if (!tokenMatches) {
+    recoveryDecision = "TOKEN_MISMATCH";
+} else if (jobState === "active") {
+    recoveryDecision = "ACTIVE_JOB_DO_NOT_TOUCH";
+} else if (
+    jobState === "waiting" ||
+    jobState === "delayed" ||
+    jobState === "waiting-children" ||
+    jobState === "prioritized"
+) {
+    recoveryDecision = "EXPIRED_QUEUED_JOB";
+} else if (
+    jobState === "failed" ||
+    jobState === "completed"
+) {
+    recoveryDecision = "TERMINAL_JOB";
+}
+
+// Recover only when BullMQ has no job for this batch.
+// The RPC rechecks the exact retry token, lease and batch state.
+if (recoveryDecision === "JOB_NOT_FOUND") {
+    const { data: recoveryResult, error: recoveryError } =
+        await supabase.rpc("recover_expired_connector_retry", {
+            p_batch_id: reservation.batch_id,
+            p_retry_claim_token: reservation.retry_claim_token
+        });
+
+    if (recoveryError) {
+        console.error(
+            "[CONNECTOR WATCHDOG] EXPIRED RETRY RECOVERY FAILED:",
+            reservation.batch_id,
+            recoveryError.message
+        );
+    } else {
+        console.log(
+            "[CONNECTOR WATCHDOG] EXPIRED RETRY RECOVERY RESULT:",
+            {
+                batch_id: reservation.batch_id,
+                result: recoveryResult
+            }
+        );
+    }
+}
+            console.warn(
+                "[CONNECTOR WATCHDOG] EXPIRED RETRY BULLMQ INSPECTION:",
+                {
+                    batch_id: reservation.batch_id,
+                    queue_name: assignedWorker.queue_name,
+                    job_found: Boolean(job),
+                  job_state: jobState,
+                    token_matches: tokenMatches,
+                    recovery_decision: recoveryDecision,
+                    retry_claim_token: reservation.retry_claim_token,
+                    retry_lease_until: reservation.retry_lease_until
+                }
+            );
+        } finally {
+            await queue.close();
+        }
+    } catch (inspectionError) {
+        console.error(
+            "[CONNECTOR WATCHDOG] EXPIRED RETRY INSPECTION FAILED:",
+            reservation.batch_id,
+            inspectionError.message
+        );
+    }
+}
+}
         // ----------------------------------------------------
         // 1. Get batches that need connector monitoring
         //

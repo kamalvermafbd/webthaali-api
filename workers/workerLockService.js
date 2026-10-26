@@ -16,11 +16,14 @@ async function lockJob(job, workerConfig) {
         throw new Error("Invalid batch ID or worker configuration");
     }
 
-    const { data: claimResult, error: claimError } =
-        await supabase.rpc("claim_sync_batch_fifo", {
-            p_batch_db_id: batchDbId,
-            p_worker_name: workerConfig.worker_name
-        });
+   const retryClaimToken = job?.data?.retry_claim_token ?? null;
+
+const { data: claimResult, error: claimError } =
+    await supabase.rpc("claim_sync_batch_fifo", {
+        p_batch_db_id: batchDbId,
+        p_worker_name: workerConfig.worker_name,
+        p_retry_claim_token: retryClaimToken
+    });
 
     if (claimError) {
         throw new Error(
