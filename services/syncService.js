@@ -1,6 +1,9 @@
 const registry = require("../socketio/connectorRegistry");
 const { sendToConnector } = require("../socketio/sendToConnector");
 const { withGlobalConnectorLock } = require("../socketio/connectorOperationCoordinator");
+
+const { randomUUID } = require("crypto");
+
 /* 2410126
 const crypto = require("crypto");
 const {
@@ -569,7 +572,9 @@ const lockedResult = await withGlobalConnectorLock(
         "Connector disconnected, changed or operation aborted while holding Trial Balance global lock"
     );
 }
-        const tbRowsPromise =
+        const requestId = randomUUID();
+
+const tbRowsPromise =
     lockedSocket.protocolReceiver.waitForCollection();
 
 tbRowsPromise.catch(() => {});
@@ -577,11 +582,12 @@ tbRowsPromise.catch(() => {});
         let tbResult;
 
 try {
-    tbResult = await sendToConnector(
+   tbResult = await sendToConnector(
     lockedSocket,
     "getTrialBalance",
     {
-        company: tallyCompany
+        company: tallyCompany,
+        requestId
     },
     { signal }
 );
@@ -612,9 +618,10 @@ try {
         let tallyLedgers;
 
 try {
-    lockedSocket.protocolReceiver.sendReady(
-        "getTrialBalance"
-    );
+  lockedSocket.protocolReceiver.sendReady(
+    "getTrialBalance",
+    requestId
+);
     tallyLedgers = await tbRowsPromise;
 } catch (error) {
     lockedSocket.protocolReceiver.cancelCollection(
@@ -1056,6 +1063,8 @@ const lockedResult = await withGlobalConnectorLock(
     );
 }
 
+const requestId = randomUUID();
+
 const stockRowsPromise =
     lockedSocket.protocolReceiver.waitForCollection();
 
@@ -1064,15 +1073,16 @@ stockRowsPromise.catch(() => {});
     let stockResult;
 
 try {
-    stockResult = await sendToConnector(
-        lockedSocket,
-        "getStockGodownSummary",
-        {
-            company: tallyCompany,
-            booksBeginningFrom
-        },
-        { signal }
-    );
+  stockResult = await sendToConnector(
+    lockedSocket,
+    "getStockGodownSummary",
+    {
+        company: tallyCompany,
+        booksBeginningFrom,
+        requestId
+    },
+    { signal }
+);
 } catch (error) {
     lockedSocket.protocolReceiver.cancelCollection(
         "Stock Godown request error"
@@ -1101,8 +1111,9 @@ let stock;
 
 try {
     lockedSocket.protocolReceiver.sendReady(
-        "getStockGodownSummary"
-    );
+    "getStockGodownSummary",
+    requestId
+);
 
     stock = await stockRowsPromise;
 } catch (error) {
