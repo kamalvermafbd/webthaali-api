@@ -785,6 +785,7 @@ async function saveVoucher({
 async function saveVoucher({
     voucher,
     sync_batch_id,
+    execution_claim_token,
     company_code,
     tally_owner
 }) {
@@ -801,6 +802,8 @@ async function saveVoucher({
             tally_owner,
 
             sync_batch_id,
+
+            execution_claim_token,
 
             rowsToSave: [voucher],
 
@@ -1147,6 +1150,8 @@ async function saveVoucherExecutionData({
 
     sync_batch_id,
 
+    execution_claim_token,
+
     syncMode,
 
     executionMode = "NORMAL",
@@ -1197,6 +1202,8 @@ async function saveVoucherExecutionData({
         tally_owner,
 
         sync_batch_id,
+
+        execution_claim_token,
 
         syncMode,
 
@@ -1689,6 +1696,7 @@ async function saveVouchers({
     company_code,
     tally_owner,
     sync_batch_id,
+    execution_claim_token,
     syncMode,
     country,
     vouchers = [],
@@ -2534,6 +2542,8 @@ const executionResult =
 
         sync_batch_id,
 
+        execution_claim_token,
+
         syncMode,
 
         executionMode,
@@ -2673,15 +2683,11 @@ if (isChildReconciliation) {
 }
 
 await BatchStatusManager.updateFields({
-
     batch_id: sync_batch_id,
-
+    execution_claim_token,
     fields: {
-
         incremental_post_completed: true
-
     }
-
 });
 
 console.log(
@@ -2741,19 +2747,13 @@ await supabase
    .eq("batch_id", sync_batch_id);
 */
 await BatchStatusManager.updateFields({
-
     batch_id: sync_batch_id,
-
+    execution_claim_token,
     fields: {
-
         guid_scan_completed: true,
-
         total_vouchers: vouchers.length,
-
         current_module: "GUID_SCAN"
-
     }
-
 });
 
 const data = null;
@@ -2808,23 +2808,6 @@ console.log(
     "Voucher reconciliation already completed by Sync Engine."
 );
 
-await supabase
-    .from("sync_batches")
-    .update({
-
-        batch_status: "COMPLETED",
-
-        current_module: "COMPLETED",
-
-        processed_vouchers: success,
-
-        failed_vouchers: vouchers.length - success,
-
-        completed_at: new Date().toISOString()
-
-    })
-
-    .eq("batch_id", sync_batch_id);
 
     /*
 fs.appendFileSync(

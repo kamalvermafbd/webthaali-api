@@ -101,12 +101,17 @@ if (
                 batch_id: claimResult.batch_id
             });
 
-        if (
-            existingBatch &&
-            existingBatch.batch_status === "PENDING" &&
-            !existingBatch.worker_id
-        ) {
-
+       if (
+    existingBatch &&
+    existingBatch.batch_status === "PENDING" &&
+    existingBatch.worker_status === "PENDING" &&
+    existingBatch.current_stage === "PENDING" &&
+    !existingBatch.worker_id &&
+    !String(existingBatch.error_message || "")
+        .startsWith("HTTP_OUTCOME_UNKNOWN:") &&
+    !String(existingBatch.error_message || "")
+        .startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+) {
             let dispatchResult;
 
             try {

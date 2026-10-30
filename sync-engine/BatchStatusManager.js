@@ -37,12 +37,10 @@ class BatchStatusManager {
     // ----------------------------------
 
     async updateFields({
-
-        batch_id,
-
-        fields = {}
-
-    }) {
+    batch_id,
+    execution_claim_token,
+    fields = {}
+}) {
 
         if (!batch_id) {
 
@@ -54,6 +52,18 @@ class BatchStatusManager {
 
         }
 
+        if (
+            typeof execution_claim_token !== "string" ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                execution_claim_token
+            )
+        ) {
+            const error = new Error(
+                "updateFields requires a valid execution claim token"
+            );
+            error.code = "EXECUTION_CLAIM_LOST";
+            throw error;
+        }
         if (
 
             Object.keys(fields).length === 0
@@ -71,8 +81,11 @@ class BatchStatusManager {
         last_activity_at: new Date().toISOString()
     })
     .eq("batch_id", batch_id)
-   .or(
-    "error_message.is.null,error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:"
+.eq("execution_claim_token", execution_claim_token)
+.neq("batch_status", "COMPLETED")
+.neq("batch_status", "CLOSED")
+.or(
+    "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
 )
     .select("batch_id")
     .maybeSingle();
@@ -89,10 +102,17 @@ class BatchStatusManager {
 
         }
 
-      return Boolean(data);
+    if (!data) {
+    const error = new Error(
+        `Batch update rejected: ownership or state mismatch, batch_id=${batch_id}`
+    );
+    error.code = "EXECUTION_CLAIM_LOST";
+    throw error;
+}
 
-    }
+return true;
 
+}
      // ----------------------------------
     // Load Batch
     // ----------------------------------
@@ -446,9 +466,9 @@ async hasCompletedSync({
             .eq("batch_id", batch_id)
             .eq("worker_id", worker_id)
             .eq("worker_status", "HTTP_RUNNING")
-            .or(
-                "error_message.is.null,error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:"
-            )
+           .or(
+    "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
+)
             .select("batch_id")
             .maybeSingle();
             if (error) {
@@ -475,139 +495,104 @@ async hasCompletedSync({
     // ----------------------------------
 
     async updateStatus({
+    batch_id,
+    execution_claim_token,
+    status
+}) {
 
+    return this.updateFields({
         batch_id,
-
-        status
-
-    }) {
-
-        return this.updateFields({
-
-            batch_id,
-
-            fields: {
-
-                batch_status: status
-
-            }
-
-        });
-
-    }
+        execution_claim_token,
+        fields: {
+            batch_status: status
+        }
+    });
+}
 
     // ----------------------------------
     // Update Current Module
     // ----------------------------------
 
-    async updateModule({
+  async updateModule({
+    batch_id,
+    execution_claim_token,
+    module,
+    entity = null,
+    action = null,
+    operation = null
+}) {
 
+    return this.updateFields({
         batch_id,
-
-        module,
-
-        entity = null,
-
-        action = null,
-
-        operation = null
-
-    }) {
-
-        return this.updateFields({
-
-            batch_id,
-
-           fields: {
-
-                current_module: module,
-
-                current_entity: entity,
-
-                current_action: action,
-
-                current_operation: operation,
-
-                last_successful_module: module
-
-            }
-
-        });
-
-    }
-
+        execution_claim_token,
+        fields: {
+            current_module: module,
+            current_entity: entity,
+            current_action: action,
+            current_operation: operation,
+            last_successful_module: module
+        }
+    });
+}
     // ----------------------------------
     // Update Progress
     // ----------------------------------
 
     async updateProgress({
+    batch_id,
+    execution_claim_token,
+    progress
+}) {
 
+    return this.updateFields({
         batch_id,
-
-        progress
-
-    }) {
-
-        return this.updateFields({
-
-            batch_id,
-
-            fields: {
-
-                sync_progress: progress
-
-            }
-
-        });
-
-    }
+        execution_claim_token,
+        fields: {
+            sync_progress: progress
+        }
+    });
+}
 
         // ----------------------------------
     // Mark Started
     // ----------------------------------
 
     async markStarted({
+    batch_id,
+    execution_claim_token
+}) {
 
-        batch_id
-
-    }) {
-
-        return this.updateFields({
-
-            batch_id,
-
-            fields: {
-
-                batch_status:
-
-                    BATCH_STATUS.RUNNING,
-
-                started_at:
-
-                    new Date().toISOString()
-
-            }
-
-        });
-
-    }
+    return this.updateFields({
+        batch_id,
+        execution_claim_token,
+      fields: {
+            batch_status: BATCH_STATUS.PROCESSING,
+            started_at: new Date().toISOString()
+        }
+    });
+}
 
     // ----------------------------------
     // Mark Completed
     // ----------------------------------
 
     async markCompleted({
-
-        batch_id,
-
-        module,
-
-        processed = 0,
-
-        failed = 0
-
-    }) {
-
+    batch_id,
+    module,
+    processed = 0,
+    failed = 0,
+    execution_claim_token
+}) {
+    if (
+        typeof execution_claim_token !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            execution_claim_token
+        )
+    ) {
+        throw new Error(
+            "markCompleted requires a valid execution claim token"
+        );
+    }
         console.log("BATCH MARK COMPLETED:", {
     batch_id,
     module,
@@ -615,36 +600,43 @@ async hasCompletedSync({
     failed
 });
 
-        return this.updateFields({
+      const { data, error } = await supabase
+    .from(TABLES.SYNC_BATCHES)
+   .update({
+    batch_status: BATCH_STATUS.COMPLETED,
+    worker_status: "COMPLETED",
+    processed_vouchers: processed,
+    failed_vouchers: failed,
+    completed_at: new Date().toISOString(),
+    current_module: module,
+    last_successful_module: module,
+    error_message: null,
+    last_activity_at: new Date().toISOString()
+})
+    .eq("batch_id", batch_id)
+.eq("batch_status", "PROCESSING")
+.eq("worker_status", "RUNNING")
+.eq("execution_claim_token", execution_claim_token)
+.or(
+    "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
+)
+    .select("batch_id")
+    .maybeSingle();
 
-            batch_id,
+if (error) {
+    throw new Error(
+        "Failed to mark batch completed: " + error.message
+    );
+}
 
-            fields: {
+if (!data) {
+    console.warn(
+        "BATCH COMPLETION SKIPPED — STATE CHANGED:",
+        batch_id
+    );
+}
 
-                batch_status:
-
-                    BATCH_STATUS.COMPLETED,
-
-                 worker_status:
-                    "COMPLETED",
-
-                processed_vouchers:
-
-                    processed,
-
-                failed_vouchers:
-
-                    failed,
-
-                completed_at:
-
-                    new Date().toISOString(),
-
-                    last_successful_module: module
-
-            }
-
-        });
+return Boolean(data);
 
     }
 
@@ -653,12 +645,20 @@ async hasCompletedSync({
 // ----------------------------------
 
 async markFailed({
-
     batch_id,
-
-    error
-
+    error,
+    execution_claim_token
 }) {
+    if (
+        typeof execution_claim_token !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            execution_claim_token
+        )
+    ) {
+        throw new Error(
+            "markFailed requires a valid execution claim token"
+        );
+    }
 
     console.log("🔥 BATCH MARK FAILED:", {
         batch_id,
@@ -675,8 +675,12 @@ const originalError =
         : error?.message || "Unknown Error";
 
 const isUncertainOutcome =
-    error?.requestDispatched === true &&
-    error?.connectorResponseReceived !== true;
+    error?.outcomeUnknown === true ||
+    error?.code === "GET_MASTERS_TRANSFER_OUTCOME_UNKNOWN" ||
+    (
+        error?.requestDispatched === true &&
+        error?.connectorResponseReceived !== true
+    );
 
 const finalErrorMessage = isUncertainOutcome
     ? `CONNECTOR_OUTCOME_UNKNOWN: ${originalError}`
@@ -690,11 +694,12 @@ const { data, error: updateError } = await supabase
         error_message: finalErrorMessage
     })
        .eq("batch_id", batch_id)
-    .neq("batch_status", "COMPLETED")
-    .neq("batch_status", "CLOSED")
-   .or(
-    "error_message.is.null,error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:"
-)
+        .eq("execution_claim_token", execution_claim_token)
+        .neq("batch_status", "COMPLETED")
+        .neq("batch_status", "CLOSED")
+        .or(
+            "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
+        )
     .select("batch_id")
     .maybeSingle();
 
@@ -710,17 +715,88 @@ return Boolean(data);
 
 
 }
+
+// ----------------------------------
+// Mark HTTP Outcome Unknown
+// ----------------------------------
+
+async markHttpOutcomeUnknown({
+    batch_id,
+    error,
+    execution_claim_token
+}) {
+    if (!batch_id) {
+        throw new Error("batch_id is required");
+    }
+
+    if (
+        typeof execution_claim_token !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            execution_claim_token
+        )
+    ) {
+        throw new Error(
+            "markHttpOutcomeUnknown requires a valid execution claim token"
+        );
+    }
+
+    const errorMessage =
+        typeof error === "string"
+            ? error
+            : error?.message || "HTTP connection lost";
+
+    const { data, error: updateError } = await supabase
+        .from(TABLES.SYNC_BATCHES)
+       .update({
+    error_message:
+        `HTTP_OUTCOME_UNKNOWN: ${errorMessage}`,
+    last_activity_at: new Date().toISOString()
+})
+       .eq("batch_id", batch_id)
+.eq("batch_status", "PROCESSING")
+.eq("worker_status", "RUNNING")
+.eq("execution_claim_token", execution_claim_token)
+.or(
+    "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
+)
+        .select("batch_id")
+        .maybeSingle();
+
+    if (updateError) {
+        throw new Error(
+            "Failed to mark HTTP outcome unknown: " +
+            updateError.message
+        );
+    }
+
+    if (!data) {
+    throw new Error(
+        `HTTP_OUTCOME_UNKNOWN_MARK_NOT_PERSISTED: batch_id=${batch_id}`
+    );
+}
+
+return true;
+}
     // ----------------------------------
 // Mark Waiting For Connector
 // ----------------------------------
 
 async markWaitingConnector({
-
-    batch_id
-
+    batch_id,
+    execution_claim_token
 }) {
+    if (
+        typeof execution_claim_token !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            execution_claim_token
+        )
+    ) {
+        throw new Error(
+            "markWaitingConnector requires a valid execution claim token"
+        );
+    }
 
-   
+/* 291026   
 const { data, error } = await supabase
     .from(TABLES.SYNC_BATCHES)
     .update({
@@ -735,22 +811,32 @@ const { data, error } = await supabase
       .eq("batch_id", batch_id)
     .eq("batch_status", "PROCESSING")
     .eq("worker_status", "RUNNING")
+    .eq("execution_claim_token", execution_claim_token)
     .or(
-    "error_message.is.null,error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:"
-)
-    .select("batch_id")
-    .maybeSingle();
+        "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
+    )
+        .select("batch_id")
+        .maybeSingle();
 
-if (error) {
-    throw new Error("Failed to mark batch waiting: " + error.message);
-}
+    if (error) {
+        throw new Error("Failed to mark batch waiting: " + error.message);
+    }
 
-if (!data) {
-    console.log("WAITING CONNECTOR UPDATE SKIPPED — ALREADY COMPLETED/CLOSED:", batch_id);
-}
+    if (!data) {
+        console.log("WAITING CONNECTOR UPDATE SKIPPED — ALREADY COMPLETED/CLOSED:", batch_id);
+    }
 
 return Boolean(data);
+*/
+console.warn(
+    "[BATCH STATUS] WAITING_CONNECTOR TRANSITION DEFERRED",
+    {
+        batch_id,
+        reason: "Previous Tally execution settlement not verified"
+    }
+);
 
+return false;
 
 }
 
@@ -762,25 +848,20 @@ return Boolean(data);
 // Merge existing payload before update.
 // Do not overwrite payload.connector.
 
-    async updateConnectorState({
+  async updateConnectorState({
+    batch_id,
+    execution_claim_token,
+    connectorState
+}) {
 
+    return this.updateFields({
         batch_id,
+        execution_claim_token,
+        fields: {
 
-        connectorState
-
-    }) {
-
-        return this.updateFields({
-
-            batch_id,
-
-            fields: {
-
-            }
-
-        });
-
-    }
+        }
+    });
+}
 
 
     
@@ -793,55 +874,70 @@ return Boolean(data);
 // Current implementation expects retry_count from caller.
 
 
-    async incrementRetry({
+  async incrementRetry({
+    batch_id,
+    execution_claim_token,
+    retry_count
+}) {
 
+    return this.updateFields({
         batch_id,
+        execution_claim_token,
+        fields: {
+            retry_count
+        }
+    });
+}
+// ----------------------------------
+// Reset Connector Retry Readiness
+// ----------------------------------
 
-        retry_count
-
-    }) {
-
-        return this.updateFields({
-
-            batch_id,
-
-            fields: {
-
-                retry_count
-
-            }
-
-        });
-
+async resetConnectorRetryReadiness({ batch_id }) {
+    if (!batch_id) {
+        throw new Error("batch_id is required");
     }
 
+    const { data, error } = await supabase
+        .from(TABLES.SYNC_BATCHES)
+        .update({
+            connector_retry_ready: false
+        })
+        .eq("batch_id", batch_id)
+        .eq("batch_status", "FAILED")
+        .eq("worker_status", "FAILED")
+        .like("error_message", "CONNECTOR_LOSS:%")
+        .eq("connector_retry_ready", true)
+        .select("batch_id")
+        .maybeSingle();
+
+    if (error) {
+        throw new Error(
+            "Failed to reset connector retry readiness: " +
+            error.message
+        );
+    }
+
+    return Boolean(data);
+}
     // ----------------------------------
     // Mark Reconciliation Completed
     // ----------------------------------
 
-    async markReconciliationCompleted({
+  async markReconciliationCompleted({
+    batch_id,
+    execution_claim_token
+}) {
 
-        batch_id
-
-    }) {
-
-        return this.updateFields({
-
-            batch_id,
-
-            fields: {
-
-                reconciliation_completed: true,
-
-                reconciliation_completed_at:
-
-                    new Date().toISOString()
-
-            }
-
-        });
-
-    }
+    return this.updateFields({
+        batch_id,
+        execution_claim_token,
+        fields: {
+            reconciliation_completed: true,
+            reconciliation_completed_at:
+                new Date().toISOString()
+        }
+    });
+}
 
 
 }

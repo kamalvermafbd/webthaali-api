@@ -199,13 +199,25 @@ if (operation?.table === "tally_vouchers") {
             console.log("total rows :", rows.length);
             console.log("================================");
 
-       const {
+    const {
     data,
     error
-} = await supabase
-    .from(table)
-    .insert(chunk)
-    .select("voucher_guid");
+} = await supabase.rpc(
+    "fenced_sync_insert",
+    {
+        p_batch_id: operation.batch_id,
+        p_execution_claim_token:
+            operation.execution_claim_token,
+        p_table: table,
+        p_rows: chunk
+    }
+);
+
+if (error?.message?.includes("EXECUTION_CLAIM_LOST")) {
+    const claimError = new Error("EXECUTION_CLAIM_LOST");
+    claimError.code = "EXECUTION_CLAIM_LOST";
+    throw claimError;
+}
 
 if (error) {
 
@@ -221,7 +233,7 @@ console.log(
     "requested:",
     chunk.length,
     "inserted:",
-    data?.length || 0
+    data ?? 0
 );
 
     }
@@ -275,35 +287,38 @@ return true;
 
 console.log("OPTIONS :", options);
 
-           const {
-                data,
-                error
-            } = await supabase
-                .from(table)
-                .upsert(
-                    chunk,
-                    options
-                )
-                .select("*");
+          const {
+    data,
+    error
+} = await supabase.rpc(
+    "fenced_sync_upsert",
+    {
+        p_batch_id: operation.batch_id,
+        p_execution_claim_token:
+            operation.execution_claim_token,
+        p_table: table,
+        p_rows: chunk,
+        p_on_conflict: options.onConflict
+    }
+);
 
-            console.log(
-                "=== UPSERT RESULT ===",
-                {
-                    table,
-                    requested: chunk.length,
-                    returned: data?.length || 0,
-                    error: error?.message || null
-                }
-            );
+if (
+    error?.message?.includes("EXECUTION_CLAIM_LOST")
+) {
+    const claimError = new Error("EXECUTION_CLAIM_LOST");
+    claimError.code = "EXECUTION_CLAIM_LOST";
+    throw claimError;
+}
 
-            if (data?.length) {
-
-                console.dir(
-                    data[0],
-                    { depth: null }
-                );
-
-            }
+       console.log(
+    "=== UPSERT RESULT ===",
+    {
+        table,
+        requested: chunk.length,
+        affected: data ?? 0,
+        error: error?.message || null
+    }
+);
 
             if (error) {
 
@@ -373,30 +388,32 @@ console.log("OPTIONS :", options);
 
                 callback: async (chunk) => {
 
-                    const {
-                        data,
-                        error
-                    } = await supabase
-                        .from(table)
-                        .upsert(
-                            chunk,
-                            options
-                        )
-                        .select("*");
+               const { data, error } = await supabase.rpc(
+    "fenced_opening_balance_upsert",
+    {
+        p_batch_id: operation.batch_id,
+        p_execution_claim_token: operation.execution_claim_token,
+        p_rows: chunk
+    }
+);
 
-                    if (error) {
+                    if (error?.message?.includes("EXECUTION_CLAIM_LOST")) {
+    const claimError = new Error("EXECUTION_CLAIM_LOST");
+    claimError.code = "EXECUTION_CLAIM_LOST";
+    throw claimError;
+}
 
-                        throw new Error(
-                            `OPENING BALANCE UPSERT failed (${table}) : ${error.message}`
-                        );
-
-                    }
+if (error) {
+    throw new Error(
+        `OPENING BALANCE UPSERT failed (${table}) : ${error.message}`
+    );
+}
 
                     console.log(
                         "OPENING BALANCE UPSERT:",
                         {
                             requested: chunk.length,
-                            returned: data?.length || 0
+                            returned: data ?? 0
                         }
                     );
 
@@ -541,29 +558,28 @@ if (existingError) {
 
         if (missingIds.length > 0) {
 
-            const {
-                error: inactiveError
-            } = await supabase
-                .from(table)
-                .update({
-                    is_active: false,
-                    updated_at:
-                        new Date().toISOString(),
-                    sync_batch_id:
-                        operation.sync_batch_id
-                })
-                .in(
-                    "id",
-                    missingIds
-                );
+        const { error: inactiveError } = await supabase.rpc(
+    "fenced_opening_balance_deactivate",
+    {
+        p_batch_id: operation.batch_id,
+        p_execution_claim_token: operation.execution_claim_token,
+        p_ids: missingIds,
+        p_sync_batch_id: operation.sync_batch_id,
+        p_updated_at: new Date().toISOString()
+    }
+);
 
-            if (inactiveError) {
+      if (inactiveError?.message?.includes("EXECUTION_CLAIM_LOST")) {
+    const claimError = new Error("EXECUTION_CLAIM_LOST");
+    claimError.code = "EXECUTION_CLAIM_LOST";
+    throw claimError;
+}
 
-                throw new Error(
-                    `OPENING BALANCE INACTIVATE failed (${table}) : ${inactiveError.message}`
-                );
-
-            }
+if (inactiveError) {
+    throw new Error(
+        `OPENING BALANCE INACTIVATE failed (${table}) : ${inactiveError.message}`
+    );
+}
 
         }
 
@@ -637,30 +653,31 @@ if (existingError) {
 
                 callback: async (chunk) => {
 
-                    const {
-                        data,
-                        error
-                    } = await supabase
-                        .from(table)
-                        .upsert(
-                            chunk,
-                            options
-                        )
-                        .select("*");
+                const { data, error } = await supabase.rpc(
+                "fenced_stock_opening_balance_upsert",
+                {
+                    p_batch_id: operation.batch_id,
+                    p_execution_claim_token: operation.execution_claim_token,
+                    p_rows: chunk
+                }
+            );
+                  if (error?.message?.includes("EXECUTION_CLAIM_LOST")) {
+    const claimError = new Error("EXECUTION_CLAIM_LOST");
+    claimError.code = "EXECUTION_CLAIM_LOST";
+    throw claimError;
+}
 
-                    if (error) {
-
-                        throw new Error(
-                            `STOCK OPENING BALANCE UPSERT failed (${table}) : ${error.message}`
-                        );
-
-                    }
+if (error) {
+    throw new Error(
+        `STOCK OPENING BALANCE UPSERT failed (${table}) : ${error.message}`
+    );
+}
 
                     console.log(
                         "STOCK OPENING BALANCE UPSERT:",
                         {
                             requested: chunk.length,
-                            returned: data?.length || 0
+                            returned: data ?? 0
                         }
                     );
 
@@ -791,22 +808,22 @@ if (existingError) {
 
         if (missingIds.length > 0) {
 
-            const {
-                error: inactiveError
-            } = await supabase
-                .from(table)
-                .update({
-                    is_active: false,
-                    updated_at:
-                        new Date().toISOString(),
-                    sync_batch_id:
-                        operation.sync_batch_id
-                })
-                .in(
-                    "id",
-                    missingIds
-                );
+       const { error: inactiveError } = await supabase.rpc(
+    "fenced_stock_opening_balance_deactivate",
+    {
+        p_batch_id: operation.batch_id,
+        p_execution_claim_token: operation.execution_claim_token,
+        p_ids: missingIds,
+        p_sync_batch_id: operation.sync_batch_id,
+        p_updated_at: new Date().toISOString()
+    }
+);
 
+if (inactiveError?.message?.includes("EXECUTION_CLAIM_LOST")) {
+    const claimError = new Error("EXECUTION_CLAIM_LOST");
+    claimError.code = "EXECUTION_CLAIM_LOST";
+    throw claimError;
+}
             if (inactiveError) {
 
                 throw new Error(
@@ -873,57 +890,42 @@ if (existingError) {
     // No IN filter → normal UPDATE
     // ----------------------------------
 
-    if (!inFilter) {
+       if (!inFilter) {
 
-        let query =
-            supabase
-                .from(table)
-                .update(values);
-
-        for (const filter of filters) {
-
-            if (
-                typeof query[filter.type] !==
-                "function"
-            ) {
-
-                throw new Error(
-                    `Unsupported filter type : ${filter.type}`
-                );
-
+        const { data, error } = await supabase.rpc(
+            "fenced_sync_update",
+            {
+                p_batch_id: operation.batch_id,
+                p_execution_claim_token:
+                    operation.execution_claim_token,
+                p_table: table,
+                p_values: values,
+                p_filters: filters
             }
+        );
 
-            query =
-                query[filter.type](
-                    filter.column,
-                    filter.value
-                );
-
+        if (
+            error?.message?.includes("EXECUTION_CLAIM_LOST")
+        ) {
+            const claimError = new Error("EXECUTION_CLAIM_LOST");
+            claimError.code = "EXECUTION_CLAIM_LOST";
+            throw claimError;
         }
-
-        const {
-            data,
-            error
-        } = await query.select("*");
 
         console.log(
             "UPDATE RESULT:",
             table,
             "updated:",
-            data?.length || 0
+            data ?? 0
         );
 
-            
         if (error) {
-
             throw new Error(
                 `UPDATE failed (${table}) : ${error.message}`
             );
-
         }
 
         return true;
-
     }
 
     // ----------------------------------
@@ -946,64 +948,51 @@ if (existingError) {
 
         callback: async (chunk) => {
 
-            let query =
-                supabase
-                    .from(table)
-                    .update(values);
-
-            for (const filter of filters) {
-
-                if (
-                    typeof query[filter.type] !==
-                    "function"
-                ) {
-
-                    throw new Error(
-                        `Unsupported filter type : ${filter.type}`
-                    );
-
-                }
-
-                const value =
-                    filter === inFilter
-                        ? chunk
-                        : filter.value;
-
-                query =
-                    query[filter.type](
-                        filter.column,
-                        value
-                    );
-
-            }
+            const chunkFilters = filters.map(filter =>
+                filter === inFilter
+                    ? { ...filter, value: chunk }
+                    : filter
+            );
 
             console.log("================================");
             console.log("BATCH UPDATE");
-            console.log(
-                "table :",
-                table
-            );
-            console.log(
-                "chunk size :",
-                chunk.length
-            );
-            console.log(
-                "total values :",
-                inFilter.value.length
-            );
+            console.log("table :", table);
+            console.log("chunk size :", chunk.length);
+            console.log("total values :", inFilter.value.length);
             console.log("================================");
 
-            const {
-                error
-            } = await query;
+            const { data, error } = await supabase.rpc(
+                "fenced_sync_update",
+                {
+                    p_batch_id: operation.batch_id,
+                    p_execution_claim_token:
+                        operation.execution_claim_token,
+                    p_table: table,
+                    p_values: values,
+                    p_filters: chunkFilters
+                }
+            );
+
+            if (error?.message?.includes("EXECUTION_CLAIM_LOST")) {
+                const claimError = new Error("EXECUTION_CLAIM_LOST");
+                claimError.code = "EXECUTION_CLAIM_LOST";
+                throw claimError;
+            }
 
             if (error) {
-
                 throw new Error(
                     `UPDATE failed (${table}) : ${error.message}`
                 );
-
             }
+
+            console.log(
+                "UPDATE RESULT:",
+                table,
+                "chunk:",
+                chunk.length,
+                "updated:",
+                data ?? 0
+            );
 
         }
 
@@ -1141,43 +1130,35 @@ if (existingError) {
 
         if (!inFilter) {
 
-            let query =
-                supabase
-                    .from(table)
-                    .delete();
-
-            for (const filter of filters) {
-
-                if (
-                    typeof query[filter.type] !==
-                    "function"
-                ) {
-
-                    throw new Error(
-                        `Unsupported filter type : ${filter.type}`
-                    );
-
+              const { data, error } = await supabase.rpc(
+                "fenced_sync_delete_eq",
+                {
+                    p_batch_id: operation.batch_id,
+                    p_execution_claim_token:
+                        operation.execution_claim_token,
+                    p_table: table,
+                    p_filters: filters
                 }
+            );
 
-                query =
-                    query[filter.type](
-                        filter.column,
-                        filter.value
-                    );
-
+            if (error?.message?.includes("EXECUTION_CLAIM_LOST")) {
+                const claimError = new Error("EXECUTION_CLAIM_LOST");
+                claimError.code = "EXECUTION_CLAIM_LOST";
+                throw claimError;
             }
 
-            const {
-                error
-            } = await query;
-
             if (error) {
-
                 throw new Error(
                     `DELETE failed (${table}) : ${error.message}`
                 );
-
             }
+
+            console.log(
+                "DELETE RESULT:",
+                table,
+                "deleted:",
+                data ?? 0
+            );
 
             return true;
 
@@ -1203,36 +1184,11 @@ if (existingError) {
 
             callback: async (chunk) => {
 
-                let query =
-                    supabase
-                        .from(table)
-                        .delete();
-
-                for (const filter of filters) {
-
-                    if (
-                        typeof query[filter.type] !==
-                        "function"
-                    ) {
-
-                        throw new Error(
-                            `Unsupported filter type : ${filter.type}`
-                        );
-
-                    }
-
-                    const value =
-                        filter === inFilter
-                            ? chunk
-                            : filter.value;
-
-                    query =
-                        query[filter.type](
-                            filter.column,
-                            value
-                        );
-
-                }
+                              const chunkFilters = filters.map(filter =>
+                    filter === inFilter
+                        ? { ...filter, value: chunk }
+                        : filter
+                );
 
                 console.log("================================");
                 console.log("BATCH DELETE");
@@ -1241,17 +1197,27 @@ if (existingError) {
                 console.log("total values :", inFilter.value.length);
                 console.log("================================");
 
-                const {
-                    data,
-                    error
-                } = await query.select("voucher_guid");
+                const { data, error } = await supabase.rpc(
+                    "fenced_sync_delete",
+                    {
+                        p_batch_id: operation.batch_id,
+                        p_execution_claim_token:
+                            operation.execution_claim_token,
+                        p_table: table,
+                        p_filters: chunkFilters
+                    }
+                );
+
+                if (error?.message?.includes("EXECUTION_CLAIM_LOST")) {
+                    const claimError = new Error("EXECUTION_CLAIM_LOST");
+                    claimError.code = "EXECUTION_CLAIM_LOST";
+                    throw claimError;
+                }
 
                 if (error) {
-
                     throw new Error(
                         `DELETE failed (${table}) : ${error.message}`
                     );
-
                 }
 
                 console.log(
@@ -1262,10 +1228,11 @@ if (existingError) {
                     "chunk:",
                     chunk.length,
                     "deleted:",
-                    data?.length || 0
+                    data ?? 0
                 );
 
             }
+
 
         });
 

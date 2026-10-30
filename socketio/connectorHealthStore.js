@@ -1523,6 +1523,64 @@ async function recoverConnectorAfterReconnect({
     };
 }
 
+async function acquireHttpBatchExecutionGuard(batchId, ownerToken) {
+    if (
+        typeof batchId !== "string" ||
+        !batchId.trim() ||
+        typeof ownerToken !== "string" ||
+        !ownerToken.trim()
+    ) {
+        throw new Error(
+            "batchId and ownerToken must be nonempty strings"
+        );
+    }
+
+    await ensureConnected();
+
+    const key =
+        `billey:sync:http-execution:${batchId.trim()}`;
+
+    const result = await redis.set(
+        key,
+        ownerToken,
+        "NX"
+    );
+
+    return result === "OK";
+}
+
+async function releaseHttpBatchExecutionGuard(batchId, ownerToken) {
+    if (
+        typeof batchId !== "string" ||
+        !batchId.trim() ||
+        typeof ownerToken !== "string" ||
+        !ownerToken.trim()
+    ) {
+        throw new Error(
+            "batchId and ownerToken must be nonempty strings"
+        );
+    }
+
+    await ensureConnected();
+
+    const key =
+        `billey:sync:http-execution:${batchId.trim()}`;
+
+    const result = await redis.eval(
+        `
+        if redis.call("GET", KEYS[1]) ~= ARGV[1] then
+            return 0
+        end
+
+        return redis.call("DEL", KEYS[1])
+        `,
+        1,
+        key,
+        ownerToken
+    );
+
+    return Number(result) === 1;
+}
 
 module.exports = {
     setConnectorHealth,
@@ -1548,7 +1606,9 @@ module.exports = {
     acquireConnectorAndSocketLock,
     releaseConnectorAndSocketLock,
     renewConnectorAndSocketLock,
-    quarantineConnectorAndSocket,
+       quarantineConnectorAndSocket,
     clearVerifiedConnectorRecovery,
-    recoverConnectorAfterReconnect
+    recoverConnectorAfterReconnect,
+    acquireHttpBatchExecutionGuard,
+    releaseHttpBatchExecutionGuard
 };

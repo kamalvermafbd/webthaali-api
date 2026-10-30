@@ -18,7 +18,8 @@ async function saveStockGodownBalances({
     company_code,
     tally_owner,
     stockGodownBalances = [],
-    sync_batch_id = null
+    sync_batch_id = null,
+    execution_claim_token = null
 
 }) {
 
@@ -364,30 +365,19 @@ async function saveStockGodownBalances({
     // 6. SAVE
     // ==================================================
 
-    const {
-        data,
-        error
-    } =
-        await supabase
-
-            .from(
-                "tally_stock_godown_balances"
-            )
-
-            .upsert(
-
-                rows,
-
-                {
-
-                    onConflict:
-                        "company_code,tally_owner,stock_guid,godown_name"
-
-                }
-
-            )
-
-            .select();
+   const {
+    data,
+    error
+} = await supabase.rpc(
+    "fenced_save_stock_godown_balances",
+    {
+        p_batch_id: sync_batch_id,
+        p_execution_claim_token: execution_claim_token,
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_rows: rows
+    }
+);
 
     if (error) {
 
@@ -608,17 +598,18 @@ const reconciliationRows =
     });
 
     // 110926 end
-   const {
+ const {
     error: reconciliationError
-} = await supabase
-    .from("tally_stock_godown_balances")
-    .upsert(
-        reconciliationRows,
-        {
-            onConflict:
-                "company_code,tally_owner,stock_guid,godown_name"
-        }
-    );
+} = await supabase.rpc(
+    "fenced_save_stock_godown_reconciliation",
+    {
+        p_batch_id: sync_batch_id,
+        p_execution_claim_token: execution_claim_token,
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_rows: reconciliationRows
+    }
+);
 
 if (reconciliationError) {
     throw reconciliationError;

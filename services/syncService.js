@@ -483,7 +483,8 @@ if (master_type === "TAX_LEDGER") {
 async function getTrialBalance({
     company_code,
     tally_owner,
-    sync_batch_id
+    sync_batch_id,
+    execution_claim_token = null
 }) {
    const is_ca =
     String(tally_owner).toUpperCase() === "CA";
@@ -839,12 +840,22 @@ const balanceDifference =
 if (updates.length > 0) {
 
     const { data: updatedCount, error: updateError } =
-        await supabase.rpc(
-            "update_trial_balance",
-            {
+    await supabase.rpc(
+        sync_batch_id
+            ? "fenced_update_trial_balance"
+            : "update_trial_balance",
+        sync_batch_id
+            ? {
+                p_batch_id: sync_batch_id,
+                p_execution_claim_token: execution_claim_token,
+                p_company_code: company_code,
+                p_tally_owner: tally_owner,
                 p_updates: updates
             }
-        );
+            : {
+                p_updates: updates
+            }
+    );
 
     if (updateError) {
 
@@ -888,15 +899,25 @@ console.log("LEDGER PASSED :", ledgerReconciliationPassed);
 console.log("DIFFERENCES :", differences);
 
 if (sync_batch_id) {
-    const { error } = await supabase
-        .from("sync_batches")
-        .update({
-            ledger_reconciliation_completed:
-                ledgerReconciliationPassed
-        })
-        .eq("batch_id", sync_batch_id);
+    const { error } = await supabase.rpc(
+        "fenced_set_ledger_reconciliation",
+        {
+            p_batch_id: sync_batch_id,
+            p_execution_claim_token: execution_claim_token,
+            p_company_code: company_code,
+            p_tally_owner: tally_owner,
+            p_reconciliation_passed: ledgerReconciliationPassed
+        }
+    );
 
-    if (error) throw error;
+    if (error) {
+        console.error(
+            "FENCED LEDGER RECONCILIATION FLAG FAILED:",
+            error
+        );
+
+        throw error;
+    }
 }
 console.log(
     "LEDGER FLAG UPDATE COMPLETE:",
@@ -924,7 +945,8 @@ async function getStockGodownBalance({
     company_code,
     tally_owner,
     sync_batch_id,
-     booksBeginningFrom
+    execution_claim_token = null,
+    booksBeginningFrom
 }) {
    const is_ca =
     String(tally_owner).toUpperCase() === "CA";
@@ -1151,11 +1173,12 @@ const saveResult =
 
         sync_batch_id,
 
+        execution_claim_token,
+
         stockGodownBalances:
             stock
 
     });
-
 console.log(
     "STOCK GODOWN DB SAVE:",
     saveResult
@@ -1176,15 +1199,23 @@ const stockReconciliationPassed =
     !differences || differences.length === 0;
 
 if (sync_batch_id) {
-    const { error } = await supabase
-        .from("sync_batches")
-        .update({
-            stock_reconciliation_completed:
-                stockReconciliationPassed
-        })
-        .eq("batch_id", sync_batch_id);
+    const { error } = await supabase.rpc(
+        "fenced_set_stock_reconciliation",
+        {
+            p_batch_id: sync_batch_id,
+            p_execution_claim_token: execution_claim_token,
+            p_company_code: company_code,
+            p_tally_owner: tally_owner,
+            p_reconciliation_passed: stockReconciliationPassed
+        }
+    );
 
     if (error) {
+        console.error(
+            "FENCED STOCK RECONCILIATION FLAG FAILED:",
+            error
+        );
+
         throw error;
     }
 }

@@ -1,6 +1,7 @@
 "use strict";
 
-const sendToConnector = require("./sendToConnector");
+//const sendToConnector = require("./sendToConnector");
+const { sendToConnector } = require("./sendToConnector");
 
 const {
     withGlobalConnectorLock

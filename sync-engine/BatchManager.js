@@ -45,10 +45,10 @@ class BatchManager {
 
 
 async execute({
-
     operations = [],
-    progressPhase = "PRIMARY"
-
+    progressPhase = "PRIMARY",
+    batch_id,
+    execution_claim_token
 }) {
 
     if (!Array.isArray(operations)) {
@@ -77,9 +77,11 @@ console.dir(operation?.rows?.[0], { depth: null });
 
         try {
 
-    await BatchExecutor.execute(
-        operation
-    );
+   await BatchExecutor.execute({
+    ...operation,
+    batch_id,
+    execution_claim_token
+});
 
     successCount++;
 
@@ -109,18 +111,19 @@ console.dir(operation?.rows?.[0], { depth: null });
         if (progress) {
 
             await BatchStatusManager.updateProgress({
-                batch_id: operation.sync_batch_id,
-                progress
-            });
+    batch_id: operation.sync_batch_id,
+    execution_claim_token,
+    progress
+});
 
-            await BatchStatusManager.updateModule({
-                batch_id: operation.sync_batch_id,
-                module: MODULE_TYPE.VOUCHER,
-                entity: ENTITY_TYPE.VOUCHER,
-                action: "SQL_COMPLETED",
-                operation: operation.operation
-            });
-
+await BatchStatusManager.updateModule({
+    batch_id: operation.sync_batch_id,
+    execution_claim_token,
+    module: MODULE_TYPE.VOUCHER,
+    entity: ENTITY_TYPE.VOUCHER,
+    action: "SQL_COMPLETED",
+    operation: operation.operation
+});
         }
 
     }
@@ -133,6 +136,10 @@ console.dir(operation?.rows?.[0], { depth: null });
                 "BATCH EXECUTION ERROR:",
                 error
             );
+
+            if (error?.code === "EXECUTION_CLAIM_LOST") {
+                throw error;
+            }
 
             failedCount++;
 
@@ -170,8 +177,8 @@ console.dir(operation?.rows?.[0], { depth: null });
 // ----------------------------------
 
 async postExecution({
-
     batch_id,
+    execution_claim_token,
     module,
     entity,
     table,
@@ -182,11 +189,7 @@ async postExecution({
     snapshotRows = [],
     validation,
     execution
-
 }) {
-
-      
-
 
 const fs = require("fs");
 
@@ -204,11 +207,11 @@ fs.writeFileSync(
 
 if (snapshotRows.length > 0) {
 
-    await SnapshotManager.saveSnapshotRows({
-
-        rows: snapshotRows
-
-    });
+await SnapshotManager.saveSnapshotRows({
+    batch_id,
+    execution_claim_token,
+    rows: snapshotRows
+});
 
 }
 
@@ -218,17 +221,18 @@ if (
 ) {
 
     await BatchStatusManager.updateProgress({
-        batch_id,
-        progress: 75
-    });
+    batch_id,
+    execution_claim_token,
+    progress: 75
+});
 
     await BatchStatusManager.updateModule({
-        batch_id,
-        module: MODULE_TYPE.VOUCHER,
-        entity: ENTITY_TYPE.VOUCHER,
-        action: "SNAPSHOT_COMPLETED"
-    });
-
+    batch_id,
+    execution_claim_token,
+    module: MODULE_TYPE.VOUCHER,
+    entity: ENTITY_TYPE.VOUCHER,
+    action: "SNAPSHOT_COMPLETED"
+});
 }
 
     const retryResult =
@@ -244,18 +248,13 @@ if (
         }
 
         : await RetryManager.retry({
-
-            batch_id,
-
-           operations:
-
-                execution.failedOperations.map(
-
-                    item => item.operation
-
-                )
-
-        });
+    batch_id,
+    execution_claim_token,
+    operations:
+        execution.failedOperations.map(
+            item => item.operation
+        )
+});
 
         fs.writeFileSync(
     `./logs/TRACE-02-after-retry-${entity}-${batch_id}.json`,
@@ -273,10 +272,10 @@ if (
         if (!retryResult.success) {
 
             await BatchStatusManager.markFailed({
-
-                batch_id
-
-            });
+    batch_id,
+    execution_claim_token,
+    error: new Error("Batch execution retry failed")
+});
 
             return {
 
@@ -375,17 +374,19 @@ if (
     sync_batch_id
 ) {
 
-    await BatchStatusManager.updateProgress({
-        batch_id,
-        progress: 80
-    });
+await BatchStatusManager.updateProgress({
+    batch_id,
+    execution_claim_token,
+    progress: 80
+});
 
     await BatchStatusManager.updateModule({
-        batch_id,
-        module: MODULE_TYPE.VOUCHER,
-        entity: ENTITY_TYPE.VOUCHER,
-        action: "RECONCILIATION"
-    });
+    batch_id,
+    execution_claim_token,
+    module: MODULE_TYPE.VOUCHER,
+    entity: ENTITY_TYPE.VOUCHER,
+    action: "RECONCILIATION"
+});
 
 }
 
@@ -628,13 +629,12 @@ const reconciliationExecution =
             failedCount: 0
         }
         : await this.execute({
-
-            operations:
-                reconciliationOperations,
-
-            progressPhase: "RECONCILIATION"
-
-        });
+    operations:
+        reconciliationOperations,
+    progressPhase: "RECONCILIATION",
+    batch_id,
+    execution_claim_token
+});
 
 const reconciliationRetryResult =
 
@@ -646,23 +646,21 @@ const reconciliationRetryResult =
         }
 
         : await RetryManager.retry({
-
-            batch_id,
-
-            operations:
-                reconciliationExecution.failedOperations.map(
-                    item => item.operation
-                )
-
-        });
+    batch_id,
+    execution_claim_token,
+    operations:
+        reconciliationExecution.failedOperations.map(
+            item => item.operation
+        )
+});
 
 if (!reconciliationRetryResult.success) {
 
-    await BatchStatusManager.markFailed({
-
-        batch_id
-
-    });
+await BatchStatusManager.markFailed({
+    batch_id,
+    execution_claim_token,
+    error: new Error("Batch reconciliation retry failed")
+});
 
     return {
 
@@ -690,16 +688,17 @@ if (
 ) {
 
     await BatchStatusManager.updateProgress({
-        batch_id,
-        progress: 90
-    });
-
+    batch_id,
+    execution_claim_token,
+    progress: 90
+});
     await BatchStatusManager.updateModule({
-        batch_id,
-        module: MODULE_TYPE.VOUCHER,
-        entity: ENTITY_TYPE.VOUCHER,
-        action: "RECONCILIATION_COMPLETED"
-    });
+    batch_id,
+    execution_claim_token,
+    module: MODULE_TYPE.VOUCHER,
+    entity: ENTITY_TYPE.VOUCHER,
+    action: "RECONCILIATION_COMPLETED"
+});
 
 }
 
@@ -722,16 +721,14 @@ if (
     if (deletedLedgerGuids.length > 0) {
 
         const { error: openingBalanceDeactivateError } =
-            await supabase
-                .from(TABLES.OPENING_BALANCE_ALLOCATIONS)
-                .update({
-                    is_active: false,
-                    updated_at: new Date().toISOString()
-                })
-                .eq("company_code", company_code)
-                .eq("tally_owner", tally_owner)
-                .eq("source_type", "TALLY")
-                .in("ledger_guid", deletedLedgerGuids);
+    await supabase.rpc(
+        "fenced_opening_balance_deactivate_by_ledger",
+        {
+            p_batch_id: batch_id,
+            p_execution_claim_token: execution_claim_token,
+            p_ledger_guids: deletedLedgerGuids
+        }
+    );
 
         if (openingBalanceDeactivateError) {
             throw new Error(
@@ -751,14 +748,14 @@ if (
  if (syncMode === "FULL") {
 
     await SnapshotManager.removeMissingGuids({
-
-        sync_batch_id,
-        company_code,
-        tally_owner,
-        module,
-        entity_type: entity
-
-    });
+    batch_id,
+    execution_claim_token,
+    sync_batch_id,
+    company_code,
+    tally_owner,
+    module,
+    entity_type: entity
+});
 
 }
 
@@ -768,23 +765,23 @@ if (
 ) {
 
     await BatchStatusManager.updateProgress({
-        batch_id,
-        progress: 95
-    });
-
+    batch_id,
+    execution_claim_token,
+    progress: 95
+});
     await BatchStatusManager.updateModule({
-        batch_id,
-        module: MODULE_TYPE.VOUCHER,
-        entity: ENTITY_TYPE.VOUCHER,
-        action: "CLEANUP_COMPLETED"
-    });
+    batch_id,
+    execution_claim_token,
+    module: MODULE_TYPE.VOUCHER,
+    entity: ENTITY_TYPE.VOUCHER,
+    action: "CLEANUP_COMPLETED"
+});
 
 }
 
 await BatchStatusManager.markReconciliationCompleted({
-
-    batch_id
-
+    batch_id,
+    execution_claim_token
 });
 
 
@@ -794,35 +791,27 @@ if (
 ) {
 
     await BatchStatusManager.updateProgress({
-        batch_id,
-        progress: 100
-    });
-
+    batch_id,
+    execution_claim_token,
+    progress: 100
+});
 }
 
 
 await BatchStatusManager.updateModule({
-
     batch_id,
-
+    execution_claim_token,
     module,
-
     entity,
-
     action: "COMPLETED"
-
 });
 
 await BatchStatusManager.updateFields({
-
     batch_id,
-
+    execution_claim_token,
     fields: {
-
         last_successful_module: module
-
     }
-
 });
 return {
 
@@ -852,24 +841,27 @@ return {
     // Run Batch
     // ----------------------------------
 
-    async run({
+   async run({
+    batch_id,
+    execution_claim_token,
+    entity,
+    company_code,
+    tally_owner,
+    sync_batch_id,
+    rows = [],
+    options = {}
+}) {
 
-        batch_id,
-       
-        entity,
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id,
-
-        rows = [],
-
-        options = {}
-
-    }) {
-
+    if (
+        typeof execution_claim_token !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            execution_claim_token
+        )
+    ) {
+        throw new Error(
+            "BatchManager.run requires a valid execution claim token"
+        );
+    }
         console.log("================================");
         console.log("BATCH MANAGER");
         console.log("entity :", entity);
@@ -973,23 +965,18 @@ const {
 
         }
 
-        await BatchStatusManager.markStarted({
+await BatchStatusManager.markStarted({
+    batch_id,
+    execution_claim_token
+});
 
-            batch_id
-
-        });
-
-        await BatchStatusManager.updateModule({
-
-            batch_id,
-
-            module,
-
-            entity,
-
-            action: "PROCESSING"
-
-        });
+await BatchStatusManager.updateModule({
+    batch_id,
+    execution_claim_token,
+    module,
+    entity,
+    action: "PROCESSING"
+});
 
 
         const dbRows =
@@ -1462,38 +1449,26 @@ if (
 
 
     const execution =
-
     await this.execute({
-
-        operations
-
+        operations,
+        batch_id,
+        execution_claim_token
     });
 
 
 
     return await this.postExecution({
-
     batch_id,
-
+    execution_claim_token,
     module,
-
     entity,
-
     table,
-
     company_code,
-
     tally_owner,
-
     sync_batch_id,
-
     snapshotRows,
-
     validation,
-
     execution,
-  
-
 });
 
     }

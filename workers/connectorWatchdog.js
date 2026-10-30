@@ -6,15 +6,6 @@
 const WATCH_INTERVAL_MS = 15 * 1000;       // 15 seconds
 const HEARTBEAT_TIMEOUT_MS = 90 * 1000;     // 90 seconds
 const CONNECTOR_RECOVERY_TIMEOUT_MS = 30 * 1000; // 30 seconds
-
-const BatchStatusManager =
-    require("../sync-engine/BatchStatusManager");
-
-const {
-    dispatchBatch,
-    dispatchConnectorLossRetry
-} = require("./secondQueueExistingBatch");
-
 const connectorRegistry = require("../socketio/connectorRegistry");
 
 const connectorHealthStore =
@@ -25,7 +16,7 @@ const { getSyncQueue } =
 
 let watchdogTimer = null;
 let watchdogRunning = false;
-const waitingConnectorSince = new Map();
+
 
 // ============================================================
 // CONNECTOR HEALTH REGISTRY — CONNECTOR ID WISE
@@ -33,7 +24,7 @@ const waitingConnectorSince = new Map();
 
 const connectorHealth = new Map();
 
-const DEFAULT_REQUEST_TIMEOUT_MS = 90 * 1000;
+
 
 // ============================================================
 // CONNECTOR HEALTH RECORD
@@ -195,23 +186,7 @@ return health;
 // ============================================================
 // PUBLISH CONNECTOR HEALTH TO SHARED REDIS STORE
 // ============================================================
-/* 221026
-function publishConnectorHealthToSharedStore(health) {
-    if (!health || !health.connector_id) {
-        return;
-    }
 
-    connectorHealthStore
-        .setConnectorHealth(health.connector_id, health)
-        .catch((error) => {
-            console.error(
-                "[ConnectorWatchdog] Shared health publish failed:",
-                health.connector_id,
-                error.message
-            );
-        });
-}
-*/
 
 async function publishConnectorHealthToSharedStore(
     health,
@@ -432,117 +407,22 @@ function refreshRegisteredConnectorHealth(registry = connectorRegistry) {
 }
 
 
-/* 211026
-async function startWaitingConnectorTimer(supabase, batch) {
-    const { error } = await supabase
-        .from("sync_batches")
-        .update({ waiting_connector_since: new Date().toISOString() })
-        .eq("id", batch.id)
-        .is("waiting_connector_since", null);
 
-    if (error) throw error;
-}
-*/
+function ensureWaitingConnectorSince(supabase, batch) {
+    const timestamp = batch.waiting_connector_since;
 
-async function startWaitingConnectorTimer(supabase, batch) {
-    const { data, error } = await supabase
-        .from("sync_batches")
-        .update({
-            waiting_connector_since: new Date().toISOString()
-        })
-        .eq("id", batch.id)
-        .eq("batch_status", "PENDING")
-        .eq("worker_status", "PENDING")
-        .eq("current_stage", "WAITING_CONNECTOR")
-        .is("waiting_connector_since", null)
-        .select("waiting_connector_since")
-        .maybeSingle();
-
-    if (error) throw error;
-
-    return data?.waiting_connector_since || null;
-}
-
-async function ensureWaitingConnectorSince(supabase, batch) {
-    if (batch.waiting_connector_since) {
-        return new Date(batch.waiting_connector_since).getTime();
+    if (!timestamp) {
+        return Date.now();
     }
 
-    const now = new Date().toISOString();
+    const waitingSince = new Date(timestamp).getTime();
 
-    const { data, error } = await supabase
-        .from("sync_batches")
-        .update({ waiting_connector_since: now })
-        .eq("id", batch.id)
-        .is("waiting_connector_since", null)
-        .select("waiting_connector_since")
-        .maybeSingle();
-
-    if (error) {
-        throw error;
-    }
-
-    if (data?.waiting_connector_since) {
-        return new Date(data.waiting_connector_since).getTime();
-    }
-
-    const { data: existing, error: readError } = await supabase
-        .from("sync_batches")
-        .select("waiting_connector_since")
-        .eq("id", batch.id)
-        .maybeSingle();
-
-    if (readError) {
-        throw readError;
-    }
-
-    return existing?.waiting_connector_since
-        ? new Date(existing.waiting_connector_since).getTime()
+    return Number.isFinite(waitingSince)
+        ? waitingSince
         : Date.now();
 }
 
-async function failWaitingConnectorBatch(supabase, batch, reason) {
-    const { data, error } = await supabase
-        .from("sync_batches")
-       .update({
-            batch_status: "FAILED",
-            worker_status: "FAILED",
-            current_stage: "FAILED",
-            completed_at: new Date().toISOString(),
-            error_message: reason,
-            worker_id: null,
-            locked_at: null,
-            heartbeat_at: null
-        })
-        .eq("id", batch.id)
-        .eq("batch_status", "PENDING")
-        .eq("worker_status", "PENDING")
-        .eq("current_stage", "WAITING_CONNECTOR")
-        .select("batch_id")
-        .maybeSingle();
 
-    if (error) {
-        throw new Error(
-            `Connector timeout failure update failed: ${error.message}`
-        );
-    }
-
-    if (!data) {
-        console.log(
-            "WATCHDOG FAILURE SKIPPED — BATCH STATE CHANGED:",
-            batch.batch_id
-        );
-        return false;
-    }
-
-    console.log(
-        "WATCHDOG BATCH FAILED AFTER CONNECTOR TIMEOUT:",
-        batch.batch_id,
-        reason
-    );
-
-    return true;
-}
 // ------------------------------------------------------------
 // CHECK CONNECTOR WATCHDOG
 // ------------------------------------------------------------
@@ -593,30 +473,17 @@ if (expiredRetryError) {
 for (const reservation of expiredRetryReservations || []) {
     try {
 
-                // Recover expired DB reservation independently of Redis.
-        // The RPC validates the exact token, lease and batch state
-        // under the same advisory lock used by worker claims.
-        const { data: recoveryResult, error: recoveryError } =
-            await supabase.rpc("recover_expired_connector_retry", {
-                p_batch_id: reservation.batch_id,
-                p_retry_claim_token: reservation.retry_claim_token
-            });
-
-        if (recoveryError) {
-            console.error(
-                "[CONNECTOR WATCHDOG] EXPIRED RETRY RECOVERY FAILED:",
-                reservation.batch_id,
-                recoveryError.message
-            );
-        } else {
-            console.log(
-                "[CONNECTOR WATCHDOG] EXPIRED RETRY RECOVERY RESULT:",
-                {
-                    batch_id: reservation.batch_id,
-                    result: recoveryResult
-                }
-            );
-        }
+// Expired retry reservation inspection only.
+// Do not invoke recovery RPC until BullMQ state and
+// previous execution settlement are independently verified.
+   console.warn(
+    "[CONNECTOR WATCHDOG] EXPIRED RETRY RECOVERY DEFERRED",
+    {
+        batch_id: reservation.batch_id,
+        retry_claim_token: reservation.retry_claim_token,
+        reason: "BullMQ job state and previous execution settlement not verified"
+    }
+);
         
         const { data: assignedWorker, error: workerError } =
             await supabase
@@ -771,10 +638,16 @@ if (!job) {
 
         // Never automatically process a batch with uncertain Tally outcome.
         // Applies to FAILED, WAITING_CONNECTOR and RUNNING paths.
-        if (
-            String(batch.error_message || "")
-                .startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
-        ) {
+       if (
+    (
+        String(batch.error_message || "")
+            .startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+    ) ||
+    (
+        String(batch.error_message || "")
+            .startsWith("HTTP_OUTCOME_UNKNOWN:")
+    )
+) {
             console.warn(
                 "[CONNECTOR WATCHDOG] UNCERTAIN OUTCOME — MANUAL REVIEW:",
                 batch.batch_id
@@ -783,11 +656,24 @@ if (!job) {
             continue;
         }
 
-        // FAILED connector-loss batches: separate safe retry flow.
+        // Inspect explicitly classified CONNECTOR_LOSS failures.
+// Automatic retry remains disabled pending execution verification.
+// Other FAILED outcomes require manual review.
 if (
     batch.batch_status === "FAILED" &&
     batch.worker_status === "FAILED"
 ) {
+    if (
+        !String(batch.error_message || "")
+            .startsWith("CONNECTOR_LOSS:")
+    ) {
+        console.warn(
+            "[CONNECTOR WATCHDOG] FAILED AUTO-RETRY DEFERRED:",
+            batch.batch_id,
+            batch.error_message
+        );
+        continue;
+    }
     // Never automatically retry uncertain Tally outcomes.
     if (
         String(batch.error_message || "")
@@ -837,50 +723,31 @@ if (
     heartbeatAge < 0 ||
     heartbeatAge >= HEARTBEAT_TIMEOUT_MS
 ) {
-        const { error: resetReadyError } = await supabase
-            .from("sync_batches")
-            .update({
-                connector_retry_ready: false
-            })
-            .eq("id", batch.id)
-            .eq("batch_status", "FAILED")
-            .eq("worker_status", "FAILED")
-            .eq("connector_retry_ready", true);
-
-        if (resetReadyError) {
-            throw new Error(
-                `Connector retry readiness reset failed: ${resetReadyError.message}`
-            );
-        }
+   console.warn(
+    "[CONNECTOR WATCHDOG] RETRY READINESS RESET DEFERRED",
+    {
+        batch_id: batch.batch_id,
+        reason: "Connector unavailable; previous Tally execution settlement unverified",
+        action: "OBSERVE_ONLY"
+    }
+);
 
         continue;
     }
 
   
-    // Connector and Tally are healthy.
-// All FAILED batches are eligible, regardless of error reason.
+    // Connector and Tally appear healthy.
+// Only CONNECTOR_LOSS failures reach this retry path.
 // Maximum 3 automatic retries.
-// BUSY blocks dispatch separately.
+// BUSY blocks dispatch; execution settlement still requires verification.
 
-const { error: retryReadyError } = await supabase
-    .from("sync_batches")
-    .update({
-        connector_retry_ready: true
-    })
-    .eq("id", batch.id)
-    .eq("batch_status", "FAILED")
-    .eq("worker_status", "FAILED")
-    .or("retry_count.lt.3,retry_count.is.null");
-
-if (retryReadyError) {
-    console.error(
-        "[CONNECTOR WATCHDOG] Retry readiness update failed:",
-        batch.batch_id,
-        retryReadyError.message
-    );
-    continue;
-}
-
+console.warn(
+    "[CONNECTOR WATCHDOG] RETRY READINESS ACTIVATION DEFERRED",
+    {
+        batch_id: batch.batch_id,
+        reason: "Previous Tally execution settlement not independently verified"
+    }
+);
 // BUSY prevents dispatch, but does not remove retry eligibility.
 const globalWatchdog =
     await connectorHealthStore.getConnectorWatchdogStatus(connectorId);
@@ -893,8 +760,14 @@ if (
     continue;
 }
 
-await dispatchConnectorLossRetry(batch);
-    continue;
+console.warn(
+    "[CONNECTOR WATCHDOG] CONNECTOR_LOSS RETRY DEFERRED",
+    {
+        batch_id: batch.batch_id,
+        reason: "Previous Tally execution settlement not independently verified"
+    }
+);
+continue;
 }
 
                 const companyCode =
@@ -974,46 +847,22 @@ await dispatchConnectorLossRetry(batch);
                             tally_owner: tallyOwner
                         }
                     );
-/* 211026
-                if (
-                    batch.batch_status === "PROCESSING" &&
-                    batch.worker_status === "RUNNING"
-                ) {
-                    await BatchStatusManager.markWaitingConnector({
-                        batch_id: batch.batch_id
-                    });
-                }
 
-                */
 
                 if (
                     batch.batch_status === "PROCESSING" &&
                     batch.worker_status === "RUNNING"
                 ) {
-                    await BatchStatusManager.markWaitingConnector({
-                        batch_id: batch.batch_id
-                    });
-
-                    await startWaitingConnectorTimer(supabase, batch);
-                }
-
-/* 211026
-if (batch.current_stage === "WAITING_CONNECTOR") {
-    const { error } = await supabase
-        .from("sync_batches")
-        .update({ waiting_connector_since: null })
-        .eq("id", batch.id)
-        .eq("current_stage", "WAITING_CONNECTOR");
-
-    if (error) {
-        console.error(
-            "CONNECTOR WAIT TIMER RESET FAILED:",
-            batch.batch_id,
-            error.message
-        );
+                    console.warn(
+    "[CONNECTOR WATCHDOG] RECOVERY DEFERRED",
+    {
+        batch_id: batch.batch_id,
+        reason: "Connector mapping missing; previous execution settlement unverified"
     }
-}
-*/
+);
+                }
+
+
 
 if (
     batch.batch_status === "PENDING" &&
@@ -1027,13 +876,18 @@ if (
 
     const waitingAge = Date.now() - waitingSince;
 
-    if (waitingAge >= CONNECTOR_RECOVERY_TIMEOUT_MS) {
-        await failWaitingConnectorBatch(
-            supabase,
-            batch,
-            "CONNECTOR_LOSS: Connector not paired within 30 seconds"
-        );
-    }
+if (waitingAge >= CONNECTOR_RECOVERY_TIMEOUT_MS) {
+    console.warn(
+        "[CONNECTOR WATCHDOG] CONNECTOR NOT PAIRED TIMEOUT OBSERVED",
+        {
+            batch_id: batch.batch_id,
+            company_code: companyCode,
+            waiting_age_seconds: Math.floor(waitingAge / 1000),
+            reason: "Connector not paired; previous Tally execution settlement unverified",
+            action: "OBSERVE_ONLY"
+        }
+    );
+}
 }
                     continue;
                 }
@@ -1116,10 +970,11 @@ if (!socket) {
 
     const now = Date.now();
 
-    // =================================================
-    // RUNNING BATCH + CONNECTOR LOST
-    // Give connector 30 seconds to reconnect.
-    // =================================================
+   // =================================================
+// RUNNING BATCH + CONNECTOR LOST
+// Observe connector loss; do not automatically
+// restart or fail an unsettled Tally execution.
+// =================================================
     if (
         batch.batch_status === "PROCESSING" &&
         batch.worker_status === "RUNNING"
@@ -1133,22 +988,15 @@ if (!socket) {
                 connector_id: connectorId
             }
         );
-/* 181026
-        await BatchStatusManager.markWaitingConnector({
-            batch_id: batch.batch_id
-        });
 
-        waitingConnectorSince.set(
-            batch.batch_id,
-            now
-        );
-*/
 
-await BatchStatusManager.markWaitingConnector({
-    batch_id: batch.batch_id
-});
-
-await startWaitingConnectorTimer(supabase, batch);
+console.warn(
+    "[CONNECTOR WATCHDOG] RECOVERY DEFERRED",
+    {
+        batch_id: batch.batch_id,
+        reason: "Connector socket missing; previous execution settlement unverified"
+    }
+);
 
 continue;
     }
@@ -1160,26 +1008,7 @@ continue;
         batch.current_stage ===
         "WAITING_CONNECTOR"
     ) {
-/* 181026
-        if (
-            !waitingConnectorSince.has(
-                batch.batch_id
-            )
-        ) {
-            waitingConnectorSince.set(
-                batch.batch_id,
-                now
-            );
-        }
 
-        const waitingSince =
-            waitingConnectorSince.get(
-                batch.batch_id
-            );
-
-        const waitingAge =
-            now - waitingSince;
-*/
 
 const waitingSince =
     await ensureWaitingConnectorSince(
@@ -1212,33 +1041,18 @@ const waitingAge =
     CONNECTOR_RECOVERY_TIMEOUT_MS
 ) {
 
-            console.log(
-                "🚨 CONNECTOR WATCHDOG: FAILING WAITING BATCH",
-                {
-                    batch_id: batch.batch_id,
-                    company_code: companyCode,
-                    connector_id: connectorId,
-                    reason:
-                        "Connector offline for 30 seconds"
-                }
-            );
-
-            waitingConnectorSince.delete(
-                batch.batch_id
-            );
-/*
-            await BatchStatusManager.markFailed({
-                batch_id: batch.batch_id,
-                error:
-                    "Connector offline / heartbeat timeout"
-            });
-            */
-
-            await failWaitingConnectorBatch(
-                supabase,
-                batch,
-                "CONNECTOR_LOSS: Connector offline / heartbeat timeout"
-            );
+          console.warn(
+    "[CONNECTOR WATCHDOG] WAITING CONNECTOR TIMEOUT OBSERVED",
+    {
+        batch_id: batch.batch_id,
+        company_code: companyCode,
+        connector_id: connectorId,
+        waiting_age_seconds: waitingAgeSeconds,
+        reason: "Connector still offline; Tally execution outcome unverified",
+        action: "OBSERVE_ONLY"
+    }
+);
+           
         }
 
         continue;
@@ -1268,12 +1082,15 @@ const waitingAge =
                         }
                     );
 
-                  await BatchStatusManager.markWaitingConnector({
-                        batch_id: batch.batch_id
-                    });
+              console.warn(
+    "[CONNECTOR WATCHDOG] RECOVERY DEFERRED",
+    {
+        batch_id: batch.batch_id,
+        reason: "Tally offline; previous execution settlement unverified"
+    }
+);
 
-                    await startWaitingConnectorTimer(supabase, batch);
-                    continue;
+continue;
                 }
                 // =================================================
                 // CASE B
@@ -1297,9 +1114,10 @@ if (
     }
 
     // ------------------------------------------------
-    // Connector socket is back, but Tally must also
-    // be ONLINE before restarting the batch.
-    // ------------------------------------------------
+// Connector socket is back.
+// Verify Tally ONLINE before checking readiness.
+// Automatic restart remains disabled.
+// ------------------------------------------------
 
     if (
         socket.tallyStatus !==
@@ -1323,20 +1141,8 @@ if (
             }
         );
 
-        // Make sure the 90-second timer exists.
-        /* 181026
-        if (
-            !waitingConnectorSince.has(
-                batch.batch_id
-            )
-        ) {
-
-            waitingConnectorSince.set(
-                batch.batch_id,
-                Date.now()
-            );
-        }
-*/
+            
+     
 const waitingSince =
     await ensureWaitingConnectorSince(
         supabase,
@@ -1354,56 +1160,32 @@ const waitingAge =
     CONNECTOR_RECOVERY_TIMEOUT_MS
 ) {
 
-            console.log(
-                "🚨 CONNECTOR WATCHDOG: TALLY OFFLINE FOR 30 SECONDS",
-                {
-                    batch_id:
-                        batch.batch_id,
-
-                    company_code:
-                        companyCode,
-
-                    connector_id:
-                        connectorId,
-
-                    tally_status:
-                        socket.tallyStatus
-                }
-            );
-
-            
-            waitingConnectorSince.delete(
-                batch.batch_id
-            );
-/* 201026
-            await BatchStatusManager.markFailed({
-                batch_id:
-                    batch.batch_id,
-
-                error:
-                    "Tally offline / heartbeat timeout"
-            });
-*/
-            await failWaitingConnectorBatch(
-                supabase,
-                batch,
-                "CONNECTOR_LOSS: Tally offline / heartbeat timeout"
-            );
-
+            console.warn(
+    "[CONNECTOR WATCHDOG] TALLY OFFLINE TIMEOUT OBSERVED",
+    {
+        batch_id: batch.batch_id,
+        company_code: companyCode,
+        connector_id: connectorId,
+        tally_status: socket.tallyStatus,
+        waiting_age_seconds: Math.floor(waitingAge / 1000),
+        reason: "Tally still offline; previous execution settlement unverified",
+        action: "OBSERVE_ONLY"
+    }
+);
+     
 
         }
 
         continue;
     }
 
-    // ------------------------------------------------
-    // Connector is back AND Tally is ONLINE.
-    // Now restart the same batch from beginning.
-    // ------------------------------------------------
-
-        // Do not restart until connector heartbeat is fresh
-    // and the previous Tally request is no longer active.
-// added 181026
+   // ------------------------------------------------
+// Connector and Tally are ONLINE.
+// Verify recovery readiness; restart remains deferred
+// until previous Tally execution settlement is confirmed.
+// ------------------------------------------------
+        // Inspect connector heartbeat and active-request state.
+// Neither condition independently proves previous execution settlement.
     const recoveryHeartbeat =
         Number(socket.lastHeartbeat || 0);
 
@@ -1416,27 +1198,7 @@ const waitingAge =
         socket.connected === true &&
         recoveryHeartbeatAge >= 0 &&
         recoveryHeartbeatAge < HEARTBEAT_TIMEOUT_MS;
-/* 181026
-    if (
-        !recoveryHeartbeatFresh ||
-        socket.tallyRequestActive === true
-    ) {
-        console.log(
-            "⏳ CONNECTOR WATCHDOG: RECOVERY NOT SAFE TO RESTART",
-            {
-                batch_id: batch.batch_id,
-                heartbeat_age_seconds:
-                    Number.isFinite(recoveryHeartbeatAge)
-                        ? Math.floor(recoveryHeartbeatAge / 1000)
-                        : null,
-                tally_request_active:
-                    socket.tallyRequestActive === true
-            }
-        );
 
-        continue;
-    }
-*/
     
     if (!recoveryHeartbeatFresh) {
 
@@ -1466,23 +1228,21 @@ const waitingAge =
             }
         );
 
-        if (waitingAge >= CONNECTOR_RECOVERY_TIMEOUT_MS) {
-            waitingConnectorSince.delete(batch.batch_id);
-/* 201026 
-            await BatchStatusManager.markFailed({
-                batch_id: batch.batch_id,
-                error:
-                    "Connector heartbeat stale; recovery timed out"
-            });
-            */
-
-            await failWaitingConnectorBatch(
-                supabase,
-                batch,
-                "CONNECTOR_LOSS: Connector heartbeat stale; recovery timed out"
-            );
-
+    if (waitingAge >= CONNECTOR_RECOVERY_TIMEOUT_MS) {
+    console.warn(
+        "[CONNECTOR WATCHDOG] STALE HEARTBEAT TIMEOUT OBSERVED",
+        {
+            batch_id: batch.batch_id,
+            connector_id: connectorId,
+            heartbeat_age_seconds: Number.isFinite(recoveryHeartbeatAge)
+                ? Math.floor(recoveryHeartbeatAge / 1000)
+                : null,
+            waiting_age_seconds: Math.floor(waitingAge / 1000),
+            reason: "Heartbeat stale; previous Tally execution settlement unverified",
+            action: "OBSERVE_ONLY"
         }
+    );
+}
 
         continue;
     }
@@ -1500,7 +1260,7 @@ if (socket.tallyRequestActive === true) {
     continue;
 }
 
-// Verify global Redis connector state before batch restart.
+// Inspect global Redis connector state; batch restart remains deferred.
 const globalWatchdog =
     await connectorHealthStore.getConnectorWatchdogStatus(
         connectorId
@@ -1523,238 +1283,21 @@ if (
     continue;
 }
 
-waitingConnectorSince.delete(
-    batch.batch_id
+console.warn(
+    "[CONNECTOR WATCHDOG] WAITING_CONNECTOR RESTART DEFERRED",
+    {
+        batch_id: batch.batch_id,
+        reason: "Previous Tally execution settlement not independently verified"
+    }
 );
-    console.log(
-        "🔄 CONNECTOR + TALLY BACK: RESTARTING BATCH",
-        {
-            batch_id:
-                batch.batch_id,
-
-            company_code:
-                companyCode,
-
-            connector_id:
-                connectorId,
-
-            tally_status:
-                socket.tallyStatus
-        }
-    );
-
-    // ------------------------------------------------
-    // Reset only this waiting batch.
-    //
-    // Atomic condition prevents duplicate dispatch.
-    // ------------------------------------------------
-
-    const {
-        data: resetBatch,
-        error: resetError
-    } = await supabase
-        .from("sync_batches")
-        .update({
-            batch_status: "PENDING",
-            worker_status: "PENDING",
-            worker_id: null,
-            locked_at: null,
-            heartbeat_at: null,
-            waiting_connector_since: null,
-            completed_at: null,
-            error_message: null,
-
-            current_stage: "PENDING",
-            current_module: "MASTERS",
-            current_action: "PENDING"
-        })
-        .eq(
-            "id",
-            batch.id
-        )
-        .eq(
-            "batch_status",
-            "PENDING"
-        )
-        .eq(
-            "worker_status",
-            "PENDING"
-        )
-        .eq(
-            "current_stage",
-            "WAITING_CONNECTOR"
-        )
-        .select()
-        .maybeSingle();
-
-    if (resetError || !resetBatch) {
-
-        console.error(
-            "❌ CONNECTOR WATCHDOG RESET ERROR:",
-            batch.batch_id,
-            resetError?.message || "Batch already handled or state changed"
-        );
-
-        continue;
-    }
-
-    // Another watchdog cycle may already have
-    // handled this batch.
-    if (!resetBatch) {
-
-        console.log(
-            "⚠️ CONNECTOR WATCHDOG: BATCH ALREADY HANDLED",
-            batch.batch_id
-        );
-
-        continue;
-    }
-
-    // ------------------------------------------------
-    // Re-dispatch through existing queue system.
-    //
-    // This starts the batch from the beginning.
-    // ------------------------------------------------
-
-    try {
-
-        await dispatchBatch(
-            resetBatch
-        );
-
-        console.log(
-            "✅ CONNECTOR WATCHDOG: BATCH RESTARTED",
-            {
-                batch_id:
-                    batch.batch_id,
-
-                company_code:
-                    companyCode,
-
-                connector_id:
-                    connectorId
-            }
-        );
-
-  } catch (dispatchError) {
-
-    console.error(
-        "❌ CONNECTOR WATCHDOG: RESTART DISPATCH FAILED",
-        {
-            batch_id: batch.batch_id,
-            error: dispatchError.message
-        }
-    );
-
-    const { error: recoveryError } = await supabase
-    .from("sync_batches")
-    .update({
-        current_stage: "WAITING_CONNECTOR",
-        worker_id: null,
-        locked_at: null
-    })
-    .eq("id", batch.id)
-    .eq("batch_status", "PENDING")
-    .eq("worker_status", "PENDING")
-    .eq("current_stage", "PENDING")
-    .is("worker_id", null);
-
-if (recoveryError) {
-    console.error(
-        "CONNECTOR WATCHDOG: RECOVERY FAILED",
-        batch.batch_id,
-        recoveryError.message
-    );
-} else {
-    await startWaitingConnectorTimer(supabase, {
-        id: batch.id
-    });
-}
-
-
-
-
-}
-
-    continue;
+continue;
+  
 }
 
                // =================================================
                 // CASE C
                 // Normal PROCESSING + RUNNING batch
                 // =================================================
-
-              // -------------------------------------------------
-// 1. Actual Tally request is running
-// -------------------------------------------------
-/* 181026
-if (socket.tallyRequestActive) {
-
-    const requestStartedAt =
-        Number(socket.tallyRequestStartedAt || 0);
-
-    const requestAge =
-        requestStartedAt
-            ? Date.now() - requestStartedAt
-            : 0;
-
-    const requestAgeSeconds =
-        Math.floor(requestAge / 1000);
-
-    // Tally request is still within safe timeout
-    if (requestAge < HEARTBEAT_TIMEOUT_MS) {
-
-        console.log(
-            "🟢 CONNECTOR WATCHDOG: TALLY REQUEST ACTIVE",
-            {
-                batch_id: batch.batch_id,
-                request_age_seconds:
-                    requestAgeSeconds
-            }
-        );
-
-        continue;
-    }
-
-    // -------------------------------------------------
-    // Tally request stuck for 90+ seconds.
-    //
-    // Do NOT fail immediately.
-    // Put batch into WAITING_CONNECTOR so that:
-    //
-    // Tally / Connector recovers within 90 sec
-    //       ↓
-    // Same batch restarts from beginning
-    //
-    // No recovery within 90 sec
-    //       ↓
-    // Batch FAILED
-    // -------------------------------------------------
-
-    console.log(
-        "⏳ CONNECTOR WATCHDOG: TALLY REQUEST STUCK, WAITING FOR RECOVERY",
-        {
-            batch_id:
-                batch.batch_id,
-
-            request_age_seconds:
-                requestAgeSeconds
-        }
-    );
-
-    await BatchStatusManager.markWaitingConnector({
-        batch_id:
-            batch.batch_id
-    });
-
-    waitingConnectorSince.set(
-        batch.batch_id,
-        Date.now()
-    );
-
-    continue;
-}
-*/
 
 // -------------------------------------------------
 // 1. Actual Tally request is running
@@ -1802,10 +1345,10 @@ if (socket.tallyRequestActive === true) {
         continue;
     }
 
-    // Active request but heartbeat stale:
-    // use existing connector recovery flow.
+  // Active Tally request with stale heartbeat.
+// Do not recover or restart: execution settlement is unverified.
     console.log(
-        "⏳ CONNECTOR WATCHDOG: ACTIVE REQUEST + STALE HEARTBEAT — WAITING FOR RECOVERY",
+        "⏳ CONNECTOR WATCHDOG: ACTIVE REQUEST + STALE HEARTBEAT — RECOVERY DEFERRED",
         {
             batch_id: batch.batch_id,
             request_age_seconds:
@@ -1817,11 +1360,13 @@ if (socket.tallyRequestActive === true) {
         }
     );
 
-await BatchStatusManager.markWaitingConnector({
-    batch_id: batch.batch_id
-});
-
-await startWaitingConnectorTimer(supabase, batch);
+console.warn(
+    "[CONNECTOR WATCHDOG] ACTIVE REQUEST: RECOVERY DEFERRED",
+    {
+        batch_id: batch.batch_id,
+        reason: "Heartbeat loss does not prove execution stopped"
+    }
+);
 
 continue;
     }
@@ -1835,27 +1380,11 @@ continue;
                     Number(
                         socket.lastHeartbeat || 0
                     );
-/*211026
-                if (!lastHeartbeat) {
-
-                    console.log(
-                        "⚠️ CONNECTOR WATCHDOG: NO HEARTBEAT YET",
-                        {
-                            batch_id: batch.batch_id,
-                            company_code: companyCode,
-                            connector_id: connectorId
-                        }
-                    );
-
-                    continue;
-                }
-                    */
-
-                
+               
              
 if (!lastHeartbeat) {
     console.log(
-        "⚠️ CONNECTOR WATCHDOG: NO HEARTBEAT — WAITING FOR RECOVERY",
+        "⚠️ CONNECTOR WATCHDOG: NO HEARTBEAT — RECOVERY DEFERRED",
         {
             batch_id: batch.batch_id,
             company_code: companyCode,
@@ -1865,14 +1394,15 @@ if (!lastHeartbeat) {
         }
     );
 
-    await BatchStatusManager.markWaitingConnector({
-        batch_id: batch.batch_id
-    });
+    console.warn(
+    "[CONNECTOR WATCHDOG] RECOVERY DEFERRED",
+    {
+        batch_id: batch.batch_id,
+        reason: "Heartbeat missing; previous execution settlement unverified"
+    }
+);
 
-    // Initialize the timer only if it is missing.
-    await startWaitingConnectorTimer(supabase, batch);
-
-    continue;
+continue;
 }
 
 
@@ -1913,17 +1443,9 @@ if (!lastHeartbeat) {
                     continue;
                 }
 
-
-                // -------------------------------------------------
-                // Heartbeat stale
-                // -------------------------------------------------
-
-              // -------------------------------------------------
-// Heartbeat stale
-// -------------------------------------------------
-
+             
 console.log(
-    "⏳ CONNECTOR WATCHDOG: HEARTBEAT STALE, WAITING FOR RECOVERY",
+    "⏳ CONNECTOR WATCHDOG: HEARTBEAT STALE — RECOVERY DEFERRED",
     {
         batch_id:
             batch.batch_id,
@@ -1943,24 +1465,21 @@ console.log(
 );
 
 // -------------------------------------------------
-// Do NOT fail immediately.
-//
-// Give connector/network 90 seconds to recover.
-// If connector comes back + Tally is ONLINE,
-// existing WAITING_CONNECTOR recovery logic
-// will restart the same batch from beginning.
-//
-// If recovery does not happen within 90 seconds,
-// WAITING_CONNECTOR logic will mark the batch FAILED.
-// ------------------------------------------------
+// Heartbeat is stale, but previous execution settlement
+// has not been independently verified.
+// Keep the RUNNING batch unchanged.
+// Do not transition to WAITING_CONNECTOR, restart,
+// or fail the batch based on heartbeat alone.
+// -------------------------------------------------
+           console.warn(
+    "[CONNECTOR WATCHDOG] RECOVERY DEFERRED",
+    {
+        batch_id: batch.batch_id,
+        reason: "Heartbeat stale; previous execution settlement unverified"
+    }
+);
 
-                await BatchStatusManager.markWaitingConnector({
-                    batch_id: batch.batch_id
-                });
-
-                await startWaitingConnectorTimer(supabase, batch);
-
-                continue;
+continue;
             } catch (batchError) {
 
                 console.error(

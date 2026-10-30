@@ -7,6 +7,7 @@ async function saveLedgers({
     company_code,
     tally_owner,
     sync_batch_id,
+    execution_claim_token,
     ledgers = []
 }) {
 
@@ -42,9 +43,8 @@ console.log("======================================");
 
 return await BatchManager.run({
 
-    batch_id:
-
-        sync_batch_id,
+    batch_id: sync_batch_id,
+    execution_claim_token,
 
     entity:
 

@@ -156,7 +156,7 @@ buildSnapshotRows({
     // Save Snapshot Rows
     // ----------------------------------
 
-    
+    /* 281026
     async saveSnapshotRows({
 
         rows = [],
@@ -166,6 +166,13 @@ buildSnapshotRows({
     CONFLICT_KEYS[TABLES.SNAPSHOT]
 
     }) {
+*/
+async saveSnapshotRows({
+    batch_id,
+    execution_claim_token,
+    rows = [],
+    onConflict = CONFLICT_KEYS[TABLES.SNAPSHOT]
+}) {
 
         console.log("SAVE SNAPSHOT:", rows.length);
 console.dir(rows[0], { depth: null });
@@ -254,7 +261,7 @@ const snapshotRows = rows;
 let error = null;
 
 for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-
+/* 281026
     const result = await supabase
         .from(TABLES.SNAPSHOT)
         .upsert(
@@ -263,15 +270,31 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                 onConflict
             }
         );
-
+*/
+const result = await supabase.rpc(
+    "fenced_snapshot_upsert",
+    {
+        p_batch_id: batch_id,
+        p_execution_claim_token: execution_claim_token,
+        p_rows: chunk
+    }
+);
     error = result.error;
 
-    console.log(
-        `SNAPSHOT UPSERT ATTEMPT ${attempt}/${MAX_RETRIES}:`,
-        error
-    );
+if (
+    error?.message?.includes("EXECUTION_CLAIM_LOST")
+) {
+    const claimError = new Error("EXECUTION_CLAIM_LOST");
+    claimError.code = "EXECUTION_CLAIM_LOST";
+    throw claimError;
+}
 
-    if (!error) {
+console.log(
+    `SNAPSHOT UPSERT ATTEMPT ${attempt}/${MAX_RETRIES}:`,
+    error
+);
+
+if (!error) {
         break;
     }
 
@@ -1018,18 +1041,14 @@ while (true) {
     // ----------------------------------
 
       async removeMissingGuids({
-
-        sync_batch_id,
-
-        company_code,
-
-        tally_owner,
-
-        module,
-
-        entity_type
-
-    }) {
+    batch_id,
+    execution_claim_token,
+    sync_batch_id,
+    company_code,
+    tally_owner,
+    module,
+    entity_type
+}) {
 
         const now =
 
@@ -1075,6 +1094,16 @@ while (true) {
 
         }
 
+        if (
+            !batch_id ||
+            !execution_claim_token ||
+            sync_batch_id !== batch_id
+        ) {
+            throw new Error(
+                "Snapshot cleanup batch/claim mismatch"
+            );
+        }
+
         const { data: candidates, error: candidateError } =
     await supabase
         .from(TABLES.SNAPSHOT)
@@ -1111,73 +1140,23 @@ fs.writeFileSync(
     }, null, 2)
 );
 
-        let query = supabase
+       const { error } = await supabase.rpc(
+    "fenced_snapshot_remove_missing",
+    {
+        p_batch_id: batch_id,
+        p_execution_claim_token: execution_claim_token,
+        p_company_code: company_code,
+        p_tally_owner: tally_owner,
+        p_module: module,
+        p_entity_type: entity_type
+    }
+);
 
-            .from(
-
-                TABLES.SNAPSHOT
-
-            )
-
-            
-            .update({
-
-                is_deleted: true,
-
-                status:
-
-                    SNAPSHOT_STATUS.DELETED,
-
-                updated_at:
-
-                    now
-
-            })
-
-            .eq(
-
-                "company_code",
-
-                company_code
-
-            )
-
-            .eq(
-
-                "tally_owner",
-
-                tally_owner
-
-            )
-
-            .eq(
-
-                "module",
-
-                module
-
-            )
-
-            .neq(
-
-                "last_sync_batch_id",
-
-                sync_batch_id
-
-            );
-
-        if (entity_type) {
-
-            query = query.eq(
-
-                "entity_type",
-
-                entity_type
-
-            );
-
-        }
-
+if (error?.message?.includes("EXECUTION_CLAIM_LOST")) {
+    const claimError = new Error("EXECUTION_CLAIM_LOST");
+    claimError.code = "EXECUTION_CLAIM_LOST";
+    throw claimError;
+}
 
        
 /*
@@ -1202,11 +1181,7 @@ fs.writeFileSync(
 );
 */
 
-        const {
-
-            error
-
-        } = await query;
+       
 
         if (error) {
 

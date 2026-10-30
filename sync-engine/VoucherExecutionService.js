@@ -30,8 +30,9 @@ class VoucherExecutionService {
 
         sync_batch_id,
 
-        syncMode,
+        execution_claim_token,
 
+        syncMode,
         rowsToSave,
 
         allVoucherRows,
@@ -107,11 +108,11 @@ class VoucherExecutionService {
             });
 
         const execution =
-            await BatchManager.execute({
-
-                operations
-
-            });
+    await BatchManager.execute({
+        batch_id: sync_batch_id,
+        execution_claim_token,
+        operations
+    });
 /*
     console.log(">>> BatchManager FINISHED");
 
@@ -243,11 +244,12 @@ fs.writeFileSync(
 
     return await BatchManager.postExecution({
 
-        batch_id:
-            sync_batch_id,
+    batch_id: sync_batch_id,
 
-        module:
-            MODULE_TYPE.VOUCHER,
+    execution_claim_token,
+
+    module:
+        MODULE_TYPE.VOUCHER,
 
         entity:
             ENTITY_TYPE.VOUCHER,

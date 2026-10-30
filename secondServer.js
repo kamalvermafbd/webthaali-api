@@ -135,6 +135,11 @@ const registry =
   require("./socketio/connectorRegistry");
 
 const {
+    acquireHttpBatchExecutionGuard,
+    releaseHttpBatchExecutionGuard
+} = require("./socketio/connectorHealthStore");
+
+const {
     pairConnector,
     pairConnectorForBatch
 } = require("./services/PairConnectorService");
@@ -39021,10 +39026,25 @@ app.get("/getStockGodownBalance", async (req, res) => {
             ).trim();
 
         const sync_batch_id =
-            String(
-                req.query.sync_batch_id || ""
-            ).trim();
+    String(
+        req.query.sync_batch_id || ""
+    ).trim();
 
+const execution_claim_token =
+    String(
+        req.get("X-Execution-Claim-Token") || ""
+    ).trim();
+
+if (
+    sync_batch_id &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+        .test(execution_claim_token)
+) {
+    return res.status(400).json({
+        success: false,
+        error: "Valid X-Execution-Claim-Token required for batch request"
+    });
+}
 
         if (!company_code) {
 
@@ -39046,17 +39066,15 @@ app.get("/getStockGodownBalance", async (req, res) => {
         }
 
 
-        const result =
-            await getStockGodownBalance({
-
-                company_code,
-
-                tally_owner,
-
-                sync_batch_id,
-                booksBeginningFrom: req.query.booksBeginningFrom
-
-            });
+       const result =
+    await getStockGodownBalance({
+        company_code,
+        tally_owner,
+        sync_batch_id,
+        execution_claim_token:
+            sync_batch_id ? execution_claim_token : null,
+        booksBeginningFrom: req.query.booksBeginningFrom
+    });
 
 
         return res.json(
@@ -39131,13 +39149,26 @@ app.get("/getTrialBalance", async (req, res) => {
 
         }
 
-        const result = await getTrialBalance({
-          company_code,
-          tally_owner,
-          asOnDate,
-          sync_batch_id
-        });
+     const execution_claim_token =
+    String(req.get("X-Execution-Claim-Token") || "").trim();
 
+if (sync_batch_id && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(execution_claim_token)) {
+    return res.status(409).json({
+        success: false,
+        error_code: "INVALID_EXECUTION_CLAIM_TOKEN",
+        error: "Valid execution claim token required for batch reconciliation"
+    });
+}
+
+const result = await getTrialBalance({
+    company_code,
+    tally_owner,
+    asOnDate,
+    sync_batch_id,
+    execution_claim_token: sync_batch_id
+        ? execution_claim_token
+        : null
+});
         return res.json(result);
 
     }
@@ -39162,14 +39193,19 @@ app.get("/getTrialBalance", async (req, res) => {
 
 app.get("/getMasters", async (req, res) => {
 
-  let sync_batch_id;
-  let httpWorkerId;
-  let socket;
-  let connector_id;
-  let batchCompletedSuccessfully = false;
+let sync_batch_id;
+let executionClaimToken = null;
+let httpWorkerId;
+let socket;
+let connector_id;
+let batchCompletedSuccessfully = false;
+let httpSyncExecutionStarted = false;
 
-  try {
+let httpExecutionGuardAttempted = false;
+let httpExecutionGuardAcquired = false;
+let httpExecutionGuardOwnerToken = null;
 
+try {
     const company_code =
       String(req.query.company_code || "").trim();
 
@@ -39474,6 +39510,22 @@ httpWorkerId = httpBatchClaim.worker_id;
 const workerBatchId =
     String(req.query.worker_batch_id || "").trim();
 
+executionClaimToken =
+    String(req.get("X-Execution-Claim-Token") || "").trim();
+if (
+    workerBatchId &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        executionClaimToken
+    )
+) {
+    return res.status(409).json({
+        success: false,
+        error_code: "HTTP_EXECUTION_NOT_STARTED",
+        reason: "INVALID_EXECUTION_CLAIM_TOKEN",
+        batch_id: workerBatchId
+    });
+}
+
 
 // ==================================================
 // WORKER EXECUTION PATH
@@ -39501,10 +39553,13 @@ if (workerBatchId) {
 
     if (!connector_id) {
 
-        return res.status(503).json({
-            success: false,
-            error: "Connector not paired"
-        });
+       return res.status(503).json({
+    success: false,
+    error: "Connector not paired",
+    error_code: "HTTP_EXECUTION_NOT_STARTED",
+    reason: "CONNECTOR_NOT_PAIRED",
+    batch_id: sync_batch_id
+});
 
     }
 
@@ -39518,10 +39573,13 @@ if (workerBatchId) {
 
     if (!socket) {
 
-        return res.status(503).json({
-            success: false,
-            error: "Connector offline"
-        });
+       return res.status(503).json({
+    success: false,
+    error: "Connector offline",
+    error_code: "HTTP_EXECUTION_NOT_STARTED",
+    reason: "CONNECTOR_OFFLINE",
+    batch_id: sync_batch_id
+});
 
     }
 
@@ -39586,10 +39644,12 @@ if (!guidMatched) {
     );
 
     return res.status(409).json({
-        success: false,
-        error: "Tally company identity mismatch"
-    });
-
+    success: false,
+    error: "Tally company identity mismatch",
+    error_code: "HTTP_EXECUTION_NOT_STARTED",
+    reason: "TALLY_COMPANY_GUID_MISMATCH",
+    batch_id: sync_batch_id
+});
 }
 
 } 
@@ -39716,7 +39776,8 @@ else {
 const failHttpBatch = async (error) => {
     await BatchStatusManager.markFailed({
         batch_id: sync_batch_id,
-        error
+        error,
+        execution_claim_token: executionClaimToken
     });
 
     if (httpWorkerId) {
@@ -39744,13 +39805,34 @@ if (!runningBatch) {
         sync_batch_id
     );
 
-    return res.status(503).json({
-        success: false,
-        error: "BATCH_LOOKUP_UNAVAILABLE"
-    });
+return res.status(503).json({
+    success: false,
+    error: "BATCH_LOOKUP_UNAVAILABLE",
+    error_code: "HTTP_EXECUTION_NOT_STARTED",
+    reason: "PRE_GUARD_BATCH_LOOKUP_UNAVAILABLE",
+    batch_id: sync_batch_id
+});
 
 }
 
+if (
+    runningBatch.batch_status === "CLOSED" &&
+    runningBatch.worker_status === "COMPLETED" &&
+    runningBatch.batch_closed === true
+) {
+    console.log(
+        "✅ BATCH ALREADY CLOSED — DUPLICATE SYNC SKIPPED:",
+        sync_batch_id
+    );
+
+    return res.status(200).json({
+        success: true,
+        already_completed: true,
+        batch_id: sync_batch_id,
+        status: "CLOSED"
+    });
+}
+/* 2710126
 if (
     typeof runningBatch.error_message === "string" &&
     runningBatch.error_message.startsWith(
@@ -39770,18 +39852,264 @@ if (
     });
 
 }
+*/
+
+const batchErrorMessage =
+    typeof runningBatch.error_message === "string"
+        ? runningBatch.error_message
+        : "";
+
+const isConnectorOutcomeUnknown =
+    batchErrorMessage.startsWith("CONNECTOR_OUTCOME_UNKNOWN:");
+
+const isHttpOutcomeUnknown =
+    batchErrorMessage.startsWith("HTTP_OUTCOME_UNKNOWN:");
+
+if (isConnectorOutcomeUnknown || isHttpOutcomeUnknown) {
+
+    console.error(
+        "⛔ UNCERTAIN BATCH — SERVER RETRY BLOCKED:",
+        sync_batch_id
+    );
+
+    return res.status(409).json({
+        success: false,
+        error: "Batch outcome is uncertain. Automatic retry blocked.",
+        error_code: isConnectorOutcomeUnknown
+            ? "CONNECTOR_OUTCOME_UNKNOWN"
+            : "HTTP_OUTCOME_UNKNOWN"
+    });
+
+}
+
+httpExecutionGuardAttempted = true;
+
+try {
+    httpExecutionGuardOwnerToken = crypto.randomUUID();
+
+    httpExecutionGuardAcquired =
+        await acquireHttpBatchExecutionGuard(
+            sync_batch_id,
+            httpExecutionGuardOwnerToken
+        );
+} catch (guardError) {
+    console.error(
+        "HTTP EXECUTION GUARD ACQUISITION FAILED:",
+        {
+            batch_id: sync_batch_id,
+            error: guardError?.message || String(guardError)
+        }
+    );
+
+    return res.status(503).json({
+        success: false,
+        error_code: "HTTP_EXECUTION_GUARD_UNAVAILABLE",
+        batch_id: sync_batch_id
+    });
+}
+
+if (httpExecutionGuardAcquired !== true) {
+    return res.status(409).json({
+        success: false,
+        error_code: "HTTP_EXECUTION_IN_PROGRESS",
+        batch_id: sync_batch_id
+    });
+}
+
+let executionBatch;
+
+try {
+    executionBatch =
+        await BatchStatusManager.loadBatch({
+            batch_id: sync_batch_id
+        });
+} catch (batchLookupError) {
+    console.error(
+        "POST-GUARD BATCH LOOKUP ERROR:",
+        {
+            batch_id: sync_batch_id,
+            error:
+                batchLookupError?.message ||
+                String(batchLookupError)
+        }
+    );
+
+    return res.status(503).json({
+        success: false,
+        error_code: "HTTP_EXECUTION_NOT_STARTED",
+        reason: "POST_GUARD_BATCH_LOOKUP_UNAVAILABLE",
+        batch_id: sync_batch_id
+    });
+}
+if (!executionBatch) {
+    console.error(
+        "POST-GUARD BATCH LOOKUP FAILED:",
+        sync_batch_id
+    );
+
+    return res.status(503).json({
+        success: false,
+        error_code: "HTTP_EXECUTION_NOT_STARTED",
+        batch_id: sync_batch_id
+    });
+}
+
+if (
+    String(executionBatch.company_code || "").trim() !==
+        String(company_code || "").trim() ||
+    String(executionBatch.tally_owner || "")
+        .trim()
+        .toUpperCase() !==
+        String(tally_owner || "").trim().toUpperCase()
+) {
+    console.error("POST-GUARD BATCH IDENTITY MISMATCH:", {
+        batch_id: sync_batch_id,
+        requested_company_code: company_code,
+        batch_company_code: executionBatch.company_code,
+        requested_tally_owner: tally_owner,
+        batch_tally_owner: executionBatch.tally_owner
+    });
+
+    return res.status(409).json({
+        success: false,
+        error_code: "HTTP_EXECUTION_NOT_STARTED",
+        reason: "BATCH_IDENTITY_MISMATCH",
+        batch_id: sync_batch_id
+    });
+}
+
+if (
+    workerBatchId &&
+    String(executionBatch.execution_claim_token || "")
+        .trim()
+        .toLowerCase() !== executionClaimToken.toLowerCase()
+) {
+    console.error("POST-GUARD EXECUTION CLAIM TOKEN MISMATCH:", {
+        batch_id: sync_batch_id
+    });
+
+    return res.status(409).json({
+        success: false,
+        error_code: "HTTP_EXECUTION_NOT_STARTED",
+        reason: "EXECUTION_CLAIM_TOKEN_MISMATCH",
+        batch_id: sync_batch_id
+    });
+}
+
+if (
+    executionBatch.batch_status === "CLOSED" &&
+    executionBatch.worker_status === "COMPLETED" &&
+    executionBatch.batch_closed === true
+) {
+    console.log(
+        "POST-GUARD BATCH ALREADY CLOSED — EXECUTION SKIPPED:",
+        sync_batch_id
+    );
+
+    return res.status(409).json({
+        success: false,
+        error_code: "HTTP_EXECUTION_NOT_STARTED",
+        reason: "BATCH_ALREADY_COMPLETED",
+        batch_id: sync_batch_id
+    });
+}
+
+const executionBatchError =
+    typeof executionBatch.error_message === "string"
+        ? executionBatch.error_message
+        : "";
+
+const executionConnectorOutcomeUnknown =
+    executionBatchError.startsWith(
+        "CONNECTOR_OUTCOME_UNKNOWN:"
+    );
+
+const executionHttpOutcomeUnknown =
+    executionBatchError.startsWith(
+        "HTTP_OUTCOME_UNKNOWN:"
+    );
+
+if (
+    executionConnectorOutcomeUnknown ||
+    executionHttpOutcomeUnknown
+) {
+    console.error(
+        "POST-GUARD UNCERTAIN BATCH — EXECUTION BLOCKED:",
+        sync_batch_id
+    );
+
+    return res.status(409).json({
+        success: false,
+        error_code: "HTTP_EXECUTION_NOT_STARTED",
+        reason: executionConnectorOutcomeUnknown
+            ? "CONNECTOR_OUTCOME_UNKNOWN"
+            : "HTTP_OUTCOME_UNKNOWN",
+        batch_id: sync_batch_id
+    });
+}
+
+
+const postGuardBatchEligible =
+    executionBatch.batch_closed === false &&
+    executionBatch.batch_status === "PROCESSING" &&
+    executionBatch.worker_status === "RUNNING";
+
+if (!postGuardBatchEligible) {
+    console.error(
+        "POST-GUARD BATCH NOT ELIGIBLE:",
+        {
+            batch_id: sync_batch_id,
+            batch_status: executionBatch.batch_status,
+            worker_status: executionBatch.worker_status,
+            batch_closed: executionBatch.batch_closed
+        }
+    );
+
+    return res.status(409).json({
+        success: false,
+        error_code: "HTTP_EXECUTION_NOT_STARTED",
+        reason: "BATCH_NOT_ELIGIBLE",
+        batch_id: sync_batch_id
+    });
+}
+
+const postGuardBatchStateChanged =
+    executionBatch.batch_status !== runningBatch.batch_status ||
+    executionBatch.worker_status !== runningBatch.worker_status ||
+    executionBatch.batch_closed !== runningBatch.batch_closed ||
+    executionBatch.error_message !== runningBatch.error_message ||
+    executionBatch.execution_claim_token !==
+        runningBatch.execution_claim_token;
+
+if (postGuardBatchStateChanged) {
+    console.error(
+        "POST-GUARD BATCH STATE CHANGED — EXECUTION BLOCKED:",
+        sync_batch_id
+    );
+
+    return res.status(409).json({
+        success: false,
+        error_code: "HTTP_EXECUTION_NOT_STARTED",
+        reason: "BATCH_STATE_CHANGED",
+        batch_id: sync_batch_id
+    });
+}
+
+httpSyncExecutionStarted = true;
+
+// Durable connector operation sequence for this execution.
+let connectorOperationOrdinal = 0;
 
 const sync =
 
     await SyncController.start({
 
-        runningBatch
+        runningBatch: executionBatch
 
     });
 
 const resumePoint =
-
-      sync.startEntity;
+    sync.startEntity;
 
 console.log(
 
@@ -39859,24 +40187,41 @@ let costCentreGuidResult = null;
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+    execution_claim_token: executionClaimToken,
     stage: "MASTERS",
     progress: 0,
     action: "FETCHING_MASTERS"
 });
 
-const result = await sendChunkedToConnector(
+// ==========================================
+// DURABLE OPERATION CLAIM — GET MASTERS
+// ==========================================
+
+const mastersPayload = {
+    company,
+    lastAlterId,
+    lastStockAlterId,
+    lastLedgerAlterId,
+    syncMode,
+    batchId: sync_batch_id
+};
+
+
+
+const result = await executeDurableConnectorOperation({
+    supabase,
     socket,
-    "getMasters",
-    {
-        company,
-        lastAlterId,
-        lastStockAlterId,
-        lastLedgerAlterId,
-        syncMode,
-                batchId: sync_batch_id,
-    },
-    connector_id
-);
+    event: "getMasters",
+    payload: mastersPayload,
+    connectorId: connector_id,
+    batchId: sync_batch_id,
+    executionClaimToken,
+    operationOrdinal: ++connectorOperationOrdinal,
+    companyCode: company_code,
+    tallyOwner: tally_owner,
+    tallyCompanyGuid: companyGuid,
+    tallyCompanyName: company
+});
 
 console.log("===== TALLY MASTER COUNTS =====");
 console.log({
@@ -39890,7 +40235,8 @@ console.log({
 });
 console.log("================================");
 
-await supabase
+const { data: masterCountUpdated, error: masterCountUpdateError } =
+    await supabase
     .from("sync_batches")
     .update({
         tally_groups_count: result.summary?.groups || 0,
@@ -39900,8 +40246,20 @@ await supabase
         tally_godowns_count: result.summary?.godowns || 0,
         tally_cost_centres_count: result.summary?.costCentres || 0,
         tally_units_count: result.summary?.units || 0
-    })
-    .eq("batch_id", sync_batch_id);
+       })
+    .eq("batch_id", sync_batch_id)
+    .eq("execution_claim_token", executionClaimToken)
+    .select("batch_id")
+    .maybeSingle();
+
+if (masterCountUpdateError || !masterCountUpdated) {
+    throw new Error(
+        `MASTER_COUNT_UPDATE_NOT_CONFIRMED: ${sync_batch_id}` +
+        (masterCountUpdateError
+            ? ` | ${masterCountUpdateError.message}`
+            : "")
+    );
+}
 
 const masterHandlers = {
 
@@ -39967,6 +40325,7 @@ return res.json(result);
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+    execution_claim_token: executionClaimToken,
     stage: "MASTERS",
     progress: 0,
     action: "PROCESSING_MASTERS"
@@ -40089,10 +40448,12 @@ if (syncMode === SYNC_MODE.FULL) {
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+    execution_claim_token: executionClaimToken,
     stage: "VOUCHER_GUID_DISCOVERY",
     progress: 0,
     action: "FETCHING_VOUCHER_GUIDS"
 });
+/* 301026
 voucherGuidResult =
     await sendChunkedToConnector(
         socket,
@@ -40126,9 +40487,46 @@ voucherGuidResult =
             module:"VOUCHER",
 
                       entity_type:"VOUCHER"
-        },
-        connector_id
+                },
+        connector_id,
+        {
+            batch_id: sync_batch_id,
+            execution_claim_token: executionClaimToken
+        }
     );
+    */
+
+    voucherGuidResult = await executeDurableConnectorOperation({
+    supabase,
+    socket,
+    event: "getMastersVoucherGuids",
+    payload: {
+        company,
+        fromDate,
+        toDate,
+        snapshot: true,
+        booksBeginningFrom: result.summary?.booksBeginningFrom,
+        lastAlterId,
+        sync_batch_id,
+        batchId: sync_batch_id,
+        syncMode,
+        syncPeriod,
+        company_code,
+        tally_owner,
+        module: "VOUCHER",
+        entity_type: "VOUCHER"
+    },
+    connectorId: connector_id,
+    batchId: sync_batch_id,
+    executionClaimToken,
+    operationOrdinal: ++connectorOperationOrdinal,
+    companyCode: company_code,
+    tallyOwner: tally_owner,
+    tallyCompanyGuid: companyGuid,
+    tallyCompanyName: company
+});
+
+/* 301026
     groupGuidResult =
     await sendChunkedToConnector(
         socket,
@@ -40149,16 +40547,44 @@ voucherGuidResult =
             module:"MASTER",
 
                        entity_type:"GROUP"
-        },
-        connector_id
+               },
+        connector_id,
+        {
+            batch_id: sync_batch_id,
+            execution_claim_token: executionClaimToken
+        }
     );
-
+*/
+groupGuidResult = await executeDurableConnectorOperation({
+    supabase,
+    socket,
+    event: "getMastersGroupGuids",
+    payload: {
+        company,
+        snapshot: true,
+        syncMode,
+        sync_batch_id,
+        company_code,
+        tally_owner,
+        module: "MASTER",
+        entity_type: "GROUP"
+    },
+    connectorId: connector_id,
+    batchId: sync_batch_id,
+    executionClaimToken,
+    operationOrdinal: ++connectorOperationOrdinal,
+    companyCode: company_code,
+    tallyOwner: tally_owner,
+    tallyCompanyGuid: companyGuid,
+    tallyCompanyName: company
+});
 
 console.log(
     "GROUP GUID SNAPSHOT :",
     groupGuidResult
 );
 
+/*
 ledgerGuidResult =
     await sendChunkedToConnector(
         socket,
@@ -40179,17 +40605,44 @@ ledgerGuidResult =
             module:"MASTER",
 
                         entity_type:"LEDGER"
-        },
-        connector_id
+               },
+        connector_id,
+        {
+            batch_id: sync_batch_id,
+            execution_claim_token: executionClaimToken
+        }
     );
-
+*/
+ledgerGuidResult = await executeDurableConnectorOperation({
+    supabase,
+    socket,
+    event: "getMastersLedgerGuids",
+    payload: {
+        company,
+        snapshot: true,
+        syncMode,
+        sync_batch_id,
+        company_code,
+        tally_owner,
+        module: "MASTER",
+        entity_type: "LEDGER"
+    },
+    connectorId: connector_id,
+    batchId: sync_batch_id,
+    executionClaimToken,
+    operationOrdinal: ++connectorOperationOrdinal,
+    companyCode: company_code,
+    tallyOwner: tally_owner,
+    tallyCompanyGuid: companyGuid,
+    tallyCompanyName: company
+});
 
 console.log(
     "LEDGER GUID SNAPSHOT :",
     ledgerGuidResult
 );
 
-
+/* 301026
 stockGroupGuidResult =
     await sendChunkedToConnector(
         socket,
@@ -40210,17 +40663,45 @@ stockGroupGuidResult =
             module:"MASTER",
 
                        entity_type:"STOCK_GROUP"
-        },
-        connector_id
+              },
+        connector_id,
+        {
+            batch_id: sync_batch_id,
+            execution_claim_token: executionClaimToken
+        }
     );
+*/
 
+stockGroupGuidResult = await executeDurableConnectorOperation({
+    supabase,
+    socket,
+    event: "getMastersStockGroupGuids",
+    payload: {
+        company,
+        snapshot: true,
+        syncMode,
+        sync_batch_id,
+        company_code,
+        tally_owner,
+        module: "MASTER",
+        entity_type: "STOCK_GROUP"
+    },
+    connectorId: connector_id,
+    batchId: sync_batch_id,
+    executionClaimToken,
+    operationOrdinal: ++connectorOperationOrdinal,
+    companyCode: company_code,
+    tallyOwner: tally_owner,
+    tallyCompanyGuid: companyGuid,
+    tallyCompanyName: company
+});
 
 console.log(
     "STOCK GROUP GUID SNAPSHOT :",
     stockGroupGuidResult
 );
 
-
+/* 301026
 stockGuidResult =
     await sendChunkedToConnector(
         socket,
@@ -40241,17 +40722,45 @@ stockGuidResult =
             module:"MASTER",
 
                         entity_type:"STOCK"
-        },
-        connector_id
+              },
+        connector_id,
+        {
+            batch_id: sync_batch_id,
+            execution_claim_token: executionClaimToken
+        }
     );
+*/
 
+stockGuidResult = await executeDurableConnectorOperation({
+    supabase,
+    socket,
+    event: "getMastersStockGuids",
+    payload: {
+        company,
+        snapshot: true,
+        syncMode,
+        sync_batch_id,
+        company_code,
+        tally_owner,
+        module: "MASTER",
+        entity_type: "STOCK"
+    },
+    connectorId: connector_id,
+    batchId: sync_batch_id,
+    executionClaimToken,
+    operationOrdinal: ++connectorOperationOrdinal,
+    companyCode: company_code,
+    tallyOwner: tally_owner,
+    tallyCompanyGuid: companyGuid,
+    tallyCompanyName: company
+});
 
 console.log(
     "STOCK GUID SNAPSHOT :",
     stockGuidResult
 );
 
-
+/* 301026
 unitGuidResult =
     await sendChunkedToConnector(
         socket,
@@ -40272,17 +40781,45 @@ unitGuidResult =
             module:"MASTER",
 
                       entity_type:"UNIT"
-        },
-        connector_id
+                },
+        connector_id,
+        {
+            batch_id: sync_batch_id,
+            execution_claim_token: executionClaimToken
+        }
     );
+*/
 
+unitGuidResult = await executeDurableConnectorOperation({
+    supabase,
+    socket,
+    event: "getMastersUnitGuids",
+    payload: {
+        company,
+        snapshot: true,
+        syncMode,
+        sync_batch_id,
+        company_code,
+        tally_owner,
+        module: "MASTER",
+        entity_type: "UNIT"
+    },
+    connectorId: connector_id,
+    batchId: sync_batch_id,
+    executionClaimToken,
+    operationOrdinal: ++connectorOperationOrdinal,
+    companyCode: company_code,
+    tallyOwner: tally_owner,
+    tallyCompanyGuid: companyGuid,
+    tallyCompanyName: company
+});
 
 console.log(
     "UNIT GUID SNAPSHOT :",
     unitGuidResult
 );
 
-
+/* 301026
 godownGuidResult =
     await sendChunkedToConnector(
         socket,
@@ -40303,17 +40840,45 @@ godownGuidResult =
             module:"MASTER",
 
                        entity_type:"GODOWN"
-        },
-        connector_id
+             },
+        connector_id,
+        {
+            batch_id: sync_batch_id,
+            execution_claim_token: executionClaimToken
+        }
     );
+*/
 
+godownGuidResult = await executeDurableConnectorOperation({
+    supabase,
+    socket,
+    event: "getMastersGodownGuids",
+    payload: {
+        company,
+        snapshot: true,
+        syncMode,
+        sync_batch_id,
+        company_code,
+        tally_owner,
+        module: "MASTER",
+        entity_type: "GODOWN"
+    },
+    connectorId: connector_id,
+    batchId: sync_batch_id,
+    executionClaimToken,
+    operationOrdinal: ++connectorOperationOrdinal,
+    companyCode: company_code,
+    tallyOwner: tally_owner,
+    tallyCompanyGuid: companyGuid,
+    tallyCompanyName: company
+});
 
 console.log(
     "GODOWN GUID SNAPSHOT :",
     godownGuidResult
 );
 
-
+/* 301026
 costCentreGuidResult =
     await sendChunkedToConnector(
         socket,
@@ -40334,10 +40899,38 @@ costCentreGuidResult =
             module:"MASTER",
 
                       entity_type:"COST_CENTRE"
-        },
-        connector_id
+                },
+        connector_id,
+        {
+            batch_id: sync_batch_id,
+            execution_claim_token: executionClaimToken
+        }
     );
+*/
 
+costCentreGuidResult = await executeDurableConnectorOperation({
+    supabase,
+    socket,
+    event: "getMastersCostCentreGuids",
+    payload: {
+        company,
+        snapshot: true,
+        syncMode,
+        sync_batch_id,
+        company_code,
+        tally_owner,
+        module: "MASTER",
+        entity_type: "COST_CENTRE"
+    },
+    connectorId: connector_id,
+    batchId: sync_batch_id,
+    executionClaimToken,
+    operationOrdinal: ++connectorOperationOrdinal,
+    companyCode: company_code,
+    tallyOwner: tally_owner,
+    tallyCompanyGuid: companyGuid,
+    tallyCompanyName: company
+});
 
 console.log(
     "COST CENTRE GUID SNAPSHOT :",
@@ -40411,7 +41004,7 @@ if (!costCentreGuidResult.success) {
 
 
 
-
+/*
 fs.appendFileSync(
 "./logs/server-guid-debug.jsonl",
 JSON.stringify({
@@ -40446,31 +41039,11 @@ JSON.stringify({
 
 }) + "\n"
 );
-
+*/
 // =========================
 // VALIDATE GROUPS
 // =========================
-/* remove 01.08.26 evening
-const groupValidation =
-    await validateMasters({
 
-        table: "tally_sync_groups",
-
-        company_code,
-
-        tally_owner,
-
-        rows: result.groups || []
-
-    });
-
-
-console.log(
-    "GROUP VALIDATION :",
-    groupValidation
-);
-
-*/
 
 if (
 
@@ -40482,8 +41055,6 @@ if (
 
 ) {
 
- 
-
 syncDebug({
 
     stage:"GROUP_PROCESSING",
@@ -40492,10 +41063,10 @@ syncDebug({
 
 });
 
-
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+    execution_claim_token: executionClaimToken,
     stage: "MASTERS",
     progress: 5,
     action: "PROCESSING_GROUPS"
@@ -40504,9 +41075,9 @@ await updateSyncProgress({
 groupResult = await BatchManager.run({
 
     batch_id: sync_batch_id,
+    execution_claim_token: executionClaimToken,
 
     module: "MASTER",
-
     entity: "GROUP",
 
     table: "tally_sync_groups",
@@ -40532,30 +41103,7 @@ console.log(
 // =========================
 // GROUP RECONCILIATION
 // =========================
-/*
-groupReconciliation =
-    await ReconciliationManager.reconcile({
 
-        table: "tally_sync_groups",
-
-        module: "MASTER",
-
-        entity_type: "GROUP",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id
-
-    });
-
-
-console.log(
-    "GROUP RECONCILIATION :",
-    groupReconciliation
-);
-*/
 
 groupReconciliation =
     groupResult.reconciliation;
@@ -40568,41 +41116,7 @@ console.log(
 // =========================
 // GROUP ACTIONS
 // =========================
-/*
-  groupActionResult =
-  await applyMasterActions({
 
-    table:"tally_sync_groups",
-
-    company_code,
-
-    tally_owner,
-
-    sync_batch_id,
-
-    reconciliationResult:
-        groupReconciliation
-
-});
-
-
-console.log(
-    "GROUP ACTION RESULT :",
-    groupActionResult
-);
-
-
-await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"GROUP",
-
-    action:"COMPLETED"
-
-});
-
-*/
 
 syncDebug({
 
@@ -40634,6 +41148,7 @@ masterFlowDebug({
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+    execution_claim_token: executionClaimToken,
     stage: "MASTERS",
     progress: 10,
     action: "PROCESSING_STOCK_GROUPS"
@@ -40642,6 +41157,7 @@ await updateSyncProgress({
 stockGroupResult = await BatchManager.run({
 
     batch_id: sync_batch_id,
+    execution_claim_token: executionClaimToken,
 
     module: "MASTER",
 
@@ -40704,6 +41220,7 @@ masterFlowDebug({
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+    execution_claim_token: executionClaimToken,
     stage: "MASTERS",
     progress: 15,
     action: "PROCESSING_LEDGERS"
@@ -40718,6 +41235,7 @@ console.log("================================");
 ledgerResult = await BatchManager.run({
 
     batch_id: sync_batch_id,
+    execution_claim_token: executionClaimToken,
 
     module: "MASTER",
 
@@ -40769,6 +41287,7 @@ masterFlowDebug({
 
 if(ledgerReconciliation?.missingGuids?.length){
 
+  /* 301026
   const missingResult =
     await sendChunkedToConnector(
         socket,
@@ -40783,8 +41302,35 @@ if(ledgerReconciliation?.missingGuids?.length){
                     item => item.guid
                 )
         },
-        connector_id
+          connector_id,
+        {
+            batch_id: sync_batch_id,
+            execution_claim_token: executionClaimToken
+        }
     );
+    */
+
+  const missingResult = await executeDurableConnectorOperation({
+    supabase,
+    socket,
+    event: "ledgerByGuid",
+    payload: {
+        company,
+        sync_batch_id,
+        tally_owner,
+        requestItems: ledgerReconciliation.missingGuids.map(
+            item => item.guid
+        )
+    },
+    connectorId: connector_id,
+    batchId: sync_batch_id,
+    executionClaimToken,
+    operationOrdinal: ++connectorOperationOrdinal,
+    companyCode: company_code,
+    tallyOwner: tally_owner,
+    tallyCompanyGuid: companyGuid,
+    tallyCompanyName: company
+});
 
     if(!missingResult.success){
     await failHttpBatch(missingResult);
@@ -40798,6 +41344,7 @@ if(ledgerReconciliation?.missingGuids?.length){
         tally_owner,
 
         sync_batch_id,
+        execution_claim_token: executionClaimToken,
 
         ledgers:
             missingResult.ledgers || []
@@ -40854,6 +41401,7 @@ masterFlowDebug({
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+    execution_claim_token: executionClaimToken,
     stage: "MASTERS",
     progress: 20,
     action: "PROCESSING_GODOWNS"
@@ -40862,6 +41410,7 @@ await updateSyncProgress({
 godownResult = await BatchManager.run({
 
     batch_id: sync_batch_id,
+    execution_claim_token: executionClaimToken,
 
     module: "MASTER",
 
@@ -40937,39 +41486,7 @@ console.log(
 // =========================
 // GODOWN ACTIONS
 // =========================
-/*
-godownActionResult =
-    await applyMasterActions({
 
-        table: "tally_sync_godowns",
-
-        company_code,
-
-        tally_owner,
-
-        sync_batch_id,
-
-        reconciliationResult:
-            godownReconciliation
-
-    });
-
-console.log(
-    "GODOWN ACTION RESULT :",
-    godownActionResult
-);
-
-await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"GODOWN",
-
-    action:"COMPLETED"
-
-});
-
-*/
 
 
 masterFlowDebug({
@@ -40990,17 +41507,6 @@ if (
 
 ) {
 
-/* 05.08.26
-  await updateMasterStatus({
-
-    sync_batch_id,
-
-    module:"UNIT",
-
-    action:"PROCESSING"
-
-});
-*/
 
 masterFlowDebug({
     stage:"UNIT_PROCESSING",
@@ -41010,6 +41516,7 @@ masterFlowDebug({
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+     execution_claim_token: executionClaimToken,
     stage: "MASTERS",
     progress: 25,
     action: "PROCESSING_UNITS"
@@ -41018,9 +41525,9 @@ await updateSyncProgress({
 unitResult = await BatchManager.run({
 
     batch_id: sync_batch_id,
+    execution_claim_token: executionClaimToken,
 
     module: "MASTER",
-
     entity: "UNIT",
 
     table: "tally_sync_units",
@@ -41083,6 +41590,7 @@ masterFlowDebug({
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+     execution_claim_token: executionClaimToken,
     stage: "MASTERS",
     progress: 30,
     action: "PROCESSING_COST_CENTRES"
@@ -41096,6 +41604,7 @@ await updateSyncProgress({
 costCentreResult = await BatchManager.run({
 
     batch_id: sync_batch_id,
+    execution_claim_token: executionClaimToken,
 
     module: "MASTER",
 
@@ -41159,6 +41668,7 @@ masterFlowDebug({
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+     execution_claim_token: executionClaimToken,
     stage: "MASTERS",
     progress: 35,
     action: "PROCESSING_STOCKS"
@@ -41171,6 +41681,7 @@ await updateSyncProgress({
 stockResult = await BatchManager.run({
 
     batch_id: sync_batch_id,
+    execution_claim_token: executionClaimToken,
 
     module: "MASTER",
 
@@ -41215,7 +41726,7 @@ masterFlowDebug({
 
 
 if(stockReconciliation?.missingGuids?.length){
-
+/*301026
    const missingResult =
     await sendChunkedToConnector(
         socket,
@@ -41230,8 +41741,34 @@ if(stockReconciliation?.missingGuids?.length){
                     item => item.guid
                 )
         },
-        connector_id
+        connector_id,
+        {
+            batch_id: sync_batch_id,
+            execution_claim_token: executionClaimToken
+        }
     );
+*/
+const missingResult = await executeDurableConnectorOperation({
+    supabase,
+    socket,
+    event: "stockByGuid",
+    payload: {
+        company,
+        sync_batch_id,
+        tally_owner,
+        requestItems: stockReconciliation.missingGuids.map(
+            item => item.guid
+        )
+    },
+    connectorId: connector_id,
+    batchId: sync_batch_id,
+    executionClaimToken,
+    operationOrdinal: ++connectorOperationOrdinal,
+    companyCode: company_code,
+    tallyOwner: tally_owner,
+    tallyCompanyGuid: companyGuid,
+    tallyCompanyName: company
+});
 
     if(!missingResult.success){
     await failHttpBatch(missingResult);
@@ -41242,6 +41779,7 @@ if(stockReconciliation?.missingGuids?.length){
         company_code,
         tally_owner,
         sync_batch_id,
+        execution_claim_token: executionClaimToken,
         stocks:
             missingResult.stocks || []
     });
@@ -41281,6 +41819,7 @@ if (
 await BatchStatusManager.updateModule({
 
     batch_id: sync_batch_id,
+    execution_claim_token: executionClaimToken,
 
     module: "VOUCHER",
 
@@ -41376,6 +41915,7 @@ console.log(
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+     execution_claim_token: executionClaimToken,
     stage: "VOUCHER_IMPORT",
     progress: 20,
     action: "VOUCHER_COMPARISON_COMPLETED"
@@ -41442,7 +41982,9 @@ const childRepairVoucherCache = [
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+     execution_claim_token: executionClaimToken,
     stage: "VOUCHER_IMPORT",
+    
     progress: 25,
     action: "SAVING_VOUCHERS"
 });
@@ -41452,6 +41994,7 @@ voucherResult = await saveVouchers({
     company_code,
     tally_owner,
     sync_batch_id,
+    execution_claim_token: executionClaimToken,
     syncMode,
     vouchers: result.vouchers || [],
     allVoucherGuids:
@@ -41463,6 +42006,7 @@ voucherResult = await saveVouchers({
 await updateSyncProgress({
   supabase,
   batchId: sync_batch_id,
+   execution_claim_token: executionClaimToken,
   stage: "VOUCHER_IMPORT",
   progress: 40,
   action: "INITIAL_VOUCHER_SAVE_COMPLETED"
@@ -41546,12 +42090,13 @@ fs.appendFileSync(
     await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+     execution_claim_token: executionClaimToken,
     stage: "VOUCHER_IMPORT",
     progress: 50,
     action: "FETCHING_MISSING_CHANGED_VOUCHERS"
 });
 
-
+/* 301026
    const missingResult =
     await sendChunkedToConnector(
         socket,
@@ -41576,13 +42121,41 @@ fs.appendFileSync(
             booksBeginningFrom:
                 result.summary?.booksBeginningFrom,
 
-       //     toDate,
-
                        requestItems:
                 recoveredVoucherGuids
-        },
-        connector_id
+              },
+        connector_id,
+        {
+            batch_id: sync_batch_id,
+            execution_claim_token: executionClaimToken
+        }
     );
+*/
+const missingResult = await executeDurableConnectorOperation({
+    supabase,
+    socket,
+    event: "voucherByGuid",
+    payload: {
+        company,
+        sync_batch_id,
+        company_code,
+        tally_owner,
+        module: "VOUCHER",
+        entity_type: "VOUCHER",
+        snapshot: true,
+        syncMode,
+        booksBeginningFrom: result.summary?.booksBeginningFrom,
+        requestItems: recoveredVoucherGuids
+    },
+    connectorId: connector_id,
+    batchId: sync_batch_id,
+    executionClaimToken,
+    operationOrdinal: ++connectorOperationOrdinal,
+    companyCode: company_code,
+    tallyOwner: tally_owner,
+    tallyCompanyGuid: companyGuid,
+    tallyCompanyName: company
+});
 
     fs.appendFileSync(
     "./logs/voucher-by-guid-source-debug.jsonl",
@@ -41671,6 +42244,7 @@ fs.writeFileSync(
         supabase,
         batchId: sync_batch_id,
         stage: "VOUCHER_IMPORT",
+         execution_claim_token: executionClaimToken,
         progress: 65,
         action: "VOUCHER_RECOVERY_FETCH_COMPLETED"
     });
@@ -41698,16 +42272,18 @@ console.log("===== BEFORE SECOND SAVE VOUCHERS =====", {
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+     execution_claim_token: executionClaimToken,
     stage: "VOUCHER_IMPORT",
     progress: 70,
     action: "SAVING_RECOVERED_VOUCHERS"
 });
 
-    voucherResult = await saveVouchers({
-        company_code,
-        tally_owner,
-        sync_batch_id,
-        syncMode,
+  voucherResult = await saveVouchers({
+    company_code,
+    tally_owner,
+    sync_batch_id,
+    execution_claim_token: executionClaimToken,
+    syncMode,
         vouchers: allFetchedVouchers,
         //vouchers: missingResult.items || [],
         allVoucherGuids:
@@ -41719,6 +42295,7 @@ await updateSyncProgress({
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+     execution_claim_token: executionClaimToken,
     stage: "VOUCHER_IMPORT",
     progress: 85,
     action: "RECOVERED_VOUCHER_SAVE_COMPLETED"
@@ -41753,6 +42330,7 @@ fs.writeFileSync(
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+     execution_claim_token: executionClaimToken,
     stage: "VOUCHER_IMPORT",
     progress: 90,
     action: "STARTING_PARENT_VOUCHER_RECONCILIATION"
@@ -41828,6 +42406,7 @@ if (
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+     execution_claim_token: executionClaimToken,
     stage: "VOUCHER_IMPORT",
     progress: 100,
     action: "PARENT_VOUCHER_RECONCILIATION_COMPLETED"
@@ -41837,6 +42416,7 @@ await updateSyncProgress({
 await BatchStatusManager.updateModule({
 
     batch_id: sync_batch_id,
+    execution_claim_token: executionClaimToken,
 
     module: "VOUCHER",
 
@@ -41863,6 +42443,7 @@ masterFlowDebug({
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+    execution_claim_token: executionClaimToken,
     stage: "CHILD_RECONCILIATION",
     progress: 0,
     action: "STARTING_CHILD_RECONCILIATION"
@@ -41959,6 +42540,7 @@ if (
     await updateSyncProgress({
         supabase,
         batchId: sync_batch_id,
+        execution_claim_token: executionClaimToken,
         stage: "CHILD_RECONCILIATION",
         progress: 10,
         action: "REPAIRING_CHILD_VOUCHERS"
@@ -42260,7 +42842,7 @@ let childMissingResult = {
 };
 
     if (uncachedMissingVoucherGuids.length > 0) {
-
+/* 301026
     childMissingResult =
         await sendChunkedToConnector(
 
@@ -42292,9 +42874,40 @@ let childMissingResult = {
                              requestItems:
                     uncachedMissingVoucherGuids
 
-            },
-            connector_id
+                       },
+            connector_id,
+            {
+                batch_id: sync_batch_id,
+                execution_claim_token: executionClaimToken
+            }
         );
+*/
+
+childMissingResult = await executeDurableConnectorOperation({
+    supabase,
+    socket,
+    event: "voucherByGuid",
+    payload: {
+        company,
+        sync_batch_id,
+        company_code,
+        tally_owner,
+        module: "VOUCHER",
+        entity_type: "VOUCHER",
+        snapshot: true,
+        syncMode,
+        booksBeginningFrom: result.summary?.booksBeginningFrom,
+        requestItems: uncachedMissingVoucherGuids
+    },
+    connectorId: connector_id,
+    batchId: sync_batch_id,
+    executionClaimToken,
+    operationOrdinal: ++connectorOperationOrdinal,
+    companyCode: company_code,
+    tallyOwner: tally_owner,
+    tallyCompanyGuid: companyGuid,
+    tallyCompanyName: company
+});
 
     if (!childMissingResult.success) {
 
@@ -42428,13 +43041,14 @@ for (
             continue;
         }
 
-        const childRepairResult =
-            await saveVouchers({
+      const childRepairResult =
+    await saveVouchers({
 
-                company_code,
-                tally_owner,
-                sync_batch_id,
-                syncMode,
+        company_code,
+        tally_owner,
+        sync_batch_id,
+        execution_claim_token: executionClaimToken,
+        syncMode,
 
                 repairAction,
 
@@ -42476,7 +43090,7 @@ for (
             }
         );
 
-        if (!childRepairResult?.success) {
+        if (childRepairResult?.execution_status !== true) {
 
             await failHttpBatch(
                 childRepairResult
@@ -42776,6 +43390,7 @@ console.log(
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+     execution_claim_token: executionClaimToken,
     stage: "CHILD_RECONCILIATION",
     progress: 100,
     action: "CHILD_RECONCILIATION_COMPLETED"
@@ -42785,13 +43400,13 @@ const childVoucherStatusResult =
     await BatchStatusManager.updateModule({
 
         batch_id: sync_batch_id,
+        execution_claim_token: executionClaimToken,
 
         module: "VOUCHER",
         entity: "VOUCHER",
         action: "COMPLETED"
 
     });
-
 console.log(
     "CHILD VOUCHER STATUS :",
     childVoucherStatusResult
@@ -42810,15 +43425,15 @@ console.log(
 // =========================
 
 const masterStatusResult =
-   await BatchStatusManager.updateModule({
+    await BatchStatusManager.updateModule({
 
-    batch_id: sync_batch_id,
+        batch_id: sync_batch_id,
+        execution_claim_token: executionClaimToken,
 
-    module: "MASTERS",
+        module: "MASTERS",
+        action: "COMPLETED"
 
-    action: "COMPLETED"
-
-});
+    });
 
 masterFlowDebug({
 
@@ -42839,9 +43454,8 @@ console.log(
 
 const batchCompleted =
     await BatchStatusManager.markCompleted({
-
-        batch_id: sync_batch_id
-
+        batch_id: sync_batch_id,
+        execution_claim_token: executionClaimToken
     });
 
 console.log(
@@ -42849,10 +43463,17 @@ console.log(
     batchCompleted
 );
 
+if (batchCompleted !== true) {
+    throw new Error(
+        `BATCH_COMPLETION_NOT_CONFIRMED: ${sync_batch_id}`
+    );
+}
+
 
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+    execution_claim_token: executionClaimToken,
     stage: "LEDGER_RECONCILIATION",
     progress: 0,
     action: "STARTING_LEDGER_RECONCILIATION"
@@ -42867,7 +43488,12 @@ const ledgerReconResponse =
         `/getTrialBalance` +
         `?company_code=${encodeURIComponent(company_code)}` +
         `&tally_owner=${encodeURIComponent(tally_owner)}` +
-        `&sync_batch_id=${encodeURIComponent(sync_batch_id)}`
+        `&sync_batch_id=${encodeURIComponent(sync_batch_id)}`,
+        {
+            headers: {
+                "X-Execution-Claim-Token": executionClaimToken
+            }
+        }
     );
 
 const ledgerReconResult =
@@ -42878,25 +43504,39 @@ const ledgerReconResult =
     ledgerReconResult.success &&
     ledgerReconResult.summary?.ledgerReconciliationPassed === true
 ) {
-    await updateSyncProgress({
-        supabase,
-        batchId: sync_batch_id,
-        stage: "LEDGER_RECONCILIATION",
-        progress: 100,
-        action: "LEDGER_RECONCILIATION_COMPLETED"
-    });
+   await updateSyncProgress({
+    supabase,
+    batchId: sync_batch_id,
+    execution_claim_token: executionClaimToken,
+    stage: "LEDGER_RECONCILIATION",
+    progress: 100,
+    action: "LEDGER_RECONCILIATION_COMPLETED"
+});
 }
 
 await updateSyncProgress({
     supabase,
     batchId: sync_batch_id,
+    execution_claim_token: executionClaimToken,
     stage: "STOCK_RECONCILIATION",
     progress: 0,
     action: "STARTING_STOCK_RECONCILIATION"
 });
 
 const stockReconResponse = await fetch(
-    `${req.protocol}://${req.get("host")}/getStockGodownBalance?company_code=${company_code}&tally_owner=${tally_owner}&sync_batch_id=${sync_batch_id}&booksBeginningFrom=${encodeURIComponent(result?.summary?.booksBeginningFrom || "")}`
+    `${req.protocol}://${req.get("host")}` +
+    `/getStockGodownBalance` +
+    `?company_code=${encodeURIComponent(company_code)}` +
+    `&tally_owner=${encodeURIComponent(tally_owner)}` +
+    `&sync_batch_id=${encodeURIComponent(sync_batch_id)}` +
+    `&booksBeginningFrom=${encodeURIComponent(
+        result?.summary?.booksBeginningFrom || ""
+    )}`,
+    {
+        headers: {
+            "X-Execution-Claim-Token": executionClaimToken
+        }
+    }
 );
 
 const stockReconResult =
@@ -42907,13 +43547,14 @@ if (
     stockReconResult.success &&
     stockReconResult.summary?.stockReconciliationPassed === true
 ) {
-    await updateSyncProgress({
-        supabase,
-        batchId: sync_batch_id,
-        stage: "STOCK_RECONCILIATION",
-        progress: 100,
-        action: "STOCK_RECONCILIATION_COMPLETED"
-    });
+   await updateSyncProgress({
+    supabase,
+    batchId: sync_batch_id,
+    execution_claim_token: executionClaimToken,
+    stage: "STOCK_RECONCILIATION",
+    progress: 100,
+    action: "STOCK_RECONCILIATION_COMPLETED"
+});
 }
 
 console.log(
@@ -42947,32 +43588,32 @@ if (finalBatchError) {
 }
 
 const ledgerPassed =
+    ledgerReconResponse.ok &&
+    ledgerReconResult?.success === true &&
+    ledgerReconResult?.summary?.ledgerReconciliationPassed === true &&
     finalBatch?.ledger_reconciliation_completed === true;
 
 const stockPassed =
+    stockReconResponse.ok &&
+    stockReconResult?.success === true &&
+    stockReconResult?.summary?.stockReconciliationPassed === true &&
     finalBatch?.stock_reconciliation_completed === true;
-
 if (
     ledgerPassed &&
     stockPassed
 ) {
 
-   await supabase
-    .from("sync_batches")
-    .update({
-        batch_status: "CLOSED",
-        batch_closed: true,
-        sync_progress: {
-            stage: "COMPLETED",
-            progress: 100,
-            updated_at: new Date().toISOString(),
-            phase_progress: null
-        }
-    })
-    .eq(
-        "batch_id",
-        sync_batch_id
+ const { data: closedBatch, error: closeError } =
+    await supabase.rpc("close_verified_sync_batch", {
+        p_batch_id: sync_batch_id,
+        p_execution_claim_token: executionClaimToken
+    });
+if (closeError || closedBatch !== true) {
+    throw new Error(
+        `BATCH_CLOSURE_NOT_CONFIRMED: ${sync_batch_id}` +
+        (closeError ? ` | ${closeError.message}` : "")
     );
+}
 
     console.log(
         "BATCH CLOSED: RECONCILIATION PASS"
@@ -42991,17 +43632,13 @@ if (
 }
 
 
-/* 280826
-batchCompletedSuccessfully = true;
-
-await BatchStatusManager.releaseHttpBatch({
-
-    batch_id: sync_batch_id,
-
-    worker_id: httpWorkerId
-
-});
-*/
+if (!ledgerPassed || !stockPassed) {
+    throw new Error(
+        `BATCH_RECONCILIATION_NOT_PASSED: ${sync_batch_id}` +
+        ` | ledgerPassed=${ledgerPassed}` +
+        ` | stockPassed=${stockPassed}`
+    );
+}
 
 batchCompletedSuccessfully = true;
 
@@ -43016,17 +43653,28 @@ if (httpWorkerId) {
     });
 
 }
+let cleanupResult;
 
-const cleanupResult =
-await CleanupManager.cleanup({
+try {
+    cleanupResult = await CleanupManager.cleanup({
+        company_code,
+        tally_owner,
+        sync_batch_id
+    });
+} catch (cleanupError) {
+    console.error(
+        "⚠️ POST-CLOSURE CLEANUP FAILED:",
+        {
+            batch_id: sync_batch_id,
+            error: cleanupError?.message || String(cleanupError)
+        }
+    );
 
-    company_code,
-
-    tally_owner,
-
-    sync_batch_id
-
-});
+    cleanupResult = {
+        success: false,
+        error: cleanupError?.message || String(cleanupError)
+    };
+}
 
 
 console.log(
@@ -43072,15 +43720,19 @@ db: {
     console.error(err);
 
     const isTallyOffline =
-      err?.message === "TALLY_OFFLINE" ||
-      err?.message?.includes("TALLY_OFFLINE");
+  err?.message === "TALLY_OFFLINE" ||
+  err?.message?.includes("TALLY_OFFLINE");
 
-    if (
-      sync_batch_id &&
-      !batchCompletedSuccessfully
-    ) {
+if (
+    sync_batch_id &&
+    !batchCompletedSuccessfully &&
+    httpExecutionGuardAcquired === true &&
+    httpSyncExecutionStarted === true &&
+    err?.durableClaimUnconfirmed !== true &&
+    err?.durableVerificationUnconfirmed !== true
+) {
 
-      try {
+    try {
 
         if (
     isTallyOffline &&
@@ -43090,15 +43742,18 @@ db: {
     )
 ) {
 
-          await BatchStatusManager.markWaitingConnector({
-            batch_id: sync_batch_id
-          });
+          const waitingMarked =
+    await BatchStatusManager.markWaitingConnector({
+        batch_id: sync_batch_id,
+        execution_claim_token: executionClaimToken
+    });
 
-          console.log(
-            "🔌 TALLY OFFLINE — BATCH WAITING:",
-            sync_batch_id
-          );
-
+console.log(
+    waitingMarked === true
+        ? "🔌 TALLY OFFLINE — BATCH WAITING:"
+        : "🔌 TALLY OFFLINE — WAITING TRANSITION DEFERRED:",
+    sync_batch_id
+);
                } else {
 
           const isConnectorLoss =
@@ -43122,9 +43777,10 @@ const failureError = isConnectorLoss
     )
   : err;
           await BatchStatusManager.markFailed({
-            batch_id: sync_batch_id,
-            error: failureError
-          });
+          batch_id: sync_batch_id,
+          error: failureError,
+          execution_claim_token: executionClaimToken
+      }); 
 
         }
 
@@ -43148,29 +43804,98 @@ const failureError = isConnectorLoss
 
     }
 
-    const isUncertainOutcome =
-  err?.requestDispatched === true &&
-  err?.connectorResponseReceived !== true;
+if (
+    httpSyncExecutionStarted !== true &&
+    String(req.query.worker_batch_id || "").trim()
+) {
+    console.error("HTTP EXECUTION NOT STARTED:", {
+        batch_id: sync_batch_id,
+        error: err?.message || String(err)
+    });
+
+    return res.status(503).json({
+        success: false,
+        error_code: "HTTP_EXECUTION_NOT_STARTED",
+        reason: "PRE_EXECUTION_ERROR",
+        batch_id:
+            sync_batch_id ||
+            String(req.query.worker_batch_id).trim()
+    });
+}
+
+   const isUncertainOutcome =
+    err?.outcomeUnknown === true ||
+    err?.code === "GET_MASTERS_TRANSFER_OUTCOME_UNKNOWN" ||
+    (
+        err?.requestDispatched === true &&
+        err?.connectorResponseReceived !== true
+    );
+
+const isDurableClaimUnconfirmed =
+    err?.durableClaimUnconfirmed === true;
+
+const isDurableVerificationUnconfirmed =
+    err?.durableVerificationUnconfirmed === true;
+
+const errorCode = isDurableClaimUnconfirmed
+    ? "DURABLE_CONNECTOR_OPERATION_CLAIM_UNCONFIRMED"
+    : isDurableVerificationUnconfirmed
+        ? "CONNECTOR_OUTCOME_UNKNOWN"
+        : isUncertainOutcome
+            ? "CONNECTOR_OUTCOME_UNKNOWN"
+            : null;
 
 return res.status(
-  isTallyOffline ? 503 : 500
+    isDurableClaimUnconfirmed || isDurableVerificationUnconfirmed
+        ? 503
+        : isTallyOffline
+            ? 503
+            : 500
 ).json({
+    success: false,
 
-  success: false,
-
-  error:
-    isTallyOffline
-      ? "TALLY_OFFLINE"
-      : (
-          err.response?.data ||
-          err.message
+    error: isTallyOffline
+        ? "TALLY_OFFLINE"
+        : (
+            err.response?.data ||
+            err.message
         ),
 
-  ...(isUncertainOutcome
-    ? { error_code: "CONNECTOR_OUTCOME_UNKNOWN" }
-    : {})
+    ...(errorCode ? { error_code: errorCode } : {}),
 
+    batch_id: sync_batch_id
 });
+
+} finally {
+
+    if (httpExecutionGuardAcquired === true) {
+        try {
+            const released =
+                await releaseHttpBatchExecutionGuard(
+                    sync_batch_id,
+                    httpExecutionGuardOwnerToken
+                );
+
+            if (released !== true) {
+                console.error(
+                    "HTTP EXECUTION GUARD RELEASE NOT CONFIRMED:",
+                    {
+                        batch_id: sync_batch_id
+                    }
+                );
+            }
+        } catch (releaseError) {
+            console.error(
+                "HTTP EXECUTION GUARD RELEASE FAILED:",
+                {
+                    batch_id: sync_batch_id,
+                    error:
+                        releaseError?.message ||
+                        String(releaseError)
+                }
+            );
+        }
+    }
 
 }
 

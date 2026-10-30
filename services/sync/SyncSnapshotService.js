@@ -20,6 +20,10 @@ const SnapshotManager =
 
 async function saveSyncSnapshotChunk({
 
+    batch_id,
+
+    execution_claim_token,
+
     sync_batch_id,
 
     company_code,
@@ -344,6 +348,10 @@ const {
 */
 await SnapshotManager.saveSnapshotRows({
 
+    batch_id,
+
+    execution_claim_token,
+
     rows: snapshotRows
 
 });
@@ -369,6 +377,10 @@ await SnapshotManager.saveSnapshotRows({
 // REMOVE MISSING SNAPSHOT GUIDS
 // ======================================================
 async function removeMissingSnapshotGuids({
+
+    batch_id,
+
+    execution_claim_token,
 
     sync_batch_id,
 
@@ -427,17 +439,21 @@ async function removeMissingSnapshotGuids({
 
     await SnapshotManager.removeMissingGuids({
 
-        company_code,
+    batch_id,
 
-        tally_owner,
+    execution_claim_token,
 
-        module,
+    sync_batch_id,
 
-        entity_type,
+    company_code,
 
-        sync_batch_id
+    tally_owner,
 
-    });
+    module,
+
+    entity_type
+
+});
 
 }
 

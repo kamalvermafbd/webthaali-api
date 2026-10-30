@@ -31,7 +31,8 @@ async function sendChunkedToConnector(
     socket,
     event,
     payload,
-    connectorIdInput
+    connectorIdInput,
+    executionContext = {}
 ) {
     const connectorId = String(
         connectorIdInput || ""
@@ -43,39 +44,95 @@ async function sendChunkedToConnector(
         );
     }
 
-        // Shared across the transfer and global lock coordinator.
     const dispatchState = {
         dispatched: false
     };
 
     try {
-    return await withGlobalConnectorLock(
-        connectorId,
-        async (lockedSocket, signal) => {
-            if (lockedSocket !== socket || signal.aborted) {
-                throw new Error(
-                    `CONNECTOR_SOCKET_CHANGED_OR_ABORTED: ${connectorId}`
-                );
-            }
-return executeChunkedTransfer(
+        return await withGlobalConnectorLock(
+            connectorId,
+            async (lockedSocket, signal) => {
+
+                if (lockedSocket !== socket || signal.aborted) {
+                    throw new Error(
+                        `CONNECTOR_SOCKET_CHANGED_OR_ABORTED: ${connectorId}`
+                    );
+                }
+
+                // Durable dispatch authorization must happen
+                // inside the global connector lock.
+                if (executionContext?.request_id) {
+
+                    if (
+                        typeof executionContext.before_dispatch !== "function"
+                    ) {
+                        throw new Error(
+                            "DURABLE_CONNECTOR_DISPATCH_HOOK_MISSING"
+                        );
+                    }
+
+                    if (signal.aborted || !lockedSocket.connected) {
+                        throw new Error(
+                            "CONNECTOR_UNAVAILABLE_BEFORE_DISPATCH"
+                        );
+                    }
+
+                    // Do not mark the request as emitted here.
+                    // The database dispatch mark is only authorization.
+                    await executionContext.before_dispatch();
+
+                    if (signal.aborted || !lockedSocket.connected) {
+                        throw new Error(
+                            "CONNECTOR_UNAVAILABLE_AFTER_DISPATCH_MARK"
+                        );
+                    }
+                }
+
+                const transferResult = await executeChunkedTransfer(
     lockedSocket,
     event,
     payload,
     signal,
     connectorId,
-    dispatchState
+    dispatchState,
+    executionContext
 );
-        }
-      );
-} catch (error) {
-    if (error && typeof error === "object") {
-        error.requestDispatched =
-            error.requestDispatched === true ||
-            dispatchState.dispatched === true;
+
+if (signal.aborted || !lockedSocket.connected) {
+    throw new Error(
+        `CONNECTOR_LOCK_LOST_AFTER_TRANSFER: ${connectorId}`
+    );
+}
+
+if (typeof executionContext.after_transfer === "function") {
+    if (!executionContext.request_id) {
+        throw new Error(
+            "POST_TRANSFER_HOOK_REQUIRES_DURABLE_REQUEST"
+        );
     }
 
-    throw error;
+    return await executionContext.after_transfer(
+        transferResult,
+        signal
+    );
 }
+
+return transferResult;
+            }
+        );
+
+    } catch (error) {
+        if (error && typeof error === "object") {
+            // Preserve the actual dispatch status.
+            // A failed before_dispatch hook must not be
+            // converted into a dispatched request.
+            error.requestDispatched =
+                error.requestDispatched === true ||
+                dispatchState.dispatched === true;
+        }
+
+        throw error;
+    }
 }
 
 async function executeChunkedTransfer(
@@ -84,7 +141,8 @@ async function executeChunkedTransfer(
     payload,
     signal,
     connectorId,
-    dispatchState
+    dispatchState,
+    executionContext
 ) {
     /* 241026
    const ownerToken = crypto.randomUUID();
@@ -241,10 +299,44 @@ if (lockLost || signal.aborted) {
     return;
 }
 
-        const requestId = crypto.randomUUID();
+        const durableRequestId =
+    executionContext?.request_id;
+
+if (
+    durableRequestId != null &&
+    (
+        typeof durableRequestId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            durableRequestId
+        )
+    )
+) {
+    throw new Error("INVALID_DURABLE_CONNECTOR_REQUEST_ID");
+}
+
+// Durable requests must have a dispatch authorization callback.
+if (
+    durableRequestId &&
+    typeof executionContext?.before_dispatch !== "function"
+) {
+    throw new Error(
+        "DURABLE_CONNECTOR_DISPATCH_HOOK_MISSING"
+    );
+}
+
+const requestId =
+    durableRequestId || crypto.randomUUID();
 
         let masterResult = null;
-        let collectionList = [];
+
+// getMasters requires both protocol receipt and connector transfer completion.
+let protocolCollectionsComplete = false;
+let transferCompleteReceived = false;
+let transferCompleteTimer = null;
+
+const GET_MASTERS_FINAL_TIMEOUT_MS = 30000;
+
+let collectionList = [];
 
         let expectedChunks = null;
         let expectedItems = null;
@@ -260,26 +352,160 @@ const processingChunkIndexes = new Set();
 let chunkProcessingError = null;
 
 const resultEvent = `${event}Result`;
-        const chunkEvent = `${event}Chunk`;
-        const ackEvent = `${event}ChunkAck`;
-        const completeEvent = `${event}Complete`;
-    
-        function cleanup() {
+const chunkEvent = `${event}Chunk`;
+const ackEvent = `${event}ChunkAck`;
+const completeEvent = `${event}Complete`;
 
-            //clearTimeout(timer);
+function makeGetMastersOutcomeUnknown(message) {
+    const error = new Error(message);
 
-            socket.off(resultEvent, onResult);
-            socket.off(chunkEvent, onChunk);
-            socket.off(completeEvent, onComplete);
-          socket.off(
-    "disconnect",
-    onDisconnect
-);
+    error.code = "GET_MASTERS_TRANSFER_OUTCOME_UNKNOWN";
+    error.outcomeUnknown = true;
+    error.requestDispatched = true;
 
-for (const cancelAck of [...pendingAckCleanups]) {
-    cancelAck();
+    return error;
 }
 
+function tryCompleteGetMasters() {
+    if (event !== "getMasters") return;
+
+    if (
+        operationSettled ||
+        lockLost ||
+        signal.aborted ||
+        masterResult?.success !== true ||
+        !protocolCollectionsComplete ||
+        !transferCompleteReceived
+    ) {
+        return;
+    }
+
+    operationSettled = true;
+    cleanup();
+    resolve(masterResult);
+}
+
+function startGetMastersFinalTimer() {
+    if (
+        event !== "getMasters" ||
+        operationSettled ||
+        lockLost ||
+        signal.aborted ||
+        !protocolCollectionsComplete ||
+        transferCompleteReceived ||
+        transferCompleteTimer !== null
+    ) {
+        return;
+    }
+
+    function checkFinalCompletion() {
+        transferCompleteTimer = setTimeout(() => {
+            if (operationSettled || transferCompleteReceived) {
+                return;
+            }
+
+            const lastHeartbeat = Number(socket.lastHeartbeat || 0);
+
+            const heartbeatFresh =
+                socket.connected === true &&
+                lastHeartbeat > 0 &&
+                Date.now() - lastHeartbeat < 90000;
+
+            const connectorActive =
+                socket.tallyRequestActive === true;
+
+            if (heartbeatFresh && connectorActive) {
+                console.log(
+                    "GET_MASTERS_FINAL_WAIT — CONNECTOR STILL ACTIVE",
+                    { connectorId, requestId }
+                );
+
+                checkFinalCompletion();
+                return;
+            }
+
+            operationSettled = true;
+            cleanup();
+
+            reject(
+                makeGetMastersOutcomeUnknown(
+                    `GET_MASTERS_FINAL_COMPLETION_TIMEOUT: requestId=${requestId}`
+                )
+            );
+        }, GET_MASTERS_FINAL_TIMEOUT_MS);
+    }
+
+    checkFinalCompletion();
+}
+
+
+function onGetMastersTransferComplete(data) {
+    if (
+        event !== "getMasters" ||
+        !data ||
+        data.requestId !== requestId
+    ) {
+        return;
+    }
+
+    if (
+        operationSettled ||
+        lockLost ||
+        signal.aborted
+    ) {
+        return;
+    }
+
+    if (transferCompleteReceived) {
+        socket.emit("getMastersTransferCompleteAck", {
+            requestId,
+            success: true
+        });
+        return;
+    }
+
+    if (data.success !== true) {
+        operationSettled = true;
+        cleanup();
+
+        return reject(
+            makeGetMastersOutcomeUnknown(
+                `GET_MASTERS_FINAL_COMPLETION_FAILED: requestId=${requestId}; error=${data.error || "Invalid completion status"}`
+            )
+        );
+    }
+
+    transferCompleteReceived = true;
+
+    socket.emit("getMastersTransferCompleteAck", {
+        requestId,
+        success: true
+    });
+
+    tryCompleteGetMasters();
+}
+function cleanup() {
+    if (transferCompleteTimer !== null) {
+        clearTimeout(transferCompleteTimer);
+        transferCompleteTimer = null;
+    }
+
+    socket.off(resultEvent, onResult);
+    socket.off(chunkEvent, onChunk);
+    socket.off(completeEvent, onComplete);
+
+    if (event === "getMasters") {
+        socket.off(
+            "getMastersTransferComplete",
+            onGetMastersTransferComplete
+        );
+    }
+
+    socket.off("disconnect", onDisconnect);
+
+    for (const cancelAck of [...pendingAckCleanups]) {
+        cancelAck();
+    }
 }
 
         function waitForAck(
@@ -795,24 +1021,50 @@ async function onResult(data) {
             JSON.stringify(data, null, 2)
         );
 
-       if (data.success === false) {
+       if (data.success !== true) {
 
     operationSettled = true;
 
     cleanup();
 
     const connectorError = new Error(
-        data.error || "Unknown error"
+    data.error || "Unknown error"
+);
+
+const isExplicitOutcomeUnknown =
+    event === "getMasters" &&
+    (
+        data.error === "GET_MASTERS_TRANSFER_OUTCOME_UNKNOWN" ||
+        data.outcomeUnknown === true
     );
 
+if (isExplicitOutcomeUnknown) {
+    connectorError.code = "GET_MASTERS_TRANSFER_OUTCOME_UNKNOWN";
+    connectorError.outcomeUnknown = true;
+
+    // An uncertainty report is not a settled connector result.
+    connectorError.connectorResponseReceived = false;
+} else {
     connectorError.connectorResponseReceived = true;
+}
 
     return reject(connectorError);
 }
 
-        masterResult = data;
+        if (
+    event === "getMasters" &&
+    masterResult !== null
+) {
+    console.warn(
+        "DUPLICATE_GET_MASTERS_SUCCESS_IGNORED",
+        { requestId }
+    );
+    return;
+}
 
-        console.log(
+masterResult = data;
+
+console.log(
             "Master payload received"
         );
 
@@ -841,23 +1093,31 @@ const collections = await activeProtocolTask;
             "All master collections received"
         );
 
-      operationSettled = true;
+   if (operationSettled || lockLost || signal.aborted) {
+    return;
+}
 
-cleanup();
+protocolCollectionsComplete = true;
 
-resolve(masterResult);
+tryCompleteGetMasters();
+
+if (!operationSettled) {
+    startGetMastersFinalTimer();
+}
 
 return;
-
     }
-    catch (error) {
+ catch (error) {
+
+    if (operationSettled) {
+        return;
+    }
 
     operationSettled = true;
 
     cleanup();
 
     reject(error);
-
 }
 
 }
@@ -1023,6 +1283,8 @@ console.log("========================");
 
     try {
 await saveSyncSnapshotChunk({
+    batch_id: executionContext.batch_id,
+    execution_claim_token: executionContext.execution_claim_token,
     sync_batch_id: payload.sync_batch_id,
     company_code: payload.company_code,
     tally_owner: payload.tally_owner,
@@ -1339,6 +1601,8 @@ if (
     try {
 
         activeCompletionTask = removeMissingSnapshotGuids({
+    batch_id: executionContext.batch_id,
+    execution_claim_token: executionContext.execution_claim_token,
     sync_batch_id: payload.sync_batch_id,
     company_code: payload.company_code,
     tally_owner: payload.tally_owner,
@@ -1458,12 +1722,19 @@ function onDisconnect(reason) {
 
 }
 
-        socket.on(
-            resultEvent,
-            onResult
-        );
+     socket.on(
+    resultEvent,
+    onResult
+);
 
-       if (event !== "getMasters") {
+if (event === "getMasters") {
+    socket.on(
+        "getMastersTransferComplete",
+        onGetMastersTransferComplete
+    );
+}
+
+if (event !== "getMasters") {
 
     socket.on(
         chunkEvent,
@@ -1530,17 +1801,49 @@ socket.emit(
     event,
     {
         ...payload,
-        requestId
+        requestId,
+
+        ...(durableRequestId
+            ? {
+                identityScope: executionContext.identity_scope,
+                companyIdentity: executionContext.company_identity,
+                payloadFingerprint: executionContext.payload_fingerprint,
+
+                ...(event === "getMasters"
+                    ? {
+                        tallyInputFingerprint:
+                            "sha256:" +
+                            crypto.createHash("sha256")
+                                .update(
+                                    JSON.stringify([
+                                        "getMasters-input-v1",
+                                        payload.company,
+                                        payload.lastAlterId ?? null,
+                                        payload.lastStockAlterId ?? null,
+                                        payload.lastLedgerAlterId ?? null
+                                    ]),
+                                    "utf8"
+                                )
+                                .digest("hex")
+                    }
+                    : {})
+            }
+            : {})
     }
 );
 
     });
 } catch (error) {
     if (error && typeof error === "object") {
-        error.requestDispatched =
-            error.requestDispatched === true ||
+        // Only actual socket emission counts as dispatch.
+        // Database dispatch authorization alone does not.
+        const wasDispatched =
             requestDispatched === true ||
             dispatchState.dispatched === true;
+
+        error.requestDispatched =
+            error.requestDispatched === true ||
+            wasDispatched;
     }
 
     throw error;

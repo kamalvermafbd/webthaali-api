@@ -385,6 +385,8 @@ async function updateSyncProgress({
 
     batchId,
 
+    execution_claim_token,
+
     stage,
 
     progress,
@@ -397,29 +399,40 @@ async function updateSyncProgress({
     // VALIDATE SUPABASE
     // --------------------------------------------------------
 
-    if (!supabase) {
-
-        console.warn(
-            "⚠️ SYNC PROGRESS: supabase missing"
-        );
-
-        return;
-    }
+  if (!supabase) {
+    const error = new Error(
+        "SYNC_PROGRESS_SUPABASE_REQUIRED"
+    );
+    error.code = "SYNC_PROGRESS_INVALID_INPUT";
+    throw error;
+}
 
 
     // --------------------------------------------------------
     // VALIDATE BATCH ID
     // --------------------------------------------------------
 
-    if (!batchId) {
+ if (!batchId) {
+    const error = new Error(
+        "SYNC_PROGRESS_BATCH_ID_REQUIRED"
+    );
+    error.code = "SYNC_PROGRESS_INVALID_INPUT";
+    throw error;
+}
 
-        console.warn(
-            "⚠️ SYNC PROGRESS: batchId missing"
+    if (
+        typeof execution_claim_token !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+            execution_claim_token
+        )
+    ) {
+        const error = new Error(
+            `SYNC_PROGRESS_EXECUTION_CLAIM_REQUIRED: batchId=${batchId}`
         );
 
-        return;
+        error.code = "EXECUTION_CLAIM_LOST";
+        throw error;
     }
-
 
     try {
 
@@ -440,25 +453,13 @@ async function updateSyncProgress({
         // UNKNOWN STAGE
         // ----------------------------------------------------
 
-        if (
-            overallProgress ===
-            null
-        ) {
-
-            console.warn(
-
-                "⚠️ SYNC PROGRESS: unknown stage",
-
-                {
-                    batchId,
-                    stage,
-                    progress
-                }
-
-            );
-
-            return;
-        }
+      if (overallProgress === null) {
+    const error = new Error(
+        `SYNC_PROGRESS_UNKNOWN_STAGE: batchId=${batchId}, stage=${stage}`
+    );
+    error.code = "SYNC_PROGRESS_INVALID_STAGE";
+    throw error;
+}
 
 
         // ----------------------------------------------------
@@ -492,21 +493,7 @@ async function updateSyncProgress({
 
 */
 
-        const { data: existingBatch, error: fetchError } =
-            await supabase
-                .from("sync_batches")
-                .select("sync_progress")
-                .eq("batch_id", batchId)
-                .maybeSingle();
-
-        if (fetchError) {
-            console.error(
-                "❌ SYNC PROGRESS FETCH ERROR:",
-                fetchError.message
-            );
-            return;
-        }
-
+     
         
 const updateData = {
     current_stage: String(stage).trim().toUpperCase(),
@@ -531,41 +518,42 @@ if (action) {
         // SUPABASE UPDATE
         // ----------------------------------------------------
 
-        const {
-            error
-        } = await supabase
+   const reconciliationStage =
+    stage === "LEDGER_RECONCILIATION" ||
+    stage === "STOCK_RECONCILIATION";
 
-            .from(
-                "sync_batches"
-            )
+const { data: updatedBatch, error } = await supabase
+    .from("sync_batches")
+    .update(updateData)
+    .eq("batch_id", batchId)
+    .eq("execution_claim_token", execution_claim_token)
+    .eq(
+        "batch_status",
+        reconciliationStage ? "COMPLETED" : "PROCESSING"
+    )
+    .eq(
+        "worker_status",
+        reconciliationStage ? "COMPLETED" : "RUNNING"
+    )
+    .eq("batch_closed", false)
+    .or(
+        "error_message.is.null,and(error_message.not.match.^HTTP_OUTCOME_UNKNOWN:,error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:)"
+    )
+    .select("batch_id")
+    .maybeSingle();
+    
+if (error) {
+    throw error;
+}
 
-            .update(
-                updateData
-            )
+if (!updatedBatch) {
+    const claimError = new Error(
+        `SYNC_PROGRESS_EXECUTION_CLAIM_LOST: batchId=${batchId}`
+    );
 
-            .eq(
-                "batch_id",
-                batchId
-            );
-
-
-        // ----------------------------------------------------
-        // ERROR
-        // ----------------------------------------------------
-
-        if (error) {
-
-            console.error(
-
-                "❌ SYNC PROGRESS UPDATE ERROR:",
-
-                error.message
-
-            );
-
-            return;
-        }
-
+    claimError.code = "EXECUTION_CLAIM_LOST";
+    throw claimError;
+}
 
         // ----------------------------------------------------
         // JSON TRACKER
@@ -619,15 +607,14 @@ if (action) {
         );
 
 
-    } catch (err) {
+         } catch (err) {
 
         console.error(
-
             "❌ SYNC PROGRESS HELPER ERROR:",
-
             err.message
-
         );
+
+        throw err;
     }
 }
 

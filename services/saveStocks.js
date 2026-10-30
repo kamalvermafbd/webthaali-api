@@ -6,6 +6,7 @@ async function saveStocks({
     company_code,
     tally_owner,
     sync_batch_id,
+    execution_claim_token,
     stocks = []
 }) {
 
@@ -34,10 +35,8 @@ async function saveStocks({
     }
 return await BatchManager.run({
 
-    batch_id:
-
-        sync_batch_id,
-
+    batch_id: sync_batch_id,
+    execution_claim_token,
     entity:
 
         "STOCK",

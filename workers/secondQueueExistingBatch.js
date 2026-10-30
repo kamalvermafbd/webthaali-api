@@ -158,6 +158,21 @@ async function dispatchConnectorLossRetry(batch) {
         throw new Error("Retry batch id missing");
     }
 
+        // Do not retry until the previous Tally execution
+    // has been independently verified as settled.
+    console.warn(
+        "[CONNECTOR RETRY] DISPATCH DEFERRED",
+        {
+            batch_id: batch.batch_id,
+            reason: "Previous Tally execution settlement not independently verified"
+        }
+    );
+
+    return {
+        success: false,
+        queued: false,
+        reason: "EXECUTION_SETTLEMENT_UNVERIFIED"
+    };
    
     const originalError = String(batch.error_message || "");
 
@@ -508,22 +523,24 @@ async function dispatchBatch(batch) {
         throw new Error("Batch is required");
     }
 
-    // Never dispatch a batch with uncertain Tally outcome.
-    if (
-        String(batch.error_message || "")
-            .startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
-    ) {
-        console.error(
-            "[BATCH DISPATCH] UNCERTAIN OUTCOME — MANUAL REVIEW:",
-            batch.batch_id
-        );
+    // Never dispatch a batch with uncertain Tally or HTTP outcome.
+const batchError = String(batch.error_message || "");
 
-        return {
-            success: false,
-            queued: false,
-            reason: "CONNECTOR_OUTCOME_UNKNOWN"
-        };
-    }
+if (
+    batchError.startsWith("CONNECTOR_OUTCOME_UNKNOWN:") ||
+    batchError.startsWith("HTTP_OUTCOME_UNKNOWN:")
+) {
+    console.error(
+        "[BATCH DISPATCH] UNCERTAIN OUTCOME — MANUAL REVIEW:",
+        batch.batch_id
+    );
+
+    return {
+        success: false,
+        queued: false,
+        reason: "OUTCOME_UNKNOWN"
+    };
+}
 
     const workerConfig =
         await resolveWorkerForBatch(batch);
@@ -564,10 +581,12 @@ const {
             "worker_status",
             "PENDING"
         )
-              // Allow NULL errors; reject the exact uncertain-outcome prefix.
-        .or(
-            "error_message.is.null,error_message.not.like.CONNECTOR\\_OUTCOME\\_UNKNOWN:%"
-        )
+
+        .eq("current_stage", "PENDING")
+     // Reject both uncertain outcomes during atomic reservation.
+.or(
+    "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
+)
         .is(
             "worker_id",
             null
@@ -695,13 +714,16 @@ if (queueCheck.state !== "NOT_FOUND") {
         worker_id: null,
         locked_at: null
     })
-    .eq("id", batch.id)
-    .eq("batch_status", "PENDING")
-    .eq("worker_status", "PENDING")
-    .eq("worker_id", workerConfig.worker_name)
-    .eq("locked_at", reserved.locked_at)
-    .select("id")
-    .maybeSingle();
+   .eq("id", batch.id)
+.eq("batch_status", "PENDING")
+.eq("worker_status", "PENDING")
+.eq("worker_id", workerConfig.worker_name)
+.eq("locked_at", reserved.locked_at)
+.or(
+    "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
+)
+.select("id")
+.maybeSingle();
 
 if (rollbackError || !rolledBack) {
     console.error(

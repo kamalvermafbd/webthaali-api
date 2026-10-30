@@ -38,11 +38,9 @@ class RetryManager {
 // Retry Failed Operations
 // ----------------------------------
 async retry({
-
     batch_id,
-
+    execution_claim_token,
     operations = []
-
 }) {
 
     if (!batch_id) {
@@ -52,6 +50,17 @@ async retry({
         );
 
     }
+
+    if (
+    typeof execution_claim_token !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    execution_claim_token
+)
+) {
+    throw new Error(
+        "RetryManager.retry requires a valid execution claim token"
+    );
+}
 
     if (!Array.isArray(operations)) {
 
@@ -91,6 +100,15 @@ async retry({
 
     for (const operation of operations) {
 
+        if (operation.operation === "INSERT") {
+    failed++;
+    failedOperations.push({
+        operation,
+        error: "INSERT retry skipped: execution outcome may be uncertain"
+    });
+    continue;
+}
+
         let operationSuccess = false;
 
         let lastError = null;
@@ -103,9 +121,11 @@ async retry({
 
             try {
 
-                await BatchExecutor.execute(
-                    operation
-                );
+             await BatchExecutor.execute({
+                ...operation,
+                batch_id,
+                execution_claim_token
+            });
 
                 retried++;
 
@@ -118,8 +138,22 @@ async retry({
 
                 lastError = error;
 
-                const retryable =
-                    isRetryableError(error);
+                const isFencedInsert =
+                operation.operation === "INSERT";
+
+            const isClaimLost =
+                error?.code === "EXECUTION_CLAIM_LOST" ||
+                String(error?.message || "").includes(
+                    "EXECUTION_CLAIM_LOST"
+                );
+
+            if (isClaimLost) {
+                throw error;
+            }
+
+            const retryable =
+                !isFencedInsert &&
+                isRetryableError(error);
 
                 console.error(
                     `RETRY ATTEMPT ${attempt}/${MAX_RETRIES}`,
@@ -186,15 +220,7 @@ async retry({
 
     }
 
-    await BatchStatusManager.incrementRetry({
-
-        batch_id,
-
-        retry_count:
-            retried
-
-    });
-
+    
     return {
 
         retried,

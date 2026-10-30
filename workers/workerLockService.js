@@ -8,6 +8,15 @@ const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_SERVICE_KEY
 );
+
+function isExecutionClaimToken(value) {
+    return (
+        typeof value === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+    );
+}
+
+
 async function lockJob(job, workerConfig) {
 
     const batchDbId = job?.data?.batch_db_id;
@@ -16,14 +25,14 @@ async function lockJob(job, workerConfig) {
         throw new Error("Invalid batch ID or worker configuration");
     }
 
-   const retryClaimToken = job?.data?.retry_claim_token ?? null;
+      const retryClaimToken = job?.data?.retry_claim_token ?? null;
 
-const { data: claimResult, error: claimError } =
-    await supabase.rpc("claim_sync_batch_fifo", {
-        p_batch_db_id: batchDbId,
-        p_worker_name: workerConfig.worker_name,
-        p_retry_claim_token: retryClaimToken
-    });
+    const { data: claimResult, error: claimError } =
+        await supabase.rpc("claim_sync_batch_fifo_v2", {
+            p_batch_db_id: batchDbId,
+            p_worker_name: workerConfig.worker_name,
+            p_retry_claim_token: retryClaimToken
+        });
 
     if (claimError) {
         throw new Error(
@@ -35,25 +44,33 @@ const { data: claimResult, error: claimError } =
         ? claimResult[0]
         : claimResult;
 
-    if (!result?.claimed) {
+    if (!result || typeof result.claimed !== "boolean") {
+        throw new Error("Invalid FIFO batch claim result");
+    }
 
-    const reason = String(
-        result?.reason || "UNKNOWN"
-    ).trim().toUpperCase();
+    if (!result.claimed) {
+        const reason = String(
+            result.reason || "UNKNOWN"
+        ).trim().toUpperCase();
 
-    // Preserve rejection reason for BullMQ worker.
-    job.claimRejectionReason = reason;
+        job.claimRejectionReason = reason;
 
-    console.log(
-        "FIFO BATCH CLAIM DECLINED:",
-        {
+        console.log("FIFO BATCH CLAIM DECLINED:", {
             batch_db_id: batchDbId,
             reason
-        }
-    );
+        });
 
-    return null;
-}
+        return null;
+    }
+
+    const executionClaimToken = result.execution_claim_token;
+
+    if (!isExecutionClaimToken(executionClaimToken)) {
+        throw new Error(
+            "Successful FIFO claim returned no valid execution token"
+        );
+    }
+
     const { data: lockedBatch, error: readError } =
         await supabase
             .from("sync_batches")
@@ -62,11 +79,14 @@ const { data: claimResult, error: claimError } =
             .eq("batch_status", "PROCESSING")
             .eq("worker_status", "RUNNING")
             .eq("worker_id", workerConfig.worker_name)
+            .eq("execution_claim_token", executionClaimToken)
             .single();
 
     if (readError || !lockedBatch) {
         throw new Error(
-            `Claimed batch read failed: ${readError?.message || "Batch not found"}`
+            `Claimed batch read failed: ${
+                readError?.message || "Batch not found"
+            }`
         );
     }
 
@@ -74,8 +94,14 @@ const { data: claimResult, error: claimError } =
 }
 async function startHeartbeat(
     jobId,
-    workerConfig
+    workerConfig,
+    executionClaimToken
 ) {
+    if (!isExecutionClaimToken(executionClaimToken)) {
+        throw new Error(
+            "Heartbeat requires a valid execution claim token"
+        );
+    }
 
     console.log(
         "HEARTBEAT STARTED:",
@@ -89,36 +115,32 @@ async function startHeartbeat(
                 const now =
                     new Date();
 
-                const { error } =
-                    await supabase
-                        .from("sync_batches")
-                        .update({
-                            heartbeat_at:
-                                now,
+            const { data: heartbeatRow, error } =
+    await supabase
+        .from("sync_batches")
+        .update({
+            heartbeat_at: now,
+            last_activity_at: now
+        })
+        .eq("id", jobId)
+        .eq("batch_status", "PROCESSING")
+        .eq("worker_status", "RUNNING")
+        .eq("worker_id", workerConfig.worker_name)
+        .eq("execution_claim_token", executionClaimToken)
+        .select("id")
+        .maybeSingle();
 
-                            last_activity_at:
-                                now
-                        })
-                       .eq(
-                            "id",
-                            jobId
-                        )
-                        .eq(
-                            "worker_status",
-                            "RUNNING"
-                        )
-                        .eq(
-                            "worker_id",
-                            workerConfig.worker_name
-                        );
-
-                if (error) {
-
-                    console.error(
-                        "Heartbeat update error:",
-                        error
-                    );
-                }
+if (error) {
+    console.error("Heartbeat update error:", error);
+} else if (!heartbeatRow) {
+    console.error(
+        "Heartbeat ownership lost or batch no longer running:",
+        {
+            batch_db_id: jobId,
+            worker_name: workerConfig.worker_name
+        }
+    );
+}
 
                 const { error: workerHeartbeatError } =
                     await supabase
@@ -174,7 +196,7 @@ async function recoverStaleBatches(workerConfig) {
      * We are NOT using Resume Engine.
      * ---------------------------------------------------------
      */
-
+/* 271026
     const {
         data: staleRunning,
         error: staleRunningError
@@ -222,14 +244,16 @@ async function recoverStaleBatches(workerConfig) {
             "worker_status",
             "RUNNING"
         )
-        .lt(
-            "heartbeat_at",
-            staleBefore
-        )
-        .select(
-            "id, batch_id"
-        );
-
+      .lt(
+    "heartbeat_at",
+    staleBefore
+)
+.or(
+    "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
+)
+.select(
+    "id, batch_id"
+);
     if (staleRunningError) {
 
         throw new Error(
@@ -238,7 +262,11 @@ async function recoverStaleBatches(workerConfig) {
         );
 
     }
+*/
 
+// Heartbeat timeout alone cannot prove remote HTTP execution stopped.
+// Keep RUNNING batch ownership until fenced recovery is available.
+const staleRunning = [];
 
     /*
      * ---------------------------------------------------------
@@ -352,11 +380,11 @@ async function recoverStaleBatches(workerConfig) {
           .eq("batch_status", "PENDING")
           .eq("worker_status", "PENDING")
           .eq("current_stage", "INIT")
-          .is("started_at", null)
-          .is("heartbeat_at", null)
-          .lt("locked_at", initReservationStaleBefore)
-          .select("id, batch_id");
-
+         .is("started_at", null)
+            .is("heartbeat_at", null)
+            .is("execution_claim_token", null)
+            .lt("locked_at", initReservationStaleBefore)
+            .select("id, batch_id");
       if (staleInitError) {
           throw new Error(
               "Stale INIT reservation recovery failed: " +
@@ -409,10 +437,11 @@ async function recoverStaleBatches(workerConfig) {
             "batch_status",
             "FAILED"
         )
-        .eq(
+       .eq(
             "worker_status",
             "RUNNING"
         )
+        .is("execution_claim_token", null)
         .select(
             "id, batch_id"
         );

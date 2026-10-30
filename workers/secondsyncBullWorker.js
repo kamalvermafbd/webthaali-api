@@ -241,33 +241,44 @@ if (!lockedJob) {
 const heartbeat =
     await startHeartbeat(
         lockedJob.id,
-        worker
+        worker,
+        lockedJob.execution_claim_token
     );
 
-                try {
+               let executionResult;
 
-                    console.log("HTTP URL:", job.data.http_url);      
-                    await runJob(
-                    lockedJob,
-                    job.data.http_url
-                );
+try {
 
-                } finally {
+    console.log("HTTP URL:", job.data.http_url);
 
-        clearInterval(heartbeat);
-    }
+    executionResult = await runJob(
+        lockedJob,
+        job.data.http_url
+    );
 
-                return {
-                    success: true
-                };
+} finally {
+
+    clearInterval(heartbeat);
+}
+
+return executionResult ?? {
+    success: false,
+    skipped: true,
+    sync_completed: false,
+    reason: "NO_EXECUTION_RESULT"
+};
             },
 
-            {
-                connection,
+           {
+    connection,
 
-                concurrency:
-                    worker.concurrency || 1
-            }
+    concurrency:
+        worker.concurrency || 1,
+
+    // Do not automatically reprocess stalled Tally jobs.
+    // Previous execution settlement must be verified first.
+    maxStalledCount: 0
+}
         );
 
         const cleanupRuntime = async () => {

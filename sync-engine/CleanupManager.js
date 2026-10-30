@@ -83,23 +83,27 @@ class CleanupManager {
         // Verify Batch
         //--------------------------------------------------
 
-        const batch =
-            await BatchStatusManager.loadBatch({
-
-                batch_id:
-                    sync_batch_id
-
-            });
-
+const batch = await BatchStatusManager.loadBatch({
+    batch_id: sync_batch_id
+});
         if (
+    !batch ||
+    batch.company_code !== company_code ||
+    batch.tally_owner !== tally_owner
+) {
+    throw new Error(
+        `Cleanup batch ownership mismatch: ${sync_batch_id}`
+    );
+}
 
-            batch.batch_status !== "CLOSED" ||
-
-            batch.current_action !== "COMPLETED" ||
-
-            batch.reconciliation_completed !== true
-
-        ) {
+    if (
+    batch.batch_status !== "CLOSED" ||
+    batch.worker_status !== "COMPLETED" ||
+    batch.batch_closed !== true ||
+    batch.reconciliation_completed !== true ||
+    batch.ledger_reconciliation_completed !== true ||
+    batch.stock_reconciliation_completed !== true
+) {
 
             return {
 
