@@ -42,45 +42,55 @@ async function getReconciliationRows({
 
     }
 
-    let query =
-        supabase
-            .from(viewName)
-            .select("*");
+   const PAGE_SIZE = 500;
+const allRows = [];
+
+const guidColumn =
+    viewName === "stock_voucher_rows_reco"
+        ? "guid"
+        : "voucher_guid";
+
+let offset = 0;
+
+while (true) {
+    let query = supabase
+        .from(viewName)
+        .select("*")
+        .order(guidColumn, { ascending: true })
+        .range(offset, offset + PAGE_SIZE - 1);
 
     if (company_code) {
-
-        query =
-            query.eq(
-                "company_code",
-                company_code
-            );
-
+        query = query.eq("company_code", company_code);
     }
 
     if (tally_owner) {
-
-        query =
-            query.eq(
-                "tally_owner",
-                tally_owner
-            );
-
+        query = query.eq("tally_owner", tally_owner);
     }
 
-    const {
-        data,
-        error
-    } = await query;
+    const { data, error } = await query;
 
     if (error) {
-
         throw new Error(
             `Child reconciliation view failed (${viewName}): ${error.message}`
         );
-
     }
 
-    return data || [];
+    if (!Array.isArray(data)) {
+        throw new Error(
+            `CHILD_RECONCILIATION_INVALID_PAGE: ${viewName}`
+        );
+    }
+
+    allRows.push(...data);
+
+    if (data.length < PAGE_SIZE) {
+        break;
+    }
+
+    offset += PAGE_SIZE;
+}
+
+return allRows;
 
 }
 
@@ -93,23 +103,11 @@ async function checkChildVoucherReconciliation({
     const views =
         VOUCHER_CHILD_RECONCILIATION_VIEWS || [];
 
-    if (!views.length) {
-
-        return {
-
-            success: true,
-
-            clean: true,
-
-            totalMissing: 0,
-
-            totalExtra: 0,
-
-            views: []
-
-        };
-
-    }
+    if (!Array.isArray(views) || views.length === 0) {
+    throw new Error(
+        "CHILD_RECONCILIATION_VIEWS_NOT_CONFIGURED"
+    );
+}
 
 
     const results = [];
@@ -134,6 +132,44 @@ async function checkChildVoucherReconciliation({
 
             });
 
+
+            const allowedStatusesByView = {
+    voucher_ledger_reconciliation_view:
+        ["MISSING", "EXTRA", "AMOUNT_MISMATCH"],
+
+    voucher_invoice_reconciliation_view:
+        ["MISSING", "EXTRA"],
+
+    stock_voucher_reconciliation_view:
+        ["MISSING", "EXTRA"],
+
+    stock_voucher_rows_reco:
+        ["MISMATCH"],
+
+    voucher_bill_allocation_reconciliation_view:
+        ["MISSING", "EXTRA"],
+
+    voucher_inventory_count_reco_view:
+        ["MISMATCH"],
+
+    voucher_costcentre_reconciliation_view:
+        ["MISSING", "EXTRA"]
+};
+
+const allowedStatuses = allowedStatusesByView[viewName];
+
+if (
+    !allowedStatuses ||
+    rows.some(
+        row =>
+            !row ||
+            !allowedStatuses.includes(row.status)
+    )
+) {
+    throw new Error(
+        `CHILD_RECONCILIATION_UNEXPECTED_STATUS: ${viewName}`
+    );
+}
 
         const missingRows =
             rows.filter(

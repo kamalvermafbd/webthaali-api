@@ -10,6 +10,9 @@ const http = require("http");
 
 const cors = require("cors");
 const crypto = require("crypto");
+// Unique identity for this secondServer.js process.
+// Changes automatically after every PM2 restart.
+const CLEANUP_SERVER_INSTANCE_ID = crypto.randomUUID();
 const bcrypt = require("bcrypt");
 
 const fs = require("fs");
@@ -428,6 +431,84 @@ startSyncBatchStatusMonitor({
     supabase
 });
 
+// Detect cleanup batches eligible for crash recovery.
+async function findStaleCleanupBatches() {
+    const cutoff = new Date(
+        Date.now() - 30 * 60 * 1000
+    ).toISOString();
+
+    const { data, error } = await supabase
+        .from("sync_batches")
+        .select("batch_id, company_code, tally_owner")
+        .eq("batch_status", "CLOSED")
+        .eq("worker_status", "COMPLETED")
+        .eq("batch_closed", true)
+        .eq("reconciliation_completed", true)
+        .eq("ledger_reconciliation_completed", true)
+        .eq("stock_reconciliation_completed", true)
+        .eq("cleanup_status", "RUNNING")
+        .not("cleanup_claim_token", "is", null)
+        .lt("cleanup_lease_until", cutoff)
+        .limit(20);
+
+    if (error) {
+        throw new Error(
+            `Cleanup recovery scan failed: ${error.message}`
+        );
+    }
+
+    return data || [];
+}
+
+let cleanupRecoveryRunning = false;
+
+async function runStaleCleanupRecovery() {
+    if (cleanupRecoveryRunning) return;
+
+    cleanupRecoveryRunning = true;
+
+    try {
+        const batches = await findStaleCleanupBatches();
+
+        for (const batch of batches) {
+            try {
+                await CleanupManager.cleanup({
+                    company_code: batch.company_code,
+                    tally_owner: batch.tally_owner,
+                    sync_batch_id: batch.batch_id,
+                    ownerInstanceId: CLEANUP_SERVER_INSTANCE_ID
+                });
+
+                console.log(
+                    "[CLEANUP RECOVERY] Processed:",
+                    batch.batch_id
+                );
+            } catch (error) {
+                console.error(
+                    "[CLEANUP RECOVERY] Failed:",
+                    batch.batch_id,
+                    error.message
+                );
+            }
+        }
+    } catch (error) {
+        console.error(
+            "[CLEANUP RECOVERY] Scan failed:",
+            error.message
+        );
+    } finally {
+        cleanupRecoveryRunning = false;
+    }
+}
+
+// Check once at startup and every 60 seconds.
+setImmediate(() => {
+    void runStaleCleanupRecovery();
+});
+
+setInterval(() => {
+    void runStaleCleanupRecovery();
+}, 60 * 1000).unref();
 
 const localCacheSyncService =
     new LocalCacheSyncService(supabase);
@@ -43151,84 +43232,7 @@ for (
 // 27.08.26 OLD AMOUNT MISMATCH TABLE-WISE REPAIR
 // Replaced by generic repairPlan flow.
 // Kept temporarily for rollback/reference.
-/*
-        if (!rows?.length) {
-            continue;
-        }
 
-        const repairVoucherGuids = [
-            ...new Set(
-                rows
-                    .map(row =>
-                        (
-                            row.voucher_guid ||
-                            row.guid
-                        )?.trim()
-                    )
-                    .filter(Boolean)
-            )
-        ];
-
-        const fetchedVouchers =
-            repairVoucherGuids
-                .map(guid =>
-                    childRepairVoucherCache.find(voucher => {
-
-                        const voucherGuid =
-                            (
-                                voucher?.header?.guid ||
-                                voucher?.guid
-                            )?.trim();
-
-                        return voucherGuid === guid;
-
-                    })
-                )
-                .filter(Boolean);
-
-        console.log(
-            "AMOUNT MISMATCH REPAIR:",
-            childTable,
-            "| GUIDS:",
-            repairVoucherGuids.length,
-            "| VOUCHERS:",
-            fetchedVouchers.length
-        );
-
-        if (!fetchedVouchers.length) {
-            continue;
-        }
-
-        const childRepairResult =
-            await saveVouchers({
-
-                company_code,
-                tally_owner,
-                sync_batch_id,
-                syncMode,
-
-                vouchers:
-                    fetchedVouchers,
-                
-                repairVoucherGuids:
-                   repairVoucherGuids,
-
-                allVoucherGuids:
-                    voucherGuidResult?.items || [],
-
-                executionMode:
-                    "CHILD_RECONCILIATION",
-
-                childRepairTables: [
-                    childTable
-                ]
-            });
-
-        console.log(
-            "AMOUNT MISMATCH REPAIR RESULT:",
-            childRepairResult
-        );
-*/
     }
 
     // =========================================
@@ -43241,99 +43245,7 @@ for (
         stockMismatchByChildTable
     )
 ) {
-/*
-// 27.08.26 OLD STOCK MISMATCH TABLE-WISE REPAIR
-// Replaced by generic repairPlan flow.
-// Kept temporarily for rollback/reference.
 
-    if (!rows?.length) {
-        continue;
-    }
-
-    const repairVoucherGuids = [
-        ...new Set(
-            rows
-                .map(row =>
-                    (
-                        row.voucher_guid ||
-                        row.guid
-                    )?.trim()
-                )
-                .filter(Boolean)
-        )
-    ];
-
-    const fetchedVouchers =
-        repairVoucherGuids
-            .map(guid =>
-                childRepairVoucherCache.find(
-                    voucher => {
-
-                        const voucherGuid =
-                            (
-                                voucher?.header?.guid ||
-                                voucher?.guid
-                            )?.trim();
-
-                        return voucherGuid === guid;
-
-                    }
-                )
-            )
-            .filter(Boolean);
-
-    console.log(
-        "STOCK ROW COUNT REPAIR:",
-        childTable,
-        "| GUIDS:",
-        repairVoucherGuids.length,
-        "| VOUCHERS:",
-        fetchedVouchers.length
-    );
-
-    if (!fetchedVouchers.length) {
-        continue;
-    }
-
-    const stockRepairResult =
-        await saveVouchers({
-
-            company_code,
-            tally_owner,
-            sync_batch_id,
-            syncMode,
-
-            vouchers:
-                fetchedVouchers,
-
-            repairVoucherGuids:
-                repairVoucherGuids,
-
-            allVoucherGuids:
-                voucherGuidResult?.items || [],
-
-            executionMode:
-                "CHILD_RECONCILIATION",
-
-            childRepairTables: [
-                childTable
-            ]
-
-        });
-
-    console.log(
-        "STOCK ROW COUNT REPAIR RESULT:",
-        {
-            childTable,
-            status:
-                stockRepairResult?.status,
-            success:
-                stockRepairResult?.success,
-            result:
-                stockRepairResult
-        }
-    );
-*/
 }
     
 
@@ -43360,6 +43272,18 @@ for (
         childReconciliationResult
     );
 */
+childReconciliationResult =
+    await runChildVoucherReconciliation({
+        company_code,
+        tally_owner,
+        sync_batch_id
+    });
+
+console.log(
+    "CHILD RECONCILIATION AFTER ROUND:",
+    childRepairRound,
+    childReconciliationResult
+);
 }
 
 
@@ -43377,6 +43301,12 @@ if (
 
 }
 */
+
+if (childReconciliationResult?.completed !== true) {
+    throw new Error(
+        `Child voucher reconciliation is still not clean after ${childRepairRound} repair rounds`
+    );
+}
 
 console.log(
     "CHILD VOUCHER RECONCILIATION COMPLETED IN ROUND:",
@@ -43659,7 +43589,8 @@ try {
     cleanupResult = await CleanupManager.cleanup({
         company_code,
         tally_owner,
-        sync_batch_id
+        sync_batch_id,
+         ownerInstanceId: CLEANUP_SERVER_INSTANCE_ID
     });
 } catch (cleanupError) {
     console.error(

@@ -199,10 +199,11 @@ const lockedJob =
 if (!lockedJob) {
 
     const deferReasons = new Set([
-        "EARLIER_BATCH_PENDING",
-        "EARLIER_CONNECTOR_LOSS_RETRY_READY",
-        "ANOTHER_BATCH_RUNNING"
-    ]);
+    "EARLIER_BATCH_PENDING",
+    "EARLIER_CONNECTOR_LOSS_RETRY_READY",
+    "ANOTHER_BATCH_RUNNING",
+    "COMPANY_CLEANUP_IN_PROGRESS"
+]);
 
     const claimReason = String(
         lockInput.claimRejectionReason || "UNKNOWN"
