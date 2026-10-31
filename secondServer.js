@@ -146,6 +146,10 @@ const {
     pairConnector,
     pairConnectorForBatch
 } = require("./services/PairConnectorService");
+
+const {
+    executeDurableConnectorOperation
+} = require("./utils/executeDurableConnectorOperation");
 const {
 
     ENTITY_METADATA,
