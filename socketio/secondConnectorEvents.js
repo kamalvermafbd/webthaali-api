@@ -559,9 +559,10 @@ for (const connectorId of connectorIds) {
         console.warn(
             "⚠️ EXISTING CONNECTOR AUTO-REGISTER SKIPPED: ownership unavailable",
             {
-                socket_id: socket.id,
-                connector_id: connectorId,
-                current_owner: claimed.health?.socket_id || null
+               socket_id: socket.id,
+connector_id: connectorId,
+current_owner: claimed.health?.socket_id || null,
+reason: claimed.reason || "UNSPECIFIED"
             }
         );
 
@@ -778,8 +779,9 @@ for (const connectorId of connectorIds) {
                     "❌ CONNECTOR REGISTRATION REJECTED: ownership unavailable",
                     {
                         socket_id: socket.id,
-                        connector_id: connectorId,
-                        current_owner: claimed.health?.socket_id || null
+connector_id: connectorId,
+current_owner: claimed.health?.socket_id || null,
+reason: claimed.reason || "UNSPECIFIED"
                     }
                 );
                 return;

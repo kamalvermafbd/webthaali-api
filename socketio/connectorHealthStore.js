@@ -366,15 +366,31 @@ async function claimConnectorSocketOwnership(
     await ensureConnected();
 const result = await redis.eval(
     `
-    -- Do not change ownership while connector/socket
+-- Do not change ownership while connector/socket
 -- locks, quarantine or active markers exist.
-if redis.call("EXISTS", KEYS[2]) == 1
-    or redis.call("EXISTS", KEYS[3]) == 1
-    or redis.call("EXISTS", KEYS[4]) == 1
-    or redis.call("EXISTS", KEYS[5]) == 1
-    or redis.call("EXISTS", KEYS[6]) == 1
-    or redis.call("EXISTS", KEYS[7]) == 1 then
-    return 0
+
+if redis.call("EXISTS", KEYS[2]) == 1 then
+    return "REJECTED:CONNECTOR_OPERATION_LOCK"
+end
+
+if redis.call("EXISTS", KEYS[3]) == 1 then
+    return "REJECTED:CONNECTOR_ACTIVE_MARKER"
+end
+
+if redis.call("EXISTS", KEYS[4]) == 1 then
+    return "REJECTED:CONNECTOR_QUARANTINE"
+end
+
+if redis.call("EXISTS", KEYS[5]) == 1 then
+    return "REJECTED:SOCKET_OPERATION_LOCK"
+end
+
+if redis.call("EXISTS", KEYS[6]) == 1 then
+    return "REJECTED:SOCKET_QUARANTINE"
+end
+
+if redis.call("EXISTS", KEYS[7]) == 1 then
+    return "REJECTED:SOCKET_ACTIVE_MARKER"
 end
 
     local current = redis.call("GET", KEYS[1])
@@ -390,7 +406,7 @@ end
             and currentSocket ~= ""
             and currentSocket ~= ARGV[2]
             and currentStatus ~= "DISCONNECTED" then
-            return 0
+            return "REJECTED:OTHER_CONNECTED_SOCKET"
         end
     end
 
@@ -420,13 +436,28 @@ String(ttlSeconds)
 );
 
     if (result === 0) {
-        return { claimed: false, health: null };
-    }
-
     return {
-        claimed: true,
-        health: JSON.parse(result)
+        claimed: false,
+        health: null,
+        reason: "UNSPECIFIED"
     };
+}
+
+if (
+    typeof result === "string" &&
+    result.startsWith("REJECTED:")
+) {
+    return {
+        claimed: false,
+        health: null,
+        reason: result.slice("REJECTED:".length)
+    };
+}
+
+return {
+    claimed: true,
+    health: JSON.parse(result)
+};
 }
 
 
