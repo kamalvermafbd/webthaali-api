@@ -325,6 +325,52 @@ console.log(
     };
 }
 
+if (
+    response.status === 500 &&
+    errorData?.success === false &&
+    errorData?.error_code === "MASTER_SAVE_FAILED"
+) {
+    let failedBatch = null;
+
+    if (errorData.batch_id === job.batch_id) {
+        try {
+            failedBatch = await BatchStatusManager.loadBatch({
+                batch_id: job.batch_id
+            });
+        } catch (lookupError) {
+            console.error(
+                "MASTER SAVE FAILURE VERIFICATION READ FAILED:",
+                job.batch_id,
+                lookupError
+            );
+        }
+    }
+
+    const storedError = failedBatch?.error_message;
+
+    if (
+        failedBatch?.batch_id === job.batch_id &&
+        typeof failedBatch.execution_claim_token === "string" &&
+        failedBatch.execution_claim_token.toLowerCase() ===
+            job.execution_claim_token.toLowerCase() &&
+        failedBatch.batch_status === "FAILED" &&
+        failedBatch.worker_status === "FAILED" &&
+        typeof storedError === "string" &&
+        !storedError.startsWith("CONNECTOR_OUTCOME_UNKNOWN:") &&
+        !storedError.startsWith("HTTP_OUTCOME_UNKNOWN:")
+    ) {
+        return {
+            outcome: "MASTER_SAVE_FAILED",
+            skipped: true,
+            sync_completed: false,
+            batch_id: job.batch_id,
+            http_status: response.status
+        };
+    }
+
+    // Verification failed: preserve existing unknown-outcome handling.
+}
+
 try {
     await BatchStatusManager.markHttpOutcomeUnknown({
         batch_id: job.batch_id,

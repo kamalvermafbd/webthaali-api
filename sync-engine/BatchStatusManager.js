@@ -694,10 +694,11 @@ const { data, error: updateError } = await supabase
         error_message: finalErrorMessage
     })
        .eq("batch_id", batch_id)
-        .eq("execution_claim_token", execution_claim_token)
-        .neq("batch_status", "COMPLETED")
-        .neq("batch_status", "CLOSED")
-        .or(
+.eq("execution_claim_token", execution_claim_token)
+.neq("batch_status", "COMPLETED")
+.neq("batch_status", "CLOSED")
+.neq("batch_status", "FAILED")
+.or(
             "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
         )
     .select("batch_id")

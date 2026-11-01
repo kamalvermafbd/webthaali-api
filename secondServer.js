@@ -41184,7 +41184,51 @@ console.log(
     groupResult
 );
 
+if (groupResult?.success !== true) {
+    let failedBatch;
 
+try {
+    failedBatch = await BatchStatusManager.loadBatch({
+        batch_id: sync_batch_id
+    });
+} catch (verificationError) {
+    console.error(
+        "MASTER SAVE FAILURE STATE READ UNVERIFIED:",
+        {
+            batch_id: sync_batch_id,
+            entity: "GROUP",
+            error: verificationError?.message || String(verificationError)
+        }
+    );
+
+    throw new Error("MASTER_SAVE_FAILURE_STATE_UNVERIFIED");
+}
+
+    const storedError = failedBatch?.error_message;
+
+    if (
+        failedBatch?.batch_id === sync_batch_id &&
+        typeof failedBatch.execution_claim_token === "string" &&
+        failedBatch.execution_claim_token.toLowerCase() ===
+            executionClaimToken.toLowerCase() &&
+        failedBatch.batch_status === "FAILED" &&
+        failedBatch.worker_status === "FAILED" &&
+        typeof storedError === "string" &&
+        !storedError.startsWith("HTTP_OUTCOME_UNKNOWN:") &&
+        !storedError.startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+    ) {
+        return res.status(500).json({
+            success: false,
+            error_code: "MASTER_SAVE_FAILED",
+            batch_id: sync_batch_id,
+            entity: "GROUP"
+        });
+    }
+
+    throw new Error(
+        "MASTER_SAVE_FAILURE_STATE_UNVERIFIED"
+    );
+}
 // =========================
 // GROUP RECONCILIATION
 // =========================
@@ -41268,6 +41312,51 @@ console.log(
     stockGroupResult
 );
 
+if (stockGroupResult?.success !== true) {
+    let failedBatch;
+
+try {
+    failedBatch = await BatchStatusManager.loadBatch({
+        batch_id: sync_batch_id
+    });
+} catch (verificationError) {
+    console.error(
+        "MASTER SAVE FAILURE STATE READ UNVERIFIED:",
+        {
+            batch_id: sync_batch_id,
+            entity: "STOCK_GROUP",
+            error: verificationError?.message || String(verificationError)
+        }
+    );
+
+    throw new Error("MASTER_SAVE_FAILURE_STATE_UNVERIFIED");
+}
+
+    const storedError = failedBatch?.error_message;
+
+    if (
+        failedBatch?.batch_id === sync_batch_id &&
+        typeof failedBatch.execution_claim_token === "string" &&
+        failedBatch.execution_claim_token.toLowerCase() ===
+            executionClaimToken.toLowerCase() &&
+        failedBatch.batch_status === "FAILED" &&
+        failedBatch.worker_status === "FAILED" &&
+        typeof storedError === "string" &&
+        !storedError.startsWith("HTTP_OUTCOME_UNKNOWN:") &&
+        !storedError.startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+    ) {
+        return res.status(500).json({
+            success: false,
+            error_code: "MASTER_SAVE_FAILED",
+            batch_id: sync_batch_id,
+            entity: "STOCK_GROUP"
+        });
+    }
+
+    throw new Error(
+        "MASTER_SAVE_FAILURE_STATE_UNVERIFIED"
+    );
+}
 
 stockGroupReconciliation =
     stockGroupResult.reconciliation;
@@ -41348,6 +41437,51 @@ console.log("================================");
 
 console.log("LEDGER SAVE :", ledgerResult);
 
+if (ledgerResult?.success !== true) {
+    let failedBatch;
+
+try {
+    failedBatch = await BatchStatusManager.loadBatch({
+        batch_id: sync_batch_id
+    });
+} catch (verificationError) {
+    console.error(
+        "MASTER SAVE FAILURE STATE READ UNVERIFIED:",
+        {
+            batch_id: sync_batch_id,
+            entity: "LEDGER",
+            error: verificationError?.message || String(verificationError)
+        }
+    );
+
+    throw new Error("MASTER_SAVE_FAILURE_STATE_UNVERIFIED");
+}
+
+    const storedError = failedBatch?.error_message;
+
+    if (
+        failedBatch?.batch_id === sync_batch_id &&
+        typeof failedBatch.execution_claim_token === "string" &&
+        failedBatch.execution_claim_token.toLowerCase() ===
+            executionClaimToken.toLowerCase() &&
+        failedBatch.batch_status === "FAILED" &&
+        failedBatch.worker_status === "FAILED" &&
+        typeof storedError === "string" &&
+        !storedError.startsWith("HTTP_OUTCOME_UNKNOWN:") &&
+        !storedError.startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+    ) {
+        return res.status(500).json({
+            success: false,
+            error_code: "MASTER_SAVE_FAILED",
+            batch_id: sync_batch_id,
+            entity: "LEDGER"
+        });
+    }
+
+    throw new Error(
+        "MASTER_SAVE_FAILURE_STATE_UNVERIFIED"
+    );
+}
 
 ledgerReconciliation =
     ledgerResult.reconciliation;
@@ -41519,6 +41653,50 @@ godownResult = await BatchManager.run({
 
 console.log("GODOWN SAVE :", godownResult);
 
+if (godownResult?.success !== true) {
+    let failedBatch;
+
+try {
+    failedBatch = await BatchStatusManager.loadBatch({
+        batch_id: sync_batch_id
+    });
+} catch (verificationError) {
+    console.error(
+        "MASTER SAVE FAILURE STATE READ UNVERIFIED:",
+        {
+            batch_id: sync_batch_id,
+            entity: "GODOWN",
+            error: verificationError?.message || String(verificationError)
+        }
+    );
+
+    throw new Error("MASTER_SAVE_FAILURE_STATE_UNVERIFIED");
+}
+    const storedError = failedBatch?.error_message;
+
+    if (
+        failedBatch?.batch_id === sync_batch_id &&
+        typeof failedBatch.execution_claim_token === "string" &&
+        failedBatch.execution_claim_token.toLowerCase() ===
+            executionClaimToken.toLowerCase() &&
+        failedBatch.batch_status === "FAILED" &&
+        failedBatch.worker_status === "FAILED" &&
+        typeof storedError === "string" &&
+        !storedError.startsWith("HTTP_OUTCOME_UNKNOWN:") &&
+        !storedError.startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+    ) {
+        return res.status(500).json({
+            success: false,
+            error_code: "MASTER_SAVE_FAILED",
+            batch_id: sync_batch_id,
+            entity: "GODOWN"
+        });
+    }
+
+    throw new Error(
+        "MASTER_SAVE_FAILURE_STATE_UNVERIFIED"
+    );
+}
 
 // =========================
 // GODOWN RECONCILIATION
@@ -41631,6 +41809,51 @@ unitResult = await BatchManager.run({
 
 console.log("UNIT SAVE :", unitResult);
 
+if (unitResult?.success !== true) {
+    let failedBatch;
+
+try {
+    failedBatch = await BatchStatusManager.loadBatch({
+        batch_id: sync_batch_id
+    });
+} catch (verificationError) {
+    console.error(
+        "MASTER SAVE FAILURE STATE READ UNVERIFIED:",
+        {
+            batch_id: sync_batch_id,
+            entity: "UNIT",
+            error: verificationError?.message || String(verificationError)
+        }
+    );
+
+    throw new Error("MASTER_SAVE_FAILURE_STATE_UNVERIFIED");
+}
+
+    const storedError = failedBatch?.error_message;
+
+    if (
+        failedBatch?.batch_id === sync_batch_id &&
+        typeof failedBatch.execution_claim_token === "string" &&
+        failedBatch.execution_claim_token.toLowerCase() ===
+            executionClaimToken.toLowerCase() &&
+        failedBatch.batch_status === "FAILED" &&
+        failedBatch.worker_status === "FAILED" &&
+        typeof storedError === "string" &&
+        !storedError.startsWith("HTTP_OUTCOME_UNKNOWN:") &&
+        !storedError.startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+    ) {
+        return res.status(500).json({
+            success: false,
+            error_code: "MASTER_SAVE_FAILED",
+            batch_id: sync_batch_id,
+            entity: "UNIT"
+        });
+    }
+
+    throw new Error(
+        "MASTER_SAVE_FAILURE_STATE_UNVERIFIED"
+    );
+}
 
 unitReconciliation =
     unitResult.reconciliation;
@@ -41711,6 +41934,51 @@ costCentreResult = await BatchManager.run({
 
 console.log("COST CENTRE SAVE :", costCentreResult);
 
+if (costCentreResult?.success !== true) {
+    let failedBatch;
+
+try {
+    failedBatch = await BatchStatusManager.loadBatch({
+        batch_id: sync_batch_id
+    });
+} catch (verificationError) {
+    console.error(
+        "MASTER SAVE FAILURE STATE READ UNVERIFIED:",
+        {
+            batch_id: sync_batch_id,
+            entity: "COST_CENTRE",
+            error: verificationError?.message || String(verificationError)
+        }
+    );
+
+    throw new Error("MASTER_SAVE_FAILURE_STATE_UNVERIFIED");
+}
+    const storedError = failedBatch?.error_message;
+
+    if (
+        failedBatch?.batch_id === sync_batch_id &&
+        typeof failedBatch.execution_claim_token === "string" &&
+        failedBatch.execution_claim_token.toLowerCase() ===
+            executionClaimToken.toLowerCase() &&
+        failedBatch.batch_status === "FAILED" &&
+        failedBatch.worker_status === "FAILED" &&
+        typeof storedError === "string" &&
+        !storedError.startsWith("HTTP_OUTCOME_UNKNOWN:") &&
+        !storedError.startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+    ) {
+        return res.status(500).json({
+            success: false,
+            error_code: "MASTER_SAVE_FAILED",
+            batch_id: sync_batch_id,
+            entity: "COST_CENTRE"
+        });
+    }
+
+    throw new Error(
+        "MASTER_SAVE_FAILURE_STATE_UNVERIFIED"
+    );
+}
+
 // =========================
 // COST CENTRE RECONCILIATION
 // =========================
@@ -41789,7 +42057,51 @@ stockResult = await BatchManager.run({
 
 console.log("STOCK SAVE :", stockResult);
 
+if (stockResult?.success !== true) {
+    let failedBatch;
 
+try {
+    failedBatch = await BatchStatusManager.loadBatch({
+        batch_id: sync_batch_id
+    });
+} catch (verificationError) {
+    console.error(
+        "MASTER SAVE FAILURE STATE READ UNVERIFIED:",
+        {
+            batch_id: sync_batch_id,
+            entity: "STOCK",
+            error: verificationError?.message || String(verificationError)
+        }
+    );
+
+    throw new Error("MASTER_SAVE_FAILURE_STATE_UNVERIFIED");
+}
+
+    const storedError = failedBatch?.error_message;
+
+    if (
+        failedBatch?.batch_id === sync_batch_id &&
+        typeof failedBatch.execution_claim_token === "string" &&
+        failedBatch.execution_claim_token.toLowerCase() ===
+            executionClaimToken.toLowerCase() &&
+        failedBatch.batch_status === "FAILED" &&
+        failedBatch.worker_status === "FAILED" &&
+        typeof storedError === "string" &&
+        !storedError.startsWith("HTTP_OUTCOME_UNKNOWN:") &&
+        !storedError.startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+    ) {
+        return res.status(500).json({
+            success: false,
+            error_code: "MASTER_SAVE_FAILED",
+            batch_id: sync_batch_id,
+            entity: "STOCK"
+        });
+    }
+
+    throw new Error(
+        "MASTER_SAVE_FAILURE_STATE_UNVERIFIED"
+    );
+}
 
 stockReconciliation =
     stockResult.reconciliation;
@@ -43664,7 +43976,8 @@ if (
     httpExecutionGuardAcquired === true &&
     httpSyncExecutionStarted === true &&
     err?.durableClaimUnconfirmed !== true &&
-    err?.durableVerificationUnconfirmed !== true
+    err?.durableVerificationUnconfirmed !== true &&
+    err?.message !== "MASTER_SAVE_FAILURE_STATE_UNVERIFIED"
 ) {
 
     try {
