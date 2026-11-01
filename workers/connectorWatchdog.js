@@ -443,7 +443,7 @@ discoverRegisteredConnectors(registry || connectorRegistry);
 
 refreshRegisteredConnectorHealth(registry || connectorRegistry);
 
-// Detect expired connector-loss retry reservations.
+// Detect expired retry reservations across all failure categories.
 // Read-only: do not reset or requeue here.
 const { data: expiredRetryReservations, error: expiredRetryError } =
     await supabase
@@ -576,12 +576,13 @@ if (!job) {
     }
 }
 }
-        // ----------------------------------------------------
-        // 1. Get batches that need connector monitoring
-        //
-        // A) PROCESSING + RUNNING
-        // B) PENDING + PENDING + WAITING_CONNECTOR
-        // ----------------------------------------------------
+      // ----------------------------------------------------
+// 1. Get batches requiring connector monitoring
+//
+// A) PROCESSING + RUNNING
+// B) PENDING + PENDING + WAITING_CONNECTOR
+// C) FAILED + FAILED (universal recovery evaluation)
+// ----------------------------------------------------
 
         const { data: batches, error: batchError } =
             await supabase
@@ -636,51 +637,54 @@ if (!job) {
 
     try {
 
-        // Never automatically process a batch with uncertain Tally outcome.
-        // Applies to FAILED, WAITING_CONNECTOR and RUNNING paths.
-       if (
-    (
-        String(batch.error_message || "")
-            .startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
-    ) ||
-    (
-        String(batch.error_message || "")
-            .startsWith("HTTP_OUTCOME_UNKNOWN:")
-    )
-) {
-            console.warn(
-                "[CONNECTOR WATCHDOG] UNCERTAIN OUTCOME — MANUAL REVIEW:",
-                batch.batch_id
-            );
+    // ----------------------------------------------------
+// UNCERTAIN OUTCOME SAFETY CLASSIFICATION
+// Evaluate FAILED batches regardless of error reason.
+// Never permit uncertain outcomes to be replayed.
+// ----------------------------------------------------
+const uncertainOutcome =
+    String(batch.error_message || "")
+        .startsWith("CONNECTOR_OUTCOME_UNKNOWN:") ||
+    String(batch.error_message || "")
+        .startsWith("HTTP_OUTCOME_UNKNOWN:");
 
-            continue;
+if (uncertainOutcome) {
+    console.warn(
+        "[CONNECTOR WATCHDOG] UNCERTAIN OUTCOME — REPLAY BLOCKED",
+        {
+            batch_id: batch.batch_id,
+            batch_status: batch.batch_status,
+            worker_status: batch.worker_status,
+            original_error: batch.error_message || null,
+            recovery_candidate:
+                batch.batch_status === "FAILED" &&
+                batch.worker_status === "FAILED",
+            action: "MANUAL_REVIEW_REQUIRED"
         }
+    );
 
-        // Inspect explicitly classified CONNECTOR_LOSS failures.
-// Automatic retry remains disabled pending execution verification.
-// Other FAILED outcomes require manual review.
+    continue;
+}
+
+      // ----------------------------------------------------
+// UNIVERSAL FAILED BATCH RECOVERY EVALUATION
+// Every FAILED batch is evaluated regardless of error.
+// Actual retry remains blocked until execution settlement
+// is independently verified.
+// ----------------------------------------------------
 if (
     batch.batch_status === "FAILED" &&
     batch.worker_status === "FAILED"
 ) {
-    if (
-        !String(batch.error_message || "")
-            .startsWith("CONNECTOR_LOSS:")
-    ) {
-        console.warn(
-            "[CONNECTOR WATCHDOG] FAILED AUTO-RETRY DEFERRED:",
-            batch.batch_id,
-            batch.error_message
-        );
-        continue;
-    }
-    // Never automatically retry uncertain Tally outcomes.
-    if (
-        String(batch.error_message || "")
-            .startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
-    ) {
-        continue;
-    }
+    console.log(
+        "[CONNECTOR WATCHDOG] FAILED RECOVERY EVALUATION",
+        {
+            batch_id: batch.batch_id,
+            original_error: batch.error_message || null,
+            retry_count: Number(batch.retry_count ?? 0),
+            action: "EVALUATE_ONLY"
+        }
+    );
 
     // Maximum 3 automatic retries.
     // NULL retry_count is treated as 0.
@@ -736,37 +740,58 @@ if (
     }
 
   
-    // Connector and Tally appear healthy.
-// Only CONNECTOR_LOSS failures reach this retry path.
-// Maximum 3 automatic retries.
-// BUSY blocks dispatch; execution settlement still requires verification.
+    // ----------------------------------------------------
+// UNIVERSAL FAILED RECOVERY — CONNECTOR HEALTH VERIFIED
+// All FAILED error categories can reach this evaluation.
+// Connector health alone does not prove execution settlement.
+// Retry dispatch remains disabled.
+// ----------------------------------------------------
 
 console.warn(
-    "[CONNECTOR WATCHDOG] RETRY READINESS ACTIVATION DEFERRED",
+    "[CONNECTOR WATCHDOG] FAILED RECOVERY SETTLEMENT UNVERIFIED",
     {
         batch_id: batch.batch_id,
-        reason: "Previous Tally execution settlement not independently verified"
+        original_error: batch.error_message || null,
+        connector_id: connectorId,
+        connector_healthy: true,
+        execution_settled: false,
+        action: "OBSERVE_ONLY"
     }
 );
-// BUSY prevents dispatch, but does not remove retry eligibility.
+// ----------------------------------------------------
+// GLOBAL CONNECTOR AVAILABILITY EVALUATION
+// FREE is necessary for future dispatch, but not
+// sufficient to establish previous execution settlement.
+// ----------------------------------------------------
 const globalWatchdog =
     await connectorHealthStore.getConnectorWatchdogStatus(connectorId);
 
-if (
-    globalWatchdog.operation_status !== "FREE" ||
-    globalWatchdog.available !== true ||
-    socket.tallyRequestActive === true
-) {
-    continue;
-}
+const connectorFree =
+    globalWatchdog?.operation_status === "FREE" &&
+    globalWatchdog?.available === true &&
+    socket.tallyRequestActive !== true;
 
 console.warn(
-    "[CONNECTOR WATCHDOG] CONNECTOR_LOSS RETRY DEFERRED",
+    "[CONNECTOR WATCHDOG] UNIVERSAL FAILED RECOVERY DECISION",
     {
         batch_id: batch.batch_id,
-        reason: "Previous Tally execution settlement not independently verified"
+        original_error: batch.error_message || null,
+        connector_id: connectorId,
+        connector_free: connectorFree,
+        global_operation_status:
+            globalWatchdog?.operation_status || "UNKNOWN",
+        retry_count: Number(batch.retry_count ?? 0),
+        execution_settled: false,
+        recovery_allowed: false,
+        reason: connectorFree
+            ? "Previous execution settlement not independently verified"
+            : "Connector unavailable or busy; execution settlement unverified",
+        action: "DEFER_RETRY"
     }
 );
+
+// Never activate retry readiness or enqueue a batch
+// without independently verified execution settlement.
 continue;
 }
 

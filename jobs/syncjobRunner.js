@@ -248,7 +248,35 @@ console.log(
         reason: errorData.reason
     };
 }
+if (
+    response.status === 503 &&
+    errorData?.success === false &&
+    [
+        "HTTP_LIFECYCLE_START_UNVERIFIED",
+        "HTTP_EXECUTION_TERMINATION_UNVERIFIED"
+    ].includes(errorData?.error_code)
+) {
+    const marked =
+        await BatchStatusManager.markHttpOutcomeUnknown({
+            batch_id: job.batch_id,
+            error: errorData.error_code,
+            execution_claim_token: job.execution_claim_token
+        });
 
+    if (marked !== true) {
+        throw new Error(
+            `HTTP_OUTCOME_UNKNOWN: ${errorData.error_code} mark not confirmed`
+        );
+    }
+
+    return {
+        outcome: errorData.error_code,
+        skipped: true,
+        sync_completed: false,
+        batch_id: job.batch_id,
+        http_status: response.status
+    };
+}
                    if (
                         errorData?.error_code === "CONNECTOR_OUTCOME_UNKNOWN"
                     ) {
@@ -458,8 +486,37 @@ throw new Error(
 );
 }
 
-            console.log(
-    "TALLY_SYNC REQUEST COMPLETED:",
+           const httpVerification =
+    await BatchStatusManager.verifyHttpExecutionTermination({
+        batch_id: job.batch_id,
+        execution_claim_token: job.execution_claim_token,
+        invocation_id: responseData?.http_execution_invocation_id
+    });
+
+if (httpVerification.verified !== true) {
+    console.error(
+        "HTTP EXECUTION TERMINATION NOT VERIFIED:",
+        job.batch_id,
+        httpVerification.reason
+    );
+
+    await BatchStatusManager.markHttpOutcomeUnknown({
+        batch_id: job.batch_id,
+        error: `HTTP_EXECUTION_TERMINATION_UNVERIFIED: ${httpVerification.reason}`,
+        execution_claim_token: job.execution_claim_token
+    });
+
+    return {
+        outcome: "HTTP_EXECUTION_TERMINATION_UNVERIFIED",
+        skipped: true,
+        sync_completed: false,
+        batch_id: job.batch_id,
+        http_status: response.status
+    };
+}
+
+console.log(
+    "TALLY_SYNC HTTP EXECUTION VERIFIED:",
     job.batch_id
 );
 
@@ -469,7 +526,8 @@ return {
     sync_completed: false,
     batch_id: job.batch_id,
     http_status: response.status,
-    response_success: responseData?.success === true
+    response_success: true,
+    http_execution_verified: true
 };
 
                 }

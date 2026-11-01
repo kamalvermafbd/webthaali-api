@@ -939,9 +939,91 @@ async resetConnectorRetryReadiness({ batch_id }) {
         }
     });
 }
+// ----------------------------------
+// Verify HTTP Execution Termination
+// ----------------------------------
 
+async verifyHttpExecutionTermination({
+    batch_id,
+    execution_claim_token,
+    invocation_id
+}) {
+    const uuidPattern =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    if (
+        typeof batch_id !== "string" ||
+        !batch_id.trim() ||
+        typeof execution_claim_token !== "string" ||
+        !uuidPattern.test(execution_claim_token) ||
+        typeof invocation_id !== "string" ||
+        !uuidPattern.test(invocation_id)
+    ) {
+        return {
+            verified: false,
+            reason: "INVALID_VERIFICATION_ARGUMENTS"
+        };
+    }
+
+    try {
+        const { data, error } = await supabase.rpc(
+            "assess_sync_http_settlement",
+            {
+                p_batch_id: batch_id,
+                p_execution_claim_token: execution_claim_token
+            }
+        );
+
+        if (error) {
+            console.error(
+                "HTTP EXECUTION VERIFICATION RPC FAILED:",
+                batch_id,
+                error
+            );
+
+            return {
+                verified: false,
+                reason: "VERIFICATION_RPC_FAILED"
+            };
+        }
+
+        const result = Array.isArray(data)
+            ? data[0]
+            : data;
+
+        const verified =
+            result?.decision === "TERMINATED" &&
+            result?.execution_state === "TERMINATED" &&
+            typeof result?.invocation_id === "string" &&
+            result.invocation_id.toLowerCase() ===
+                invocation_id.toLowerCase() &&
+            Boolean(result?.terminated_at) &&
+            result?.terminal_outcome ===
+                "HANDLER_COMPLETED_SUCCESS";
+
+        return {
+            verified,
+            reason: verified
+                ? "HTTP_EXECUTION_TERMINATED"
+                : "HTTP_EXECUTION_TERMINATION_UNVERIFIED"
+        };
+
+    } catch (error) {
+        console.error(
+            "HTTP EXECUTION VERIFICATION UNCERTAIN:",
+            batch_id,
+            error
+        );
+
+        return {
+            verified: false,
+            reason: "VERIFICATION_RPC_UNCERTAIN"
+        };
+    }
+}
 
 }
+
 
 module.exports =
     new BatchStatusManager();

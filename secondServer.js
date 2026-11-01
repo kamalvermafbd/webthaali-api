@@ -39286,9 +39286,67 @@ let connector_id;
 let batchCompletedSuccessfully = false;
 let httpSyncExecutionStarted = false;
 
+let httpExecutionInvocationId = null;
+let httpExecutionStartUnverified = false;
+
 let httpExecutionGuardAttempted = false;
 let httpExecutionGuardAcquired = false;
 let httpExecutionGuardOwnerToken = null;
+
+async function finalizeHttpExecution() {
+    if (!httpExecutionInvocationId) {
+        return {
+            confirmed: false,
+            reason: "INVOCATION_ID_MISSING"
+        };
+    }
+
+    try {
+        const { data, error } = await supabase.rpc(
+            "terminate_sync_http_execution",
+            {
+                p_batch_id: sync_batch_id,
+                p_execution_claim_token: executionClaimToken,
+                p_invocation_id: httpExecutionInvocationId,
+                p_guard_owner_id: httpExecutionGuardOwnerToken,
+                p_terminal_outcome:
+                    batchCompletedSuccessfully === true
+                        ? "HANDLER_COMPLETED_SUCCESS"
+                        : "HANDLER_EXITED"
+            }
+        );
+
+        const result = Array.isArray(data) ? data[0] : data;
+
+        if (
+            error ||
+            result?.accepted !== true ||
+            !["TERMINATED", "ALREADY_TERMINATED"].includes(
+                result?.decision
+            )
+        ) {
+            return {
+                confirmed: false,
+                reason: "TERMINATION_UNVERIFIED"
+            };
+        }
+
+        return {
+            confirmed: true,
+            invocation_id: httpExecutionInvocationId
+        };
+    } catch (error) {
+        console.error(
+            "HTTP LIFECYCLE FINALIZATION FAILED:",
+            error
+        );
+
+        return {
+            confirmed: false,
+            reason: "TERMINATION_RPC_UNCERTAIN"
+        };
+    }
+}
 
 try {
     const company_code =
@@ -40180,6 +40238,54 @@ if (postGuardBatchStateChanged) {
     });
 }
 
+// Register durable HTTP invocation before sync side effects.
+httpExecutionStartUnverified = true;
+
+let lifecycleStartResponse;
+
+try {
+    lifecycleStartResponse = await supabase.rpc(
+        "start_sync_http_execution",
+        {
+            p_batch_id: sync_batch_id,
+            p_execution_claim_token: executionClaimToken,
+            p_guard_owner_id: httpExecutionGuardOwnerToken,
+            p_server_instance_id: CLEANUP_SERVER_INSTANCE_ID
+        }
+    );
+} catch (startError) {
+    console.error(
+        "HTTP LIFECYCLE START RPC UNVERIFIED:",
+        {
+            batch_id: sync_batch_id,
+            error: startError?.message || String(startError)
+        }
+    );
+
+    throw new Error("HTTP_LIFECYCLE_START_UNVERIFIED");
+}
+
+const lifecycleStartResult =
+    Array.isArray(lifecycleStartResponse?.data)
+        ? lifecycleStartResponse.data[0]
+        : lifecycleStartResponse?.data;
+
+if (lifecycleStartResponse?.error) {
+    throw new Error("HTTP_LIFECYCLE_START_UNVERIFIED");
+}
+
+if (
+    lifecycleStartResult?.accepted !== true ||
+    lifecycleStartResult?.decision !== "STARTED" ||
+    typeof lifecycleStartResult?.invocation_id !== "string"
+) {
+    throw new Error("HTTP_LIFECYCLE_START_UNVERIFIED");
+}
+
+httpExecutionInvocationId =
+    lifecycleStartResult.invocation_id;
+
+httpExecutionStartUnverified = false;
 httpSyncExecutionStarted = true;
 
 // Durable connector operation sequence for this execution.
@@ -43929,9 +44035,30 @@ console.log(
     cleanupResult
 );
 
+const httpFinalization = await finalizeHttpExecution();
+
+if (httpFinalization.confirmed !== true) {
+    console.error(
+        "HTTP SUCCESS BLOCKED — TERMINATION UNVERIFIED:",
+        {
+            batch_id: sync_batch_id,
+            invocation_id: httpExecutionInvocationId,
+            reason: httpFinalization.reason
+        }
+    );
+
+    return res.status(503).json({
+        success: false,
+        error_code: "HTTP_EXECUTION_TERMINATION_UNVERIFIED",
+        reason: httpFinalization.reason,
+        batch_id: sync_batch_id
+    });
+}
+
 return res.json({
   ...result,
-db: {
+  http_execution_invocation_id: httpFinalization.invocation_id,
+  db: {
     groups: groupResult,
     groupReconciliation: groupReconciliation,
    // groupAction: groupActionResult,
@@ -44056,15 +44183,27 @@ if (
     httpSyncExecutionStarted !== true &&
     String(req.query.worker_batch_id || "").trim()
 ) {
-    console.error("HTTP EXECUTION NOT STARTED:", {
-        batch_id: sync_batch_id,
-        error: err?.message || String(err)
-    });
+    const lifecycleStartUnverified =
+        httpExecutionStartUnverified === true;
+
+    console.error(
+        lifecycleStartUnverified
+            ? "HTTP LIFECYCLE START UNVERIFIED:"
+            : "HTTP EXECUTION NOT STARTED:",
+        {
+            batch_id: sync_batch_id,
+            error: err?.message || String(err)
+        }
+    );
 
     return res.status(503).json({
         success: false,
-        error_code: "HTTP_EXECUTION_NOT_STARTED",
-        reason: "PRE_EXECUTION_ERROR",
+        error_code: lifecycleStartUnverified
+            ? "HTTP_LIFECYCLE_START_UNVERIFIED"
+            : "HTTP_EXECUTION_NOT_STARTED",
+        reason: lifecycleStartUnverified
+            ? "START_COMMIT_UNVERIFIED"
+            : "PRE_EXECUTION_ERROR",
         batch_id:
             sync_batch_id ||
             String(req.query.worker_batch_id).trim()
@@ -44094,7 +44233,9 @@ const errorCode = isDurableClaimUnconfirmed
             : null;
 
 return res.status(
-    isDurableClaimUnconfirmed || isDurableVerificationUnconfirmed
+    isDurableClaimUnconfirmed ||
+    isDurableVerificationUnconfirmed ||
+    isUncertainOutcome
         ? 503
         : isTallyOffline
             ? 503
@@ -44115,6 +44256,23 @@ return res.status(
 });
 
 } finally {
+
+        // Fallback lifecycle termination for all exit paths.
+    // Does not certify connector-operation settlement.
+    if (httpExecutionInvocationId) {
+        const finalization = await finalizeHttpExecution();
+
+        if (finalization.confirmed !== true) {
+            console.error(
+                "HTTP EXECUTION TERMINATION UNVERIFIED:",
+                {
+                    batch_id: sync_batch_id,
+                    invocation_id: httpExecutionInvocationId,
+                    reason: finalization.reason
+                }
+            );
+        }
+    }
 
     if (httpExecutionGuardAcquired === true) {
         try {
