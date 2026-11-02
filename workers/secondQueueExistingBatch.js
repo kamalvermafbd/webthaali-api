@@ -479,6 +479,7 @@ const { data: claimResult, error: claimError } = await supabase
 
 }
 
+
 async function inspectNormalBatchJob(
     batch,
     workerConfig
@@ -487,8 +488,14 @@ async function inspectNormalBatchJob(
 
     const syncQueue = getSyncQueue(workerConfig.queue_name);
 
+    const retryToken = batch.retry_claim_token ?? null;
+
+    const bullJobId = retryToken
+        ? `${batch.batch_id}-retry-${retryToken}`
+        : batch.batch_id;
+
     try {
-        const job = await syncQueue.getJob(batch.batch_id);
+        const job = await syncQueue.getJob(bullJobId);
 
         if (!job) {
             return {
@@ -506,7 +513,7 @@ async function inspectNormalBatchJob(
             data.worker_name === workerConfig.worker_name &&
             String(data.worker_id) === String(workerConfig.id) &&
             data.server_id === workerConfig.server_id &&
-            (data.retry_claim_token ?? null) === null;
+            (data.retry_claim_token ?? null) === retryToken;
 
         return {
             state,
@@ -516,6 +523,7 @@ async function inspectNormalBatchJob(
         await syncQueue.close();
     }
 }
+
 
 async function dispatchBatch(batch) {
 
@@ -556,10 +564,8 @@ if (
 
    const reservationLockedAt = new Date().toISOString();
 
-const {
-    data: reserved,
-    error: reserveError
-} = await supabase
+
+let reservationQuery = supabase
     .from("sync_batches")
     .update({
         worker_id: workerConfig.worker_name,
@@ -569,30 +575,34 @@ const {
         job_type: batch.job_type,
         worker_type: batch.worker_type
     })
-        .eq(
-            "id",
-            batch.id
-        )
-        .eq(
-            "batch_status",
-            "PENDING"
-        )
-             .eq(
-            "worker_status",
-            "PENDING"
-        )
+    .eq("id", batch.id)
+    .eq("batch_status", "PENDING")
+    .eq("worker_status", "PENDING")
+    .eq("current_stage", "PENDING")
+    .is("worker_id", null)
+    .or(
+        "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
+    );
 
-        .eq("current_stage", "PENDING")
-     // Reject both uncertain outcomes during atomic reservation.
-.or(
-    "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
-)
-        .is(
-            "worker_id",
-            null
-        )
-        .select()
-        .maybeSingle();
+if (batch.retry_claim_token == null) {
+    reservationQuery = reservationQuery.is(
+        "retry_claim_token",
+        null
+    );
+} else {
+    reservationQuery = reservationQuery.eq(
+        "retry_claim_token",
+        batch.retry_claim_token
+    );
+}
+
+const {
+    data: reserved,
+    error: reserveError
+} = await reservationQuery
+    .select()
+    .maybeSingle();
+
 
     if (reserveError) {
         throw new Error(
@@ -708,22 +718,42 @@ if (queueCheck.state !== "NOT_FOUND") {
     throw uncertainError;
 }
 
-   const { data: rolledBack, error: rollbackError } = await supabase
+   
+let rollbackQuery = supabase
     .from("sync_batches")
     .update({
         worker_id: null,
         locked_at: null
     })
-   .eq("id", batch.id)
-.eq("batch_status", "PENDING")
-.eq("worker_status", "PENDING")
-.eq("worker_id", workerConfig.worker_name)
-.eq("locked_at", reserved.locked_at)
-.or(
-    "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
-)
-.select("id")
-.maybeSingle();
+    .eq("id", reserved.id)
+    .eq("batch_status", "PENDING")
+    .eq("worker_status", "PENDING")
+    .eq("current_stage", "PENDING")
+    .eq("worker_id", workerConfig.worker_name)
+    .eq("locked_at", reserved.locked_at)
+    .or(
+        "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
+    );
+
+if (reserved.retry_claim_token == null) {
+    rollbackQuery = rollbackQuery.is(
+        "retry_claim_token",
+        null
+    );
+} else {
+    rollbackQuery = rollbackQuery.eq(
+        "retry_claim_token",
+        reserved.retry_claim_token
+    );
+}
+
+const {
+    data: rolledBack,
+    error: rollbackError
+} = await rollbackQuery
+    .select("id")
+    .maybeSingle();
+
 
 if (rollbackError || !rolledBack) {
     console.error(

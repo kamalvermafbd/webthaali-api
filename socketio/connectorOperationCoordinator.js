@@ -583,6 +583,27 @@ if (
     );
 
     // Keep persistent markers until verified safe recovery.
+    if (!operationAbortController.signal.aborted) {
+    operationAbortController.abort(
+        new Error(
+            `Unsafe connector operation: ${lock.connectorId}`
+        )
+    );
+}
+
+try {
+    await quarantineConnectorAndSocket(
+        lock.connectorId,
+        lock.socketId,
+        "UNSAFE_OPERATION_FINALIZATION",
+        lock.ownerToken
+    );
+} catch (quarantineError) {
+    console.error(
+        `[GLOBAL LOCK] Unsafe finalization quarantine failed: ${lock.connectorId}`,
+        quarantineError
+    );
+}
 } else {
     try {
     const released = await releaseConnectorAndSocketLock(

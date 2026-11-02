@@ -1041,9 +1041,9 @@ const operationStatus =
         ? "QUARANTINED"
         : locked || activeOperation
             ? "BUSY"
-            : queueVerifiedIdle
-                ? "FREE"
-                : "UNKNOWN";
+            : connected && socketId && queueVerifiedIdle
+    ? "FREE"
+    : "UNKNOWN";
 
     const ttlMs = connectorLock !== null
         ? await redis.pttl(connectorLockKey)

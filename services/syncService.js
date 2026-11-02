@@ -573,7 +573,29 @@ const lockedResult = await withGlobalConnectorLock(
         "Connector disconnected, changed or operation aborted while holding Trial Balance global lock"
     );
 }
-        const requestId = randomUUID();
+
+if (sync_batch_id) {
+    const { data: eligibleBatch, error: eligibilityError } =
+        await supabase
+            .from("sync_batches")
+            .select("batch_id")
+            .eq("batch_id", sync_batch_id)
+            .eq("execution_claim_token", execution_claim_token)
+            .eq("company_code", company_code)
+            .eq("tally_owner", tally_owner)
+            .eq("batch_status", "COMPLETED")
+            .eq("worker_status", "COMPLETED")
+            .eq("batch_closed", false)
+            .maybeSingle();
+
+    if (eligibilityError || !eligibleBatch) {
+        throw new Error(
+            `TRIAL_BALANCE_EXECUTION_CLAIM_NOT_CONFIRMED: ${sync_batch_id}`
+        );
+    }
+}
+
+const requestId = randomUUID();
 
 const tbRowsPromise =
     lockedSocket.protocolReceiver.waitForCollection();
@@ -1083,6 +1105,27 @@ const lockedResult = await withGlobalConnectorLock(
     throw new Error(
         "Connector disconnected, changed or operation aborted while holding Stock Godown global lock"
     );
+}
+
+if (sync_batch_id) {
+    const { data: eligibleBatch, error: eligibilityError } =
+        await supabase
+            .from("sync_batches")
+            .select("batch_id")
+            .eq("batch_id", sync_batch_id)
+            .eq("execution_claim_token", execution_claim_token)
+            .eq("company_code", company_code)
+            .eq("tally_owner", tally_owner)
+            .eq("batch_status", "COMPLETED")
+            .eq("worker_status", "COMPLETED")
+            .eq("batch_closed", false)
+            .maybeSingle();
+
+    if (eligibilityError || !eligibleBatch) {
+        throw new Error(
+            `STOCK_EXECUTION_CLAIM_NOT_CONFIRMED: ${sync_batch_id}`
+        );
+    }
 }
 
 const requestId = randomUUID();
