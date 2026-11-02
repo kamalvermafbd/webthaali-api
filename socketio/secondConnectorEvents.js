@@ -9,7 +9,8 @@ const {
 const {
     claimConnectorSocketOwnership,
     updateConnectorHealthIfSocketOwner,
-    getConnectorWatchdogStatus
+    getConnectorWatchdogStatus,
+    updateConnectorTallyQueueStatus
 } = require("./connectorHealthStore");
 
 // 060926 start
@@ -391,6 +392,16 @@ console.log(
 
 socket.on("identifyConnector", async (data) => {
 
+    if (socket.identificationInProgress === true) {
+        console.warn(
+            "[CONNECTOR IDENTIFY SKIPPED] Identification already in progress",
+            { socket_id: socket.id }
+        );
+        return;
+    }
+
+    socket.identificationInProgress = true;
+
     console.log("[CONNECTOR IDENTIFY RECEIVED]", {
         socket_id: socket.id,
         connected: socket.connected,
@@ -412,9 +423,13 @@ socket.on("identifyConnector", async (data) => {
     Number.isSafeInteger(rawQueueStatus.pendingOperations) &&
     rawQueueStatus.pendingOperations >= 0 &&
     Number.isSafeInteger(rawQueueStatus.runningOperations) &&
-    rawQueueStatus.runningOperations >= 0 &&
+       rawQueueStatus.runningOperations >= 0 &&
     Number.isSafeInteger(rawQueueStatus.operationGeneration) &&
-    rawQueueStatus.operationGeneration >= 0;
+    rawQueueStatus.operationGeneration >= 0 &&
+    rawQueueStatus.idle === (
+    rawQueueStatus.pendingOperations === 0 &&
+    rawQueueStatus.runningOperations === 0
+);
 
 const tallyQueueStatus = isValidQueueStatus
     ? {
@@ -425,13 +440,42 @@ const tallyQueueStatus = isValidQueueStatus
     }
     : null;
 
-socket.reportedTallyQueueStatus = tallyQueueStatus;
+const previousQueueStatus = socket.reportedTallyQueueStatus;
 
-        console.log("📋 CONNECTOR TALLY QUEUE STATUS:", {
+const isNewerQueueStatus =
+    tallyQueueStatus !== null &&
+    (
+        !previousQueueStatus ||
+        tallyQueueStatus.operationGeneration >
+            previousQueueStatus.operationGeneration ||
+        (
+            tallyQueueStatus.operationGeneration ===
+                previousQueueStatus.operationGeneration &&
+            tallyQueueStatus.idle === previousQueueStatus.idle &&
+            tallyQueueStatus.pendingOperations ===
+                previousQueueStatus.pendingOperations &&
+            tallyQueueStatus.runningOperations ===
+                previousQueueStatus.runningOperations
+        )
+    );
+
+if (isNewerQueueStatus) {
+    socket.reportedTallyQueueStatus = tallyQueueStatus;
+} else {
+    console.warn(
+        "[CONNECTOR IDENTIFY] Invalid, stale or conflicting queue status ignored",
+        {
             socket_id: socket.id,
-            queue_status: tallyQueueStatus
-        });
+            received_status: tallyQueueStatus,
+            previous_status: previousQueueStatus || null
+        }
+    );
+}
 
+console.log("📋 CONNECTOR TALLY QUEUE STATUS:", {
+    socket_id: socket.id,
+    queue_status: socket.reportedTallyQueueStatus || null
+});
         const company_guids =
             Array.isArray(data?.company_guids)
                 ? [...new Set(
@@ -571,6 +615,18 @@ if (connectorIds.length === 0) {
 }
 
 for (const connectorId of connectorIds) {
+
+    if (!socket.connected) {
+        console.warn(
+            "[CONNECTOR IDENTIFY STOPPED] Socket disconnected before ownership claim",
+            {
+                socket_id: socket.id,
+                connector_id: connectorId
+            }
+        );
+        break;
+    }
+
     const claimed = await claimConnectorSocketOwnership(
         connectorId,
         socket.id
@@ -584,8 +640,48 @@ for (const connectorId of connectorIds) {
             }
         );
 
-        return { claimed: false, health: null };
+             return { claimed: false, health: null };
     });
+
+    if (!socket.connected && claimed.claimed) {
+        console.warn(
+            "[CONNECTOR IDENTIFY] Socket disconnected after ownership claim",
+            {
+                socket_id: socket.id,
+                connector_id: connectorId
+            }
+        );
+
+        await updateConnectorHealthIfSocketOwner(
+            connectorId,
+            socket.id,
+            {
+                connection_status: "DISCONNECTED",
+                operation_status: "UNKNOWN"
+            }
+        ).catch(error => {
+            console.error(
+                "[CONNECTOR IDENTIFY] Disconnect rollback failed",
+                {
+                    connector_id: connectorId,
+                    error: error.message
+                }
+            );
+        });
+
+                break;
+    }
+
+    if (!socket.connected) {
+        console.warn(
+            "[CONNECTOR IDENTIFY STOPPED] Socket disconnected after failed ownership claim",
+            {
+                socket_id: socket.id,
+                connector_id: connectorId
+            }
+        );
+        break;
+    }
 
     if (!claimed.claimed) {
         console.warn(
@@ -678,6 +774,35 @@ socket.emit("connector:registration:status", {
         healthUpdate = { updated: false };
     }
 
+        if (healthUpdate.updated && !socket.connected) {
+        console.warn(
+            "[CONNECTOR IDENTIFY] Socket disconnected during health update",
+            {
+                socket_id: socket.id,
+                connector_id: connectorId
+            }
+        );
+
+        await updateConnectorHealthIfSocketOwner(
+            connectorId,
+            socket.id,
+            {
+                connection_status: "DISCONNECTED",
+                operation_status: "UNKNOWN"
+            }
+        ).catch(error => {
+            console.error(
+                "[CONNECTOR IDENTIFY] Post-update disconnect rollback failed",
+                {
+                    connector_id: connectorId,
+                    error: error.message
+                }
+            );
+        });
+
+        registry.remove(connectorId, socket);
+        break;
+    }
 
     if (!healthUpdate.updated) {
         console.error(
@@ -733,14 +858,97 @@ socket.emit("connector:registration:status", {
         continue;
     }
 
-    console.log(
-        "✅ EXISTING CONNECTOR AUTO REGISTERED WITH OWNERSHIP",
-        {
-            socket_id: socket.id,
-            connector_id: connectorId
+        if (!socket.connected) {
+        console.warn(
+            "[CONNECTOR IDENTIFY] Socket disconnected before registration success",
+            {
+                socket_id: socket.id,
+                connector_id: connectorId
+            }
+        );
+
+        await updateConnectorHealthIfSocketOwner(
+            connectorId,
+            socket.id,
+            {
+                connection_status: "DISCONNECTED",
+                operation_status: "UNKNOWN"
+            }
+        ).catch(error => {
+            console.error(
+                "[CONNECTOR IDENTIFY] Final disconnect rollback failed",
+                {
+                    connector_id: connectorId,
+                    error: error.message
+                }
+            );
+        });
+
+        registry.remove(connectorId, socket);
+        break;
+    }
+
+   console.log(
+    "✅ EXISTING CONNECTOR AUTO REGISTERED WITH OWNERSHIP",
+    {
+        socket_id: socket.id,
+        connector_id: connectorId
+    }
+);
+
+if (isNewerQueueStatus && socket.connected) {
+    try {
+        const result = await updateConnectorTallyQueueStatus(
+            connectorId,
+            socket.id,
+            tallyQueueStatus
+        );
+
+        if (!result.updated && !result.unchanged) {
+            console.warn(
+                "[CONNECTOR IDENTIFY] Initial queue status rejected",
+                {
+                    socket_id: socket.id,
+                    connector_id: connectorId,
+                    reason: result.reason
+                }
+            );
         }
-    );
-    socket.emit("connector:registration:status", {
+    } catch (error) {
+        console.error(
+            "[CONNECTOR IDENTIFY] Initial queue status persistence failed",
+            {
+                socket_id: socket.id,
+                connector_id: connectorId,
+                error: error.message
+            }
+        );
+    }
+}
+
+if (!socket.connected) {
+    await updateConnectorHealthIfSocketOwner(
+        connectorId,
+        socket.id,
+        {
+            connection_status: "DISCONNECTED",
+            operation_status: "UNKNOWN"
+        }
+    ).catch(error => {
+        console.error(
+            "[CONNECTOR IDENTIFY] Disconnect rollback failed",
+            {
+                connector_id: connectorId,
+                error: error.message
+            }
+        );
+    });
+
+    registry.remove(connectorId, socket);
+    break;
+}
+
+socket.emit("connector:registration:status", {
     connector_id: connectorId,
     registered: true,
     socket_id: socket.id
@@ -787,12 +995,14 @@ socket.emit("connector:registration:status", {
         err
     );
 
-    socket.emit("connector:registration:status", {
+       socket.emit("connector:registration:status", {
         connector_id: null,
         registered: false,
         reason: "IDENTIFICATION_ERROR"
     });
 
+} finally {
+    socket.identificationInProgress = false;
 }
 
 });
@@ -832,6 +1042,37 @@ socket.emit("connector:registration:status", {
                 );
                 return { claimed: false, health: null };
             });
+
+                        if (!socket.connected) {
+                console.warn(
+                    "[CONNECTOR REGISTER STOPPED] Socket disconnected after ownership claim",
+                    {
+                        socket_id: socket.id,
+                        connector_id: connectorId
+                    }
+                );
+
+                if (claimed.claimed) {
+                    await updateConnectorHealthIfSocketOwner(
+                        connectorId,
+                        socket.id,
+                        {
+                            connection_status: "DISCONNECTED",
+                            operation_status: "UNKNOWN"
+                        }
+                    ).catch(error => {
+                        console.error(
+                            "[CONNECTOR REGISTER] Disconnect rollback failed",
+                            {
+                                connector_id: connectorId,
+                                error: error.message
+                            }
+                        );
+                    });
+                }
+
+                return;
+            }
 
             if (!claimed.claimed) {
                 console.error(
@@ -915,10 +1156,10 @@ socket.connectorId = connectorId;
                         socket.id,
                         {
                             connection_status: "CONNECTED",
-                            operation_status:
+                                                       operation_status:
                                 socket.tallyRequestActive === true
                                     ? "BUSY"
-                                    : "FREE",
+                                    : "UNKNOWN",
                             last_heartbeat_at:
                                 socket.lastHeartbeat
                                     ? new Date(socket.lastHeartbeat).toISOString()
@@ -936,6 +1177,36 @@ socket.connectorId = connectorId;
                 );
 
                 healthUpdate = { updated: false };
+            }
+
+                        if (healthUpdate.updated && !socket.connected) {
+                console.warn(
+                    "[CONNECTOR REGISTER] Socket disconnected during health update",
+                    {
+                        socket_id: socket.id,
+                        connector_id: connectorId
+                    }
+                );
+
+                await updateConnectorHealthIfSocketOwner(
+                    connectorId,
+                    socket.id,
+                    {
+                        connection_status: "DISCONNECTED",
+                        operation_status: "UNKNOWN"
+                    }
+                ).catch(error => {
+                    console.error(
+                        "[CONNECTOR REGISTER] Post-update disconnect rollback failed",
+                        {
+                            connector_id: connectorId,
+                            error: error.message
+                        }
+                    );
+                });
+
+                registry.remove(connectorId, socket);
+                return;
             }
 
             if (!healthUpdate.updated) {
@@ -972,6 +1243,35 @@ socket.connectorId = connectorId;
                 return;
             }
 
+                        if (!socket.connected) {
+                console.warn(
+                    "[CONNECTOR REGISTER] Socket disconnected before registration success",
+                    {
+                        socket_id: socket.id,
+                        connector_id: connectorId
+                    }
+                );
+
+                await updateConnectorHealthIfSocketOwner(
+                    connectorId,
+                    socket.id,
+                    {
+                        connection_status: "DISCONNECTED",
+                        operation_status: "UNKNOWN"
+                    }
+                ).catch(error => {
+                    console.error(
+                        "[CONNECTOR REGISTER] Final disconnect rollback failed",
+                        {
+                            connector_id: connectorId,
+                            error: error.message
+                        }
+                    );
+                });
+
+                registry.remove(connectorId, socket);
+                return;
+            }
 
             console.log("✅ CONNECTOR REGISTERED WITH OWNERSHIP", {
                 socket_id: socket.id,
@@ -1003,10 +1303,10 @@ socket.on("getMastersProgress", async (data) => {
 
             await updateOwnedSocketHealth({
         connection_status: "CONNECTED",
-        operation_status:
+               operation_status:
             socket.tallyRequestActive === true
                 ? "BUSY"
-                : "FREE",
+                : "UNKNOWN",
         last_heartbeat_at:
             new Date(socket.lastHeartbeat).toISOString()
     });
@@ -1157,6 +1457,109 @@ socket.on("getMastersProgress", async (data) => {
 }
         });
 
+                // ============================================================
+        // CONNECTOR TALLY QUEUE STATUS REPORT
+        // ============================================================
+
+       socket.on("tally:queue:status", async (data = {}) => {
+    const valid =
+        data !== null &&
+        typeof data === "object" &&
+        !Array.isArray(data) &&
+        typeof data.idle === "boolean" &&
+        Number.isSafeInteger(data.pendingOperations) &&
+        data.pendingOperations >= 0 &&
+        Number.isSafeInteger(data.runningOperations) &&
+        data.runningOperations >= 0 &&
+        Number.isSafeInteger(data.operationGeneration) &&
+        data.operationGeneration >= 0 &&
+        data.idle === (
+            data.pendingOperations === 0 &&
+            data.runningOperations === 0
+        );
+
+    if (!valid || !socket.connected) {
+        console.warn(
+            "[CONNECTOR TALLY QUEUE STATUS] Invalid status or disconnected socket",
+            { socket_id: socket.id }
+        );
+        return;
+    }
+
+    const status = {
+        idle: data.idle,
+        pendingOperations: data.pendingOperations,
+        runningOperations: data.runningOperations,
+        operationGeneration: data.operationGeneration
+    };
+
+    const connectorIds = [
+        ...new Set([
+            ...(socket.connectorIds || []),
+            socket.connectorId
+        ].filter(Boolean))
+    ].filter(connectorId =>
+        registry.get(connectorId) === socket
+    );
+
+    if (connectorIds.length === 0) {
+        console.warn(
+            "[CONNECTOR TALLY QUEUE STATUS] No registered connector",
+            { socket_id: socket.id }
+        );
+        return;
+    }
+
+    for (const connectorId of connectorIds) {
+        if (
+            !socket.connected ||
+            registry.get(connectorId) !== socket
+        ) {
+            continue;
+        }
+
+        try {
+            const result = await updateConnectorTallyQueueStatus(
+                connectorId,
+                socket.id,
+                status
+            );
+
+            if (!result.updated && !result.unchanged) {
+                console.warn(
+                    "[CONNECTOR TALLY QUEUE STATUS] Redis update rejected",
+                    {
+                        socket_id: socket.id,
+                        connector_id: connectorId,
+                        reason: result.reason
+                    }
+                );
+                continue;
+            }
+
+            console.log(
+                "[CONNECTOR TALLY QUEUE STATUS] Redis accepted",
+                {
+                    socket_id: socket.id,
+                    connector_id: connectorId,
+                    updated: result.updated,
+                    unchanged: result.unchanged,
+                    queue_status: status
+                }
+            );
+        } catch (error) {
+            console.error(
+                "[CONNECTOR TALLY QUEUE STATUS] Redis update failed",
+                {
+                    socket_id: socket.id,
+                    connector_id: connectorId,
+                    error: error.message
+                }
+            );
+        }
+    }
+});
+
         // ============================================================
         // TALLY REQUEST START
         // ============================================================
@@ -1190,7 +1593,7 @@ socket.on("getMastersProgress", async (data) => {
 
             await updateOwnedSocketHealth({
                 connection_status: "CONNECTED",
-                operation_status: "FREE",
+                operation_status: "UNKNOWN",
                 last_heartbeat_at:
                     socket.lastHeartbeat
                         ? new Date(socket.lastHeartbeat).toISOString()

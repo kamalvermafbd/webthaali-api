@@ -209,20 +209,38 @@ async function setConnectorHealth(
         );
     }
 
-    const record = {
-        ...health,
-        connector_id: id,
-        shared_updated_at: new Date().toISOString()
-    };
+   const safeHealth = Object.fromEntries(
+    Object.entries(health).filter(
+        ([key]) =>
+            !key.startsWith("tally_queue_") &&
+            key !== "socket_id" &&
+            key !== "connection_status"
+    )
+);
+
+const record = {
+    ...safeHealth,
+    connector_id: id,
+    connection_status: "DISCONNECTED",
+    shared_updated_at: new Date().toISOString()
+};
 
     await ensureConnected();
 
-    await redis.set(
-        getHealthKey(id),
-        JSON.stringify(record),
-        "EX",
-        ttlSeconds
+    const result = await redis.set(
+    getHealthKey(id),
+    JSON.stringify(record),
+    "EX",
+    ttlSeconds,
+    "NX"
+);
+
+if (result !== "OK") {
+    throw new Error(
+        "CONNECTOR_HEALTH_ALREADY_EXISTS: " +
+        "Use an ownership-verified health updater"
     );
+}
 
     return record;
 }
@@ -291,9 +309,17 @@ async function updateConnectorHealthAtomic(
 
         local patch = cjson.decode(ARGV[1])
 
-        for k, v in pairs(patch) do
-            record[k] = v
-        end
+      for k, v in pairs(patch) do
+    -- Generic updates must not modify queue proof
+    -- or connector socket ownership.
+    if string.sub(k, 1, 12) ~= "tally_queue_"
+        and k ~= "socket_id"
+        and k ~= "connection_status"
+        and k ~= "connector_id"
+        and k ~= "shared_updated_at" then
+        record[k] = v
+    end
+end
 
         record["connector_id"] = ARGV[2]
         record["shared_updated_at"] = ARGV[3]
@@ -316,11 +342,11 @@ async function updateConnectorHealthAtomic(
 }
 
 async function deleteConnectorHealth(connectorId) {
-    const id = normalizeConnectorId(connectorId);
+    normalizeConnectorId(connectorId);
 
-    await ensureConnected();
-
-    return redis.del(getHealthKey(id));
+    throw new Error(
+        "CONNECTOR_HEALTH_DELETE_REQUIRES_VERIFIED_CLEANUP"
+    );
 }
 
 async function ping() {
@@ -410,10 +436,22 @@ end
         end
     end
 
-    record["connector_id"] = ARGV[1]
-    record["socket_id"] = ARGV[2]
-    record["connection_status"] = "CONNECTED"
-    record["shared_updated_at"] = ARGV[3]
+   local previousSocket = record["socket_id"]
+
+record["connector_id"] = ARGV[1]
+record["socket_id"] = ARGV[2]
+record["connection_status"] = "CONNECTED"
+
+if previousSocket ~= ARGV[2] then
+    -- A new socket cannot inherit the old socket's queue proof.
+    record["operation_status"] = "UNKNOWN"
+    record["tally_queue_idle"] = false
+    record["tally_queue_generation"] = cjson.null
+    record["tally_queue_reported_at"] = cjson.null
+    record["tally_queue_reported_at_ms"] = cjson.null
+end
+
+record["shared_updated_at"] = ARGV[3]
 
     local updated = cjson.encode(record)
 
@@ -513,13 +551,14 @@ async function updateConnectorHealthIfSocketOwner(
         end
 
 
-        for k, v in pairs(patch) do
-            if k ~= "connector_id"
-                and k ~= "socket_id"
-                and k ~= "shared_updated_at" then
-                record[k] = v
-            end
-        end
+     for k, v in pairs(patch) do
+    if k ~= "connector_id"
+        and k ~= "socket_id"
+        and k ~= "shared_updated_at"
+        and string.sub(k, 1, 12) ~= "tally_queue_" then
+        record[k] = v
+    end
+end
 
         record["connector_id"] = ARGV[3]
         record["shared_updated_at"] = ARGV[4]
@@ -550,7 +589,127 @@ async function updateConnectorHealthIfSocketOwner(
 }
 
 
+async function updateConnectorTallyQueueStatus(
+    connectorId,
+    socketId,
+    queueStatus
+) {
+    const id = normalizeConnectorId(connectorId);
+    const sid = String(socketId || "").trim();
 
+    if (!sid) {
+        throw new Error("socketId is required");
+    }
+
+    const status = queueStatus;
+
+    if (
+        !status ||
+        typeof status !== "object" ||
+        Array.isArray(status) ||
+        typeof status.idle !== "boolean" ||
+        !Number.isSafeInteger(status.pendingOperations) ||
+        status.pendingOperations < 0 ||
+        !Number.isSafeInteger(status.runningOperations) ||
+        status.runningOperations < 0 ||
+        !Number.isSafeInteger(status.operationGeneration) ||
+        status.operationGeneration < 0 ||
+        status.idle !== (
+            status.pendingOperations === 0 &&
+            status.runningOperations === 0
+        )
+    ) {
+        throw new Error("Invalid Tally queue status");
+    }
+
+    await ensureConnected();
+
+    const result = await redis.eval(
+        `
+        local raw = redis.call("GET", KEYS[1])
+
+        if not raw then
+            return "REJECTED:NO_HEALTH"
+        end
+
+        local health = cjson.decode(raw)
+
+        if health["connector_id"] ~= ARGV[1]
+            or health["socket_id"] ~= ARGV[2]
+            or health["connection_status"] ~= "CONNECTED" then
+            return "REJECTED:NOT_CONNECTED_OWNER"
+        end
+
+        local incoming = cjson.decode(ARGV[3])
+        local oldGeneration = health["tally_queue_generation"]
+
+        if type(oldGeneration) == "number" then
+            if incoming["operationGeneration"] < oldGeneration then
+                return "REJECTED:STALE_GENERATION"
+            end
+
+         if incoming["operationGeneration"] == oldGeneration then
+    if health["tally_queue_idle"] ~= incoming["idle"]
+        or health["tally_queue_pending_operations"] ~= incoming["pendingOperations"]
+        or health["tally_queue_running_operations"] ~= incoming["runningOperations"] then
+        return "REJECTED:GENERATION_CONFLICT"
+    end
+
+    -- Identical heartbeat from the currently verified socket owner.
+    -- Renew freshness using Redis server time.
+    local redisTime = redis.call("TIME")
+    local reportedAtMs =
+        tonumber(redisTime[1]) * 1000 +
+        math.floor(tonumber(redisTime[2]) / 1000)
+
+    health["tally_queue_reported_at"] = ARGV[4]
+    health["tally_queue_reported_at_ms"] = reportedAtMs
+    health["shared_updated_at"] = ARGV[4]
+
+    redis.call(
+        "SET",
+        KEYS[1],
+        cjson.encode(health),
+        "KEEPTTL"
+    )
+
+    return "UNCHANGED"
+end
+        end
+
+      local redisTime = redis.call("TIME")
+local reportedAtMs =
+    tonumber(redisTime[1]) * 1000 +
+    math.floor(tonumber(redisTime[2]) / 1000)
+
+health["tally_queue_idle"] = incoming["idle"]
+health["tally_queue_pending_operations"] = incoming["pendingOperations"]
+health["tally_queue_running_operations"] = incoming["runningOperations"]
+health["tally_queue_generation"] = incoming["operationGeneration"]
+health["tally_queue_reported_at"] = ARGV[4]
+health["tally_queue_reported_at_ms"] = reportedAtMs
+health["shared_updated_at"] = ARGV[4]
+
+        redis.call("SET", KEYS[1], cjson.encode(health), "KEEPTTL")
+
+        return "UPDATED"
+        `,
+        1,
+        getHealthKey(id),
+        id,
+        sid,
+        JSON.stringify(status),
+        new Date().toISOString()
+    );
+
+    return {
+        updated: result === "UPDATED",
+        unchanged: result === "UNCHANGED",
+        reason: result.startsWith("REJECTED:")
+            ? result.slice("REJECTED:".length)
+            : null
+    };
+}
  // Renew health-key TTL only if this socket still owns a CONNECTED record.
 async function renewConnectorSocketLease(
     connectorId,
@@ -855,6 +1014,24 @@ const inconsistentConnectorState =
         connectorLock !== connectorActive
     );
 
+const redisTime = await redis.time();
+
+const nowMs =
+    Number(redisTime[0]) * 1000 +
+    Math.floor(Number(redisTime[1]) / 1000);
+
+const reportedAtMs =
+    health?.tally_queue_reported_at_ms;
+
+const queueVerifiedIdle =
+    health?.tally_queue_idle === true &&
+    Number.isSafeInteger(health?.tally_queue_generation) &&
+    health.tally_queue_generation >= 0 &&
+    Number.isSafeInteger(reportedAtMs) &&
+    reportedAtMs >= 0 &&
+    reportedAtMs <= nowMs &&
+    nowMs - reportedAtMs <= 30000;
+
 const operationStatus =
     quarantined ||
     missingSocketMapping ||
@@ -864,7 +1041,9 @@ const operationStatus =
         ? "QUARANTINED"
         : locked || activeOperation
             ? "BUSY"
-            : "FREE";
+            : queueVerifiedIdle
+                ? "FREE"
+                : "UNKNOWN";
 
     const ttlMs = connectorLock !== null
         ? await redis.pttl(connectorLockKey)
@@ -1136,6 +1315,42 @@ if health["connector_id"] ~= ARGV[3]
     or health["connection_status"] ~= "CONNECTED" then
     return 0
 end
+
+    -- Require fresh, verified Tally queue-idle proof.
+    if health["tally_queue_idle"] ~= true then
+        return 0
+    end
+
+    local generation = health["tally_queue_generation"]
+
+    if type(generation) ~= "number"
+        or generation < 0 then
+        return 0
+    end
+
+    local reportedAt = health["tally_queue_reported_at"]
+
+    if type(reportedAt) ~= "string" then
+        return 0
+    end
+
+    -- Freshness must be checked inside Redis, atomically
+    -- with the operation lock acquisition.
+    local redisTime = redis.call("TIME")
+    local nowMs =
+        tonumber(redisTime[1]) * 1000 +
+        math.floor(tonumber(redisTime[2]) / 1000)
+
+    local reportedAtMs = tonumber(
+        health["tally_queue_reported_at_ms"]
+    )
+
+    if not reportedAtMs
+        or reportedAtMs > nowMs
+        or nowMs - reportedAtMs > 30000 then
+        return 0
+    end
+
     -- Reject existing connector/socket locks.
     if redis.call("EXISTS", KEYS[1]) == 1
         or redis.call("EXISTS", KEYS[2]) == 1 then
@@ -1506,11 +1721,18 @@ async function recoverConnectorAfterReconnect({
             KEYS[2], KEYS[3], KEYS[4], KEYS[5]
         )
 
-        health["connector_id"] = ARGV[1]
-        health["socket_id"] = ARGV[3]
-        health["connection_status"] = "CONNECTED"
-        health["operation_status"] = "FREE"
-        health["shared_updated_at"] = ARGV[5]
+       health["connector_id"] = ARGV[1]
+health["socket_id"] = ARGV[3]
+health["connection_status"] = "CONNECTED"
+health["operation_status"] = "UNKNOWN"
+
+-- Old socket queue status must not authorize new socket.
+health["tally_queue_idle"] = false
+health["tally_queue_generation"] = cjson.null
+health["tally_queue_reported_at"] = cjson.null
+health["tally_queue_reported_at_ms"] = cjson.null
+
+health["shared_updated_at"] = ARGV[5]
 
         local updated = cjson.encode(health)
 
@@ -1641,5 +1863,6 @@ module.exports = {
     clearVerifiedConnectorRecovery,
     recoverConnectorAfterReconnect,
     acquireHttpBatchExecutionGuard,
+    updateConnectorTallyQueueStatus,
     releaseHttpBatchExecutionGuard
 };
