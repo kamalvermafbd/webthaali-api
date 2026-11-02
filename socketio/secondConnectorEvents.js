@@ -391,6 +391,15 @@ console.log(
 
 socket.on("identifyConnector", async (data) => {
 
+    console.log("[CONNECTOR IDENTIFY RECEIVED]", {
+        socket_id: socket.id,
+        connected: socket.connected,
+        guid_count: Array.isArray(data?.company_guids)
+            ? data.company_guids.length
+            : 0,
+        received_at: new Date().toISOString()
+    });
+
     try {
 
         const rawQueueStatus = data?.tally_queue_status;
@@ -437,14 +446,20 @@ socket.reportedTallyQueueStatus = tallyQueueStatus;
             company_guids
         );
 
-        if (!company_guids.length) {
+       if (!company_guids.length) {
 
-            console.error(
-                "❌ No Tally company GUIDs received"
-            );
+    console.error(
+        "❌ No Tally company GUIDs received"
+    );
 
-            return;
-        }
+    socket.emit("connector:registration:status", {
+        connector_id: null,
+        registered: false,
+        reason: "NO_COMPANY_GUIDS"
+    });
+
+    return;
+}
 
         const [
             clientResult,
@@ -537,6 +552,23 @@ const connectorIds = [
     )
 ];
 
+if (connectorIds.length === 0) {
+    console.warn(
+        "⚠️ CONNECTOR IDENTIFICATION: NO DATABASE MAPPING",
+        {
+            socket_id: socket.id,
+            company_guid_count: company_guids.length
+        }
+    );
+
+    socket.emit("connector:registration:status", {
+        connector_id: null,
+        registered: false,
+        reason: "NO_CONNECTOR_MAPPING"
+    });
+
+    return;
+}
 
 for (const connectorId of connectorIds) {
     const claimed = await claimConnectorSocketOwnership(
@@ -562,10 +594,16 @@ for (const connectorId of connectorIds) {
                socket_id: socket.id,
 connector_id: connectorId,
 current_owner: claimed.health?.socket_id || null,
-reason: claimed.reason || "UNSPECIFIED"
+reason: claimed.reason || "UNSPECIFIED",
+health_status: claimed.health?.connection_status || null,
+health_operation_status: claimed.health?.operation_status || null
             }
         );
-
+socket.emit("connector:registration:status", {
+    connector_id: connectorId,
+    registered: false,
+    reason: claimed.reason || "OWNERSHIP_UNAVAILABLE"
+});
         continue;
     }
 
@@ -599,7 +637,11 @@ reason: claimed.reason || "UNSPECIFIED"
                 connector_id: connectorId
             }
         );
-
+        socket.emit("connector:registration:status", {
+    connector_id: connectorId,
+    registered: false,
+    reason: "REGISTRY_REGISTRATION_FAILED"
+});
         continue;
     }
 
@@ -682,6 +724,12 @@ reason: claimed.reason || "UNSPECIFIED"
             }
         );
 
+        socket.emit("connector:registration:status", {
+    connector_id: connectorId,
+    registered: false,
+    reason: "HEALTH_UPDATE_FAILED"
+});
+
         continue;
     }
 
@@ -692,6 +740,11 @@ reason: claimed.reason || "UNSPECIFIED"
             connector_id: connectorId
         }
     );
+    socket.emit("connector:registration:status", {
+    connector_id: connectorId,
+    registered: true,
+    socket_id: socket.id
+});
 }
 
 // ==========================================
@@ -727,14 +780,20 @@ reason: claimed.reason || "UNSPECIFIED"
             );
         }
 
-    } catch (err) {
+   } catch (err) {
 
-        console.error(
-            "❌ CONNECTOR IDENTITY ERROR:",
-            err
-        );
+    console.error(
+        "❌ CONNECTOR IDENTITY ERROR:",
+        err
+    );
 
-    }
+    socket.emit("connector:registration:status", {
+        connector_id: null,
+        registered: false,
+        reason: "IDENTIFICATION_ERROR"
+    });
+
+}
 
 });
 
