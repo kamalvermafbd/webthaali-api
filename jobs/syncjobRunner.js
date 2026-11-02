@@ -357,7 +357,7 @@ if (
             error: "DURABLE_CONNECTOR_OPERATION_CLAIM_UNCONFIRMED",
             execution_claim_token: job.execution_claim_token
         });
-
+//check
     if (marked !== true) {
         throw new Error(
             "DURABLE_CLAIM_UNCONFIRMED_MARK_NOT_CONFIRMED"
