@@ -788,7 +788,7 @@ async markWaitingConnector({
 }) {
     if (
         typeof execution_claim_token !== "string" ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
             execution_claim_token
         )
     ) {
@@ -797,48 +797,35 @@ async markWaitingConnector({
         );
     }
 
-/* 291026   
-const { data, error } = await supabase
-    .from(TABLES.SYNC_BATCHES)
-    .update({
-        batch_status: BATCH_STATUS.PENDING,
-        worker_status: "PENDING",
-        current_stage: SYNC_STAGE.WAITING_CONNECTOR,
-        error_message: null,
-        //worker_id: null,
-        locked_at: null,
-        heartbeat_at: null
-    })
-      .eq("batch_id", batch_id)
-    .eq("batch_status", "PROCESSING")
-    .eq("worker_status", "RUNNING")
-    .eq("execution_claim_token", execution_claim_token)
-    .or(
-        "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
-    )
-        .select("batch_id")
-        .maybeSingle();
+    const { data, error } = await supabase.rpc(
+        "mark_sync_batch_waiting_connector_if_not_started",
+        {
+            p_batch_id: batch_id,
+            p_execution_claim_token: execution_claim_token
+        }
+    );
 
     if (error) {
-        throw new Error("Failed to mark batch waiting: " + error.message);
+        throw new Error(
+            "Failed to mark batch waiting: " + error.message
+        );
     }
 
-    if (!data) {
-        console.log("WAITING CONNECTOR UPDATE SKIPPED — ALREADY COMPLETED/CLOSED:", batch_id);
+    if (data !== true) {
+        console.warn(
+            "[BATCH STATUS] WAITING_CONNECTOR TRANSITION REJECTED",
+            { batch_id }
+        );
+
+        return false;
     }
 
-return Boolean(data);
-*/
-console.warn(
-    "[BATCH STATUS] WAITING_CONNECTOR TRANSITION DEFERRED",
-    {
-        batch_id,
-        reason: "Previous Tally execution settlement not verified"
-    }
-);
+    console.log(
+        "[BATCH STATUS] WAITING_CONNECTOR TRANSITION VERIFIED",
+        { batch_id }
+    );
 
-return false;
-
+    return true;
 }
 
         // ----------------------------------

@@ -234,11 +234,41 @@ console.log(
         };
     }
 
-    if (
+   if (
     (response.status === 409 || response.status === 503) &&
     errorData?.success === false &&
     errorData?.error_code === "HTTP_EXECUTION_NOT_STARTED"
 ) {
+    if (
+        response.status === 503 &&
+        errorData.reason === "CONNECTOR_OFFLINE" &&
+        errorData.batch_id === job.batch_id
+    ) {
+        const waitingMarked =
+            await BatchStatusManager.markWaitingConnector({
+                batch_id: job.batch_id,
+                execution_claim_token: job.execution_claim_token
+            });
+
+        if (waitingMarked === true) {
+            return {
+                outcome: "CONNECTOR_WAITING",
+                skipped: true,
+                sync_completed: false,
+                batch_id: job.batch_id,
+                http_status: response.status
+            };
+        }
+
+        return {
+            outcome: "CONNECTOR_WAITING_TRANSITION_DEFERRED",
+            skipped: true,
+            sync_completed: false,
+            batch_id: job.batch_id,
+            http_status: response.status
+        };
+    }
+
     return {
         outcome: "HTTP_EXECUTION_NOT_STARTED",
         skipped: true,
@@ -301,29 +331,19 @@ if (
         errorData?.error_code === "TALLY_OFFLINE"
     )
 ) {
+    console.warn(
+        "CONNECTOR OFFLINE — EXECUTION NOT VERIFIED AS NOT_STARTED:",
+        job.batch_id
+    );
 
-                            const waitingMarked =
-                                await BatchStatusManager.markWaitingConnector({
-                                    batch_id: job.batch_id,
-                                    execution_claim_token: job.execution_claim_token
-                                });
-
-                            console.log(
-                                waitingMarked === true
-                                    ? "CONNECTOR OFFLINE — BATCH WAITING:"
-                                    : "CONNECTOR OFFLINE — WAITING TRANSITION DEFERRED:",
-                                job.batch_id
-                            );
-                           return {
-    outcome: waitingMarked === true
-        ? "CONNECTOR_WAITING"
-        : "CONNECTOR_WAITING_TRANSITION_DEFERRED",
-    skipped: true,
-    sync_completed: false,
-    batch_id: job.batch_id,
-    http_status: response.status
-};
-                        }
+    return {
+        outcome: "CONNECTOR_OFFLINE_EXECUTION_UNVERIFIED",
+        skipped: true,
+        sync_completed: false,
+        batch_id: job.batch_id,
+        http_status: response.status
+    };
+}
 
                   if (
     response.status === 503 &&
