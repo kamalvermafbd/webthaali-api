@@ -1278,21 +1278,21 @@ const normalizedWorkerType =
         }
         */
 
-          // Normal sync keeps existing stale-batch recovery.
-    // Connector-loss retry must not modify unrelated batches.
-    if (!options.connectorLossRetry) {
-        for (const worker of workers) {
-            try {
-                await recoverStaleBatches(worker);
-            } catch (error) {
-                console.error(
-                    "STALE BATCH RECOVERY ERROR:",
-                    worker.worker_name,
-                    error.message
-                );
-            }
+        // Preserve normal worker routing for retries.
+// Never perform stale-batch recovery during retry selection.
+if (!options.connectorLossRetry && !options.universalFailedRetry) {
+    for (const worker of workers) {
+        try {
+            await recoverStaleBatches(worker);
+        } catch (error) {
+            console.error(
+                "STALE BATCH RECOVERY ERROR:",
+                worker.worker_name,
+                error.message
+            );
         }
     }
+}
         
         for (const worker of workers) {
 

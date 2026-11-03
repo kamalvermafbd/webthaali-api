@@ -541,8 +541,8 @@ discoverRegisteredConnectors(registry || connectorRegistry);
 
 refreshRegisteredConnectorHealth(registry || connectorRegistry);
 
-// Detect expired retry reservations across all failure categories.
-// Read-only: do not reset or requeue here.
+// Detect expired CONNECTOR_OFFLINE_TIMEOUT retry reservations.
+// Recovery is limited to DB-eligible, token-matched, non-active BullMQ jobs.
 const { data: expiredRetryReservations, error: expiredRetryError } =
     await supabase
         .from("sync_batches")
@@ -558,6 +558,7 @@ const { data: expiredRetryReservations, error: expiredRetryError } =
         .eq("batch_status", "PENDING")
         .eq("worker_status", "PENDING")
         .not("retry_claim_token", "is", null)
+        .eq("retry_reservation_origin", "CONNECTOR_OFFLINE_TIMEOUT")
         .lt("retry_lease_until", new Date().toISOString())
         .order("retry_lease_until", { ascending: true })
         .limit(25);
@@ -569,20 +570,7 @@ if (expiredRetryError) {
     );
 } else {
 for (const reservation of expiredRetryReservations || []) {
-    try {
-
-// Expired retry reservation inspection only.
-// Do not invoke recovery RPC until BullMQ state and
-// previous execution settlement are independently verified.
-   console.warn(
-    "[CONNECTOR WATCHDOG] EXPIRED RETRY RECOVERY DEFERRED",
-    {
-        batch_id: reservation.batch_id,
-        retry_claim_token: reservation.retry_claim_token,
-        reason: "BullMQ job state and previous execution settlement not verified"
-    }
-);
-        
+    try {        
         const { data: assignedWorker, error: workerError } =
             await supabase
                 .from("workers")
@@ -624,8 +612,8 @@ for (const reservation of expiredRetryReservations || []) {
     (job.data?.retry_claim_token ?? null) ===
         reservation.retry_claim_token;
 
-                    // Read-only recovery decision.
-// Do not modify database or BullMQ jobs here.
+// Assess database eligibility before any recovery attempt.
+// BullMQ jobs are inspected only; never modified here.
 let recoveryDecision = "MANUAL_REVIEW";
 
 const { data: assessmentData, error: assessmentError } =
@@ -673,6 +661,94 @@ if (!job) {
     recoveryDecision = "COMPLETED_JOB";
 }
 
+// Recover only DB-eligible reservations with a matching
+// terminal BullMQ job. Queued and active jobs remain untouched.
+const recoveryCandidate =
+    databaseEligible === true &&
+    job != null &&
+    tokenMatches === true &&
+    (
+        recoveryDecision === "FAILED_JOB" ||
+        recoveryDecision === "COMPLETED_JOB"
+    );
+
+if (recoveryCandidate) {
+    const { data: recoveryData, error: recoveryError } =
+        await supabase.rpc(
+            "recover_expired_connector_retry_reservation",
+            {
+                p_batch_db_id: reservation.id,
+                p_retry_claim_token: reservation.retry_claim_token
+            }
+        );
+
+ if (recoveryError) {
+    const { data: current, error: readError } =
+        await supabase
+            .from("sync_batches")
+            .select(`
+                batch_id,
+                batch_status,
+                worker_status,
+                current_stage,
+                error_message,
+                retry_claim_token,
+                retry_lease_until,
+                retry_reservation_origin
+            `)
+            .eq("id", reservation.id)
+            .maybeSingle();
+
+    if (readError || !current) {
+        throw new Error(
+            "EXPIRED_RETRY_RECOVERY_OUTCOME_UNKNOWN"
+        );
+    }
+
+    const recoveryCommitted =
+        current.batch_id === reservation.batch_id &&
+        current.batch_status === "FAILED" &&
+        current.worker_status === "FAILED" &&
+        current.current_stage === "FAILED" &&
+        current.error_message === "CONNECTOR_OFFLINE_TIMEOUT" &&
+        current.retry_claim_token === null &&
+        current.retry_lease_until === null &&
+        current.retry_reservation_origin === null;
+
+    if (recoveryCommitted) {
+        console.warn(
+            "[CONNECTOR WATCHDOG] RECOVERY COMMIT OBSERVED AFTER RPC ERROR",
+            {
+                batch_id: reservation.batch_id,
+                action: "READBACK_CONFIRMED",
+                automatic_retry: false
+            }
+        );
+    }
+
+    throw new Error(
+        recoveryCommitted
+            ? "EXPIRED_RETRY_RECOVERY_COMMIT_OBSERVED"
+            : "EXPIRED_RETRY_RECOVERY_OUTCOME_UNKNOWN"
+    );
+}
+
+    const recovery = Array.isArray(recoveryData)
+        ? recoveryData[0]
+        : recoveryData;
+
+    if (
+        recovery?.recovered === true &&
+        recovery?.reason === "RECOVERED" &&
+        recovery?.recovered_batch_id === reservation.batch_id
+    ) {
+        recoveryDecision = "RECOVERED";
+    } else {
+        recoveryDecision =
+            `RECOVERY_REJECTED:${recovery?.reason || "INVALID_RESPONSE"}`;
+    }
+}
+
             console.warn(
     "[CONNECTOR WATCHDOG] EXPIRED RETRY ASSESSMENT:",
     {
@@ -686,7 +762,12 @@ if (!job) {
         recovery_decision: recoveryDecision,
         retry_claim_token: reservation.retry_claim_token,
         retry_lease_until: reservation.retry_lease_until,
-        action: "OBSERVE_ONLY"
+       action:
+    recoveryDecision === "RECOVERED"
+        ? "RECOVERED"
+        : recoveryDecision.startsWith("RECOVERY_REJECTED:")
+            ? "RECOVERY_REJECTED"
+            : "OBSERVE_ONLY"
     }
 );
         } finally {
