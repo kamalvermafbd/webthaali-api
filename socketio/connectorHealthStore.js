@@ -214,7 +214,8 @@ async function setConnectorHealth(
         ([key]) =>
             !key.startsWith("tally_queue_") &&
             key !== "socket_id" &&
-            key !== "connection_status"
+            key !== "connection_status" &&
+            key !== "disconnected_since_ms"
     )
 );
 
@@ -309,14 +310,15 @@ async function updateConnectorHealthAtomic(
 
         local patch = cjson.decode(ARGV[1])
 
-      for k, v in pairs(patch) do
-    -- Generic updates must not modify queue proof
-    -- or connector socket ownership.
+     for k, v in pairs(patch) do
+    -- Generic updates must not modify queue proof,
+    -- connector ownership or disconnect evidence.
     if string.sub(k, 1, 12) ~= "tally_queue_"
         and k ~= "socket_id"
         and k ~= "connection_status"
         and k ~= "connector_id"
-        and k ~= "shared_updated_at" then
+        and k ~= "shared_updated_at"
+        and k ~= "disconnected_since_ms" then
         record[k] = v
     end
 end
@@ -441,10 +443,12 @@ end
 record["connector_id"] = ARGV[1]
 record["socket_id"] = ARGV[2]
 record["connection_status"] = "CONNECTED"
+record["disconnected_since_ms"] = cjson.null
 
 if previousSocket ~= ARGV[2] then
     -- A new socket cannot inherit the old socket's queue proof.
     record["operation_status"] = "UNKNOWN"
+    record["tally_status"] = "UNKNOWN"
     record["tally_queue_idle"] = false
     record["tally_queue_generation"] = cjson.null
     record["tally_queue_reported_at"] = cjson.null
@@ -541,27 +545,37 @@ async function updateConnectorHealthIfSocketOwner(
             return 0
         end
 
-        local patch = cjson.decode(ARGV[2])
+      local patch = cjson.decode(ARGV[2])
 
-        -- A delayed heartbeat must not revive a disconnected socket.
-        -- Reconnection must first pass through claimConnectorSocketOwnership.
-        if record["connection_status"] == "DISCONNECTED"
-            and patch["connection_status"] == "CONNECTED" then
-            return 0
-        end
+-- A disconnected socket cannot update shared health again.
+-- Reconnection must first pass through claimConnectorSocketOwnership.
+if record["connection_status"] == "DISCONNECTED"
+    and patch["connection_status"] ~= "DISCONNECTED" then
+    return 0
+end
 
+local becameDisconnected =
+    patch["connection_status"] == "DISCONNECTED"
+    and record["connection_status"] ~= "DISCONNECTED"
 
-     for k, v in pairs(patch) do
+for k, v in pairs(patch) do
     if k ~= "connector_id"
         and k ~= "socket_id"
         and k ~= "shared_updated_at"
+        and k ~= "disconnected_since_ms"
         and string.sub(k, 1, 12) ~= "tally_queue_" then
         record[k] = v
     end
 end
 
-        record["connector_id"] = ARGV[3]
-        record["shared_updated_at"] = ARGV[4]
+if becameDisconnected then
+    local now = redis.call("TIME")
+    record["disconnected_since_ms"] =
+        tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+end
+
+record["connector_id"] = ARGV[3]
+record["shared_updated_at"] = ARGV[4]
 
         local updated = cjson.encode(record)
 
@@ -1041,9 +1055,12 @@ const operationStatus =
         ? "QUARANTINED"
         : locked || activeOperation
             ? "BUSY"
-            : connected && socketId && queueVerifiedIdle
-    ? "FREE"
-    : "UNKNOWN";
+            : connected &&
+              socketId &&
+              health?.tally_status === "ONLINE" &&
+              queueVerifiedIdle
+                ? "FREE"
+                : "UNKNOWN";
 
     const ttlMs = connectorLock !== null
         ? await redis.pttl(connectorLockKey)
@@ -1312,7 +1329,8 @@ local health = cjson.decode(healthRaw)
 
 if health["connector_id"] ~= ARGV[3]
     or health["socket_id"] ~= ARGV[4]
-    or health["connection_status"] ~= "CONNECTED" then
+    or health["connection_status"] ~= "CONNECTED"
+    or health["tally_status"] ~= "ONLINE" then
     return 0
 end
 
@@ -1724,7 +1742,9 @@ async function recoverConnectorAfterReconnect({
        health["connector_id"] = ARGV[1]
 health["socket_id"] = ARGV[3]
 health["connection_status"] = "CONNECTED"
+health["disconnected_since_ms"] = cjson.null
 health["operation_status"] = "UNKNOWN"
+health["tally_status"] = "UNKNOWN"
 
 -- Old socket queue status must not authorize new socket.
 health["tally_queue_idle"] = false

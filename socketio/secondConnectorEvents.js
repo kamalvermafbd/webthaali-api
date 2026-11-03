@@ -1295,6 +1295,10 @@ socket.connectorId = connectorId;
 
 socket.on("getMastersProgress", async (data) => {
 
+    if (!socket.connected) {
+        return;
+    }
+
     socket.lastHeartbeat =
         Date.now();
 
@@ -1392,7 +1396,12 @@ socket.on("getMastersProgress", async (data) => {
         // PROTOCOL HEARTBEAT
         // ============================================================
 
-        socket.on("tally:status", (data = {}) => {
+    socket.on("tally:status", async (data = {}) => {
+
+    if (!socket.connected) {
+        return;
+    }
+
     const status = data.status;
 
     if (status !== "ONLINE" && status !== "OFFLINE") {
@@ -1402,6 +1411,10 @@ socket.on("getMastersProgress", async (data) => {
     // Verified Tally status received from connector monitor.
     socket.tallyStatus = status;
     socket.lastTallyStatusAt = Date.now();
+
+    await updateOwnedSocketHealth({
+            tally_status: status
+        });
 
     socket.tallyCompanies =
         status === "ONLINE" && Array.isArray(data.companies)
@@ -1432,7 +1445,11 @@ socket.on("getMastersProgress", async (data) => {
 });
 
         socket.on("protocol:heartbeat", async () => {
-            socket.lastHeartbeat = Date.now();
+    if (!socket.connected) {
+        return;
+    }
+
+    socket.lastHeartbeat = Date.now();
 
             await updateOwnedSocketHealth({
                 connection_status: "CONNECTED",
@@ -1565,7 +1582,12 @@ socket.on("getMastersProgress", async (data) => {
         // ============================================================
 
         socket.on("tally:request:start", async (data) => {
-            socket.tallyRequestActive = true;
+
+    if (!socket.connected) {
+        return;
+    }
+
+    socket.tallyRequestActive = true;
             socket.tallyRequestStartedAt =
                 data?.timestamp || Date.now();
             socket.lastTallyActivity = Date.now();
@@ -1587,7 +1609,12 @@ socket.on("getMastersProgress", async (data) => {
         // ============================================================
 
         socket.on("tally:request:end", async (data) => {
-            socket.tallyRequestActive = false;
+
+    if (!socket.connected) {
+        return;
+    }
+
+    socket.tallyRequestActive = false;
             socket.tallyRequestStartedAt = 0;
             socket.lastTallyActivity = Date.now();
 
@@ -1623,7 +1650,12 @@ socket.on("getMastersProgress", async (data) => {
         // ============================================================
 
         socket.on("tally:request:error", async (data) => {
-            socket.tallyRequestActive = false;
+
+    if (!socket.connected) {
+        return;
+    }
+
+    socket.tallyRequestActive = false;
             socket.tallyRequestStartedAt = 0;
             socket.lastTallyActivity = Date.now();
 

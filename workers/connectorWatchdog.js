@@ -17,6 +17,10 @@ const { getSyncQueue } =
 let watchdogTimer = null;
 let watchdogRunning = false;
 
+// Serialize shared health publications per connector.
+// A failed publication must not block later publications.
+const connectorHealthPublishTails = new Map();
+
 
 // ============================================================
 // CONNECTOR HEALTH REGISTRY — CONNECTOR ID WISE
@@ -169,15 +173,44 @@ function updateConnectorHealth(
 
 connectorHealth.set(health.connector_id, health);
 
-publishConnectorHealthToSharedStore(
-    {
-        ...health,
-        reasons: Array.isArray(health.reasons)
-            ? [...health.reasons]
-            : []
-    },
-    registry
+
+
+const snapshotSocket = registry?.get?.(health.connector_id);
+
+const snapshot = {
+    ...health,
+    originating_socket_id:
+        snapshotSocket?.connected === true && snapshotSocket?.id
+            ? snapshotSocket.id
+            : null,
+    reasons: Array.isArray(health.reasons)
+        ? [...health.reasons]
+        : []
+};
+
+const previousTail =
+    connectorHealthPublishTails.get(health.connector_id) ||
+    Promise.resolve();
+const publishTask = previousTail
+    .catch(() => undefined)
+    .then(() =>
+        publishConnectorHealthToSharedStore(snapshot, registry)
+    );
+
+const nextTail = publishTask.then(
+    () => undefined,
+    () => undefined
 );
+
+connectorHealthPublishTails.set(health.connector_id, nextTail);
+
+void nextTail.then(() => {
+    if (
+        connectorHealthPublishTails.get(health.connector_id) === nextTail
+    ) {
+        connectorHealthPublishTails.delete(health.connector_id);
+    }
+});
 
 return health;
 }
@@ -205,13 +238,19 @@ async function publishConnectorHealthToSharedStore(
         const localSocket =
     registry?.get?.(health.connector_id);
 
-        if (!localSocket || !localSocket.id) {
-            console.warn(
-                "[ConnectorWatchdog] Shared health publish skipped: no local socket",
-                health.connector_id
-            );
-            return;
-        }
+    if (
+    !health.originating_socket_id ||
+    !localSocket ||
+    !localSocket.id ||
+    localSocket.connected !== true ||
+    localSocket.id !== health.originating_socket_id
+) {
+ console.warn(
+    "[ConnectorWatchdog] Shared health publish skipped: originating socket missing, disconnected, or changed",
+    health.connector_id
+);
+    return;
+}
 
         const ownerSocketId = sharedHealth?.socket_id;
 
@@ -227,13 +266,22 @@ async function publishConnectorHealthToSharedStore(
             return;
         }
 
+        if (
+    localSocket.connected !== true ||
+            registry?.get?.(health.connector_id) !== localSocket
+        ) {
+            console.warn(
+                "[ConnectorWatchdog] Shared health publish skipped: socket disconnected or registry owner changed",
+                health.connector_id
+            );
+            return;
+        }
         const result =
             await connectorHealthStore.updateConnectorHealthIfSocketOwner(
                 health.connector_id,
                 localSocket.id,
                 {
                     responsiveness: health.responsiveness,
-                    tally_status: health.tally_status,
                     heartbeat_status: health.heartbeat_status,
                     health_status: health.health_status,
                     active_operation: health.active_operation,
@@ -408,18 +456,68 @@ function refreshRegisteredConnectorHealth(registry = connectorRegistry) {
 
 
 
-function ensureWaitingConnectorSince(supabase, batch) {
+async function ensureWaitingConnectorSince(supabase, batch) {
     const timestamp = batch.waiting_connector_since;
 
-    if (!timestamp) {
+    if (timestamp) {
+        const waitingSince = new Date(timestamp).getTime();
+
+        if (Number.isFinite(waitingSince)) {
+            return waitingSince;
+        }
+    }
+
+    if (
+        batch.batch_status !== "PROCESSING" ||
+        batch.worker_status !== "RUNNING" ||
+        !batch.execution_claim_token
+    ) {
         return Date.now();
     }
 
-    const waitingSince = new Date(timestamp).getTime();
+    const now = new Date().toISOString();
 
-    return Number.isFinite(waitingSince)
-        ? waitingSince
-        : Date.now();
+    const { data, error } = await supabase
+        .from("sync_batches")
+        .update({ waiting_connector_since: now })
+        .eq("batch_id", batch.batch_id)
+        .eq("batch_status", "PROCESSING")
+        .eq("worker_status", "RUNNING")
+        .eq("execution_claim_token", batch.execution_claim_token)
+        .is("waiting_connector_since", null)
+        .select("waiting_connector_since")
+        .maybeSingle();
+
+    if (error) {
+        throw error;
+    }
+
+    if (data?.waiting_connector_since) {
+        return new Date(data.waiting_connector_since).getTime();
+    }
+
+    const { data: current, error: readError } = await supabase
+        .from("sync_batches")
+        .select("waiting_connector_since")
+        .eq("batch_id", batch.batch_id)
+        .eq("batch_status", "PROCESSING")
+        .eq("worker_status", "RUNNING")
+        .eq("execution_claim_token", batch.execution_claim_token)
+        .maybeSingle();
+
+    if (readError) {
+        throw readError;
+    }
+
+    const persisted = current?.waiting_connector_since
+        ? new Date(current.waiting_connector_since).getTime()
+        : NaN;
+
+    if (!Number.isFinite(persisted)) {
+        throw new Error("OFFLINE_TIMER_NOT_VERIFIED");
+    }
+
+    return persisted;
 }
 
 
@@ -1091,36 +1189,94 @@ if (!socket) {
 
     const now = Date.now();
 
+   
    // =================================================
 // RUNNING BATCH + CONNECTOR LOST
 // Observe connector loss; do not automatically
 // restart or fail an unsettled Tally execution.
 // =================================================
+   if (
+    batch.batch_status === "PROCESSING" &&
+    batch.worker_status === "RUNNING"
+) {
+ const globalHealth =
+    await connectorHealthStore.getConnectorHealth(
+        connectorId
+    );
+
+const globallyOffline =
+    globalHealth?.connection_status === "DISCONNECTED" &&
+    Boolean(globalHealth?.socket_id);
+
+if (!globallyOffline) {
     if (
-        batch.batch_status === "PROCESSING" &&
-        batch.worker_status === "RUNNING"
+        globalHealth?.connection_status === "CONNECTED" &&
+        globalHealth?.socket_id &&
+        batch.waiting_connector_since &&
+        batch.execution_claim_token
     ) {
+        const { error: resetError } = await supabase
+            .from("sync_batches")
+            .update({ waiting_connector_since: null })
+            .eq("batch_id", batch.batch_id)
+            .eq("batch_status", "PROCESSING")
+            .eq("worker_status", "RUNNING")
+            .eq("execution_claim_token", batch.execution_claim_token)
+            .eq("waiting_connector_since", batch.waiting_connector_since);
 
-        console.log(
-            "⏳ CONNECTOR WATCHDOG: CONNECTOR LOST, WAITING FOR RECOVERY",
-            {
-                batch_id: batch.batch_id,
-                company_code: companyCode,
-                connector_id: connectorId
-            }
-        );
-
-
-console.warn(
-    "[CONNECTOR WATCHDOG] RECOVERY DEFERRED",
-    {
-        batch_id: batch.batch_id,
-        reason: "Connector socket missing; previous execution settlement unverified"
+        if (resetError) throw resetError;
     }
-);
 
-continue;
-    }
+    console.log(
+        "[CONNECTOR WATCHDOG] OFFLINE TIMER DEFERRED",
+        {
+            batch_id: batch.batch_id,
+            connector_id: connectorId,
+            global_connection_status:
+                globalHealth?.connection_status ?? "UNKNOWN",
+            global_tally_status:
+                globalHealth?.tally_status ?? "UNKNOWN",
+            reason: "Global offline state not confirmed"
+        }
+    );
+
+    continue;
+}
+    const waitingSince = await ensureWaitingConnectorSince(
+        supabase,
+        batch
+    );
+
+    console.log(
+        "[CONNECTOR WATCHDOG] OFFLINE TIMER",
+        {
+            batch_id: batch.batch_id,
+            connector_id: connectorId,
+            offline_age_seconds: Math.floor(
+                (Date.now() - waitingSince) / 1000
+            )
+        }
+    );
+
+    console.log(
+        "⏳ CONNECTOR WATCHDOG: CONNECTOR LOST, WAITING FOR RECOVERY",
+        {
+            batch_id: batch.batch_id,
+            company_code: companyCode,
+            connector_id: connectorId
+        }
+    );
+
+    console.warn(
+        "[CONNECTOR WATCHDOG] RECOVERY DEFERRED",
+        {
+            batch_id: batch.batch_id,
+            reason: "Connector socket missing; previous execution settlement unverified"
+        }
+    );
+
+    continue;
+}
 
     // =================================================
     // ALREADY WAITING FOR CONNECTOR
@@ -1188,31 +1344,67 @@ const waitingAge =
                 // TALLY OFFLINE / CONNECTION RECOVERY
                 // =================================================
 
-                if (
-                    batch.batch_status === "PROCESSING" &&
-                    batch.worker_status === "RUNNING" &&
-                    socket.tallyStatus === "OFFLINE"
-                ) {
+              if (
+    batch.batch_status === "PROCESSING" &&
+    batch.worker_status === "RUNNING" &&
+    socket.tallyStatus === "OFFLINE"
+) {
+    const globalHealth =
+    await connectorHealthStore.getConnectorHealth(
+        connectorId
+    );
 
-                    console.log(
-                        "⏳ CONNECTOR WATCHDOG: TALLY OFFLINE, WAITING FOR RECOVERY",
-                        {
-                            batch_id: batch.batch_id,
-                            company_code: companyCode,
-                            connector_id: connectorId
-                        }
-                    );
+if (
+    globalHealth?.connection_status !== "CONNECTED" ||
+    globalHealth?.tally_status !== "OFFLINE" ||
+    globalHealth?.socket_id !== socket.id
+) {
+    console.log(
+        "[CONNECTOR WATCHDOG] TALLY OFFLINE TIMER DEFERRED",
+        {
+            batch_id: batch.batch_id,
+            connector_id: connectorId,
+            reason: "Global Tally OFFLINE not verified for socket owner"
+        }
+    );
 
-              console.warn(
-    "[CONNECTOR WATCHDOG] RECOVERY DEFERRED",
-    {
-        batch_id: batch.batch_id,
-        reason: "Tally offline; previous execution settlement unverified"
-    }
-);
+    continue;
+}
+    const waitingSince = await ensureWaitingConnectorSince(
+        supabase,
+        batch
+    );
 
-continue;
-                }
+    console.log(
+        "[CONNECTOR WATCHDOG] TALLY OFFLINE TIMER",
+        {
+            batch_id: batch.batch_id,
+            connector_id: connectorId,
+            offline_age_seconds: Math.floor(
+                (Date.now() - waitingSince) / 1000
+            )
+        }
+    );
+
+    console.log(
+        "⏳ CONNECTOR WATCHDOG: TALLY OFFLINE, WAITING FOR RECOVERY",
+        {
+            batch_id: batch.batch_id,
+            company_code: companyCode,
+            connector_id: connectorId
+        }
+    );
+
+    console.warn(
+        "[CONNECTOR WATCHDOG] RECOVERY DEFERRED",
+        {
+            batch_id: batch.batch_id,
+            reason: "Tally offline; previous execution settlement unverified"
+        }
+    );
+
+    continue;
+}
                 // =================================================
                 // CASE B
                 // Connector is ONLINE
@@ -1590,29 +1782,62 @@ continue;
                 // -------------------------------------------------
                 // Healthy connector
                 // -------------------------------------------------
+if (
+    heartbeatAge >= 0 &&
+    heartbeatAge < HEARTBEAT_TIMEOUT_MS &&
+    socket.connected === true &&
+    socket.tallyStatus === "ONLINE"
+) {
+    const globalWatchdog =
+        await connectorHealthStore.getConnectorWatchdogStatus(
+            connectorId
+        );
 
-                if (
-                    heartbeatAge <
-                    HEARTBEAT_TIMEOUT_MS
-                ) {
+    const globallyHealthy =
+    globalWatchdog?.connection_status === "CONNECTED" &&
+    globalWatchdog?.socket_id === socket.id;
 
-                    console.log(
-                        "💓 CONNECTOR WATCHDOG: ALIVE",
-                        {
-                            batch_id: batch.batch_id,
-                            company_code: companyCode,
-                            connector_id: connectorId,
-                            heartbeat_age_seconds:
-                                heartbeatAgeSeconds,
-                            stage:
-                                batch.current_stage,
-                            action:
-                                batch.current_action
-                        }
-                    );
+    if (
+        globallyHealthy &&
+        batch.batch_status === "PROCESSING" &&
+        batch.worker_status === "RUNNING" &&
+        batch.execution_claim_token &&
+        batch.waiting_connector_since
+    ) {
+        const { error: resetError } = await supabase
+            .from("sync_batches")
+            .update({ waiting_connector_since: null })
+            .eq("batch_id", batch.batch_id)
+            .eq("batch_status", "PROCESSING")
+            .eq("worker_status", "RUNNING")
+            .eq(
+                "execution_claim_token",
+                batch.execution_claim_token
+            )
+            .eq(
+                "waiting_connector_since",
+                batch.waiting_connector_since
+            );
 
-                    continue;
-                }
+        if (resetError) {
+            throw resetError;
+        }
+    }
+
+    console.log(
+        "💓 CONNECTOR WATCHDOG: ALIVE",
+        {
+            batch_id: batch.batch_id,
+            company_code: companyCode,
+            connector_id: connectorId,
+            heartbeat_age_seconds: heartbeatAgeSeconds,
+            stage: batch.current_stage,
+            action: batch.current_action
+        }
+    );
+
+    continue;
+}
 
              
 console.log(
