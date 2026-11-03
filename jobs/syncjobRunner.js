@@ -266,6 +266,16 @@ console.log(
             continue;
         }
 
+      console.log("🔎 OFFLINE TIMEOUT TOKEN DIAGNOSTIC:", {
+    batch_id: job.batch_id,
+    token_type: typeof job.execution_claim_token,
+    token_length: job.execution_claim_token?.length,
+    token_valid_uuid:
+        typeof job.execution_claim_token === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            job.execution_claim_token
+        )
+});
         const failedMarked =
             await BatchStatusManager.markConnectorOfflineTimeoutFailed({
                 batch_id: job.batch_id,
