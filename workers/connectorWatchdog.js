@@ -615,14 +615,14 @@ for (const reservation of expiredRetryReservations || []) {
     const job = await queue.getJob(bullJobId);
     const jobState = job ? await job.getState() : "NOT_FOUND";
             const tokenMatches =
-                job !== undefined &&
-                job !== null &&
-                String(job.data?.batch_db_id) === String(reservation.id) &&
-                job.data?.worker_name === assignedWorker.worker_name &&
-                String(job.data?.worker_id) === String(assignedWorker.id) &&
-                String(job.data?.server_id) === String(assignedWorker.server_id) &&
-                (job.data?.retry_claim_token ?? null) ===
-                    reservation.retry_claim_token;
+    job != null &&
+    job.data?.batch_id === reservation.batch_id &&
+    String(job.data?.batch_db_id) === String(reservation.id) &&
+    job.data?.worker_name === assignedWorker.worker_name &&
+    String(job.data?.worker_id) === String(assignedWorker.id) &&
+    String(job.data?.server_id) === String(assignedWorker.server_id) &&
+    (job.data?.retry_claim_token ?? null) ===
+        reservation.retry_claim_token;
 
                     // Read-only recovery decision.
 // Do not modify database or BullMQ jobs here.
