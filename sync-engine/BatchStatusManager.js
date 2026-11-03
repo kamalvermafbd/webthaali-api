@@ -848,7 +848,7 @@ async markConnectorOfflineTimeoutFailed({
 }) {
     if (
         typeof execution_claim_token !== "string" ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
             execution_claim_token
         )
     ) {
