@@ -65,45 +65,20 @@ async function rollbackConnectorLossRetry(
     originalError,
     retryClaimToken
 ) {
-    const { data: rolledBack, error: rollbackError } = await supabase
-        .from("sync_batches")
-      .update({
-    batch_status: "FAILED",
-    worker_status: "FAILED",
-    worker_id: null,
-    locked_at: null,
-    heartbeat_at: null,
-    retry_claim_token: null,
-    retry_lease_until: null,
-    error_message: originalError
-})
-.eq("id", batch.id)
-.eq("batch_status", "PENDING")
-.eq("worker_status", "PENDING")
-.eq("worker_id", workerName)
-.eq("retry_claim_token", retryClaimToken)
-.select("id")
-        .maybeSingle();
+    console.error(
+        "[CONNECTOR RETRY] AUTOMATIC ROLLBACK DEFERRED",
+        {
+            batch_id: batch.batch_id,
+            worker_name: workerName,
+            retry_claim_token: retryClaimToken,
+            original_error: originalError,
+            reason: "ATOMIC_QUEUE_RECONCILIATION_REQUIRED"
+        }
+    );
 
-    if (rollbackError) {
-        console.error(
-            "CONNECTOR RETRY ROLLBACK FAILED:",
-            batch.batch_id,
-            rollbackError.message
-        );
-        return false;
-    }
-
-    if (!rolledBack) {
-        console.error(
-            "CONNECTOR RETRY ROLLBACK SKIPPED: RESERVATION NOT OWNED",
-            batch.batch_id,
-            workerName
-        );
-        return false;
-    }
-
-    return true;
+    // Never convert a potentially claimed/queued retry
+    // back to FAILED using a non-atomic database update.
+    return false;
 }
 
 
@@ -158,13 +133,20 @@ async function dispatchConnectorLossRetry(batch) {
         throw new Error("Retry batch id missing");
     }
 
-        // Do not retry until the previous Tally execution
-    // has been independently verified as settled.
+     // Only the exact offline-timeout failure may enter
+// the dedicated atomic recovery path.
+const isOfflineTimeout =
+    batch.batch_status === "FAILED" &&
+    batch.worker_status === "FAILED" &&
+    batch.current_stage === "FAILED" &&
+    batch.error_message === "CONNECTOR_OFFLINE_TIMEOUT";
+
+if (!isOfflineTimeout) {
     console.warn(
         "[CONNECTOR RETRY] DISPATCH DEFERRED",
         {
             batch_id: batch.batch_id,
-            reason: "Previous Tally execution settlement not independently verified"
+            reason: "EXECUTION_SETTLEMENT_UNVERIFIED"
         }
     );
 
@@ -173,6 +155,7 @@ async function dispatchConnectorLossRetry(batch) {
         queued: false,
         reason: "EXECUTION_SETTLEMENT_UNVERIFIED"
     };
+}
    
     const originalError = String(batch.error_message || "");
 
@@ -285,7 +268,7 @@ const retryClaimToken = randomUUID();
 
 // Atomically claim the batch with this ownership token.
 const { data: claimResult, error: claimError } = await supabase
-    .rpc("claim_latest_connector_loss_retry", {
+    .rpc("claim_connector_offline_timeout_retry", {
         p_company_code: batch.company_code,
         p_tally_owner: batch.tally_owner,
         p_expected_batch_id: batch.batch_id,
@@ -322,32 +305,33 @@ const { data: claimResult, error: claimError } = await supabase
     }
 
     // Reload the claimed row so queue payload uses current database state.
-    const { data: claimed, error: loadClaimedError } = await supabase
+ const { data: claimed, error: loadClaimedError } = await supabase
     .from("sync_batches")
     .select("*")
+    .eq("id", batch.id)
     .eq("batch_id", batch.batch_id)
     .eq("worker_id", workerConfig.worker_name)
     .eq("batch_status", "PENDING")
     .eq("worker_status", "PENDING")
+    .eq("current_stage", "PENDING")
     .eq("retry_claim_token", retryClaimToken)
     .gt("retry_lease_until", new Date().toISOString())
     .maybeSingle();
 
 
   if (loadClaimedError || !claimed) {
-    await rollbackConnectorLossRetry(
-        batch,
-        workerConfig.worker_name,
-        originalError,
-        retryClaimToken
+    const uncertainError = new Error(
+        `CONNECTOR_RETRY_CLAIM_RELOAD_UNCERTAIN: ${batch.batch_id}: ${
+            loadClaimedError?.message || "Claimed batch not found"
+        }`
     );
 
-        throw new Error(
-            `Retry claimed but batch reload failed for ${batch.batch_id}: ${
-                loadClaimedError?.message || "Claimed batch not found"
-            }`
-        );
-    }
+    uncertainError.code = "CONNECTOR_RETRY_CLAIM_RELOAD_UNCERTAIN";
+
+    // Preserve reservation for independent reconciliation.
+    // Do not rollback when ownership/read outcome is uncertain.
+    throw uncertainError;
+}
 
 
     try {
@@ -455,9 +439,20 @@ const { data: claimResult, error: claimError } = await supabase
             throw queueError;
         }
 
-        if (queueCheck.state === "UNKNOWN") {
-            throw queueError;
+        if (queueCheck.state !== "NOT_FOUND") {
+    console.error(
+        "CONNECTOR RETRY QUEUE STATE UNCERTAIN",
+        {
+            batch_id: batch.batch_id,
+            queue_state: queueCheck.state,
+            assignment_matches: queueCheck.matches
         }
+    );
+
+    // Never rollback when a BullMQ job exists
+    // or its state cannot be conclusively reconciled.
+    throw queueError;
+}
 
       const rolledBack = await rollbackConnectorLossRetry(
     batch,
@@ -466,14 +461,18 @@ const { data: claimResult, error: claimError } = await supabase
     retryClaimToken
 );
 
-        if (!rolledBack) {
-            console.error(
-                "CONNECTOR RETRY RESERVATION NEEDS REVIEW:",
-                batch.batch_id
-            );
-        }
+if (!rolledBack) {
+    const uncertainError = new Error(
+        `CONNECTOR_RETRY_RESERVATION_UNCERTAIN: ${batch.batch_id}`
+    );
 
-        throw queueError;
+    uncertainError.code = "CONNECTOR_RETRY_RESERVATION_UNCERTAIN";
+    uncertainError.cause = queueError;
+
+    throw uncertainError;
+}
+
+throw queueError;
     }
 
 

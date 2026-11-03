@@ -628,6 +628,30 @@ for (const reservation of expiredRetryReservations || []) {
 // Do not modify database or BullMQ jobs here.
 let recoveryDecision = "MANUAL_REVIEW";
 
+const { data: assessmentData, error: assessmentError } =
+    await supabase.rpc(
+        "assess_expired_connector_retry_reservation",
+        {
+            p_batch_db_id: reservation.id,
+            p_retry_claim_token: reservation.retry_claim_token
+        }
+    );
+
+if (assessmentError) {
+    throw new Error(
+        `RETRY_ASSESSMENT_FAILED: ${assessmentError.message}`
+    );
+}
+
+const assessment = Array.isArray(assessmentData)
+    ? assessmentData[0]
+    : assessmentData;
+
+const databaseEligible =
+    assessment?.eligible === true &&
+    assessment?.reason === "DB_ELIGIBLE_BULLMQ_UNVERIFIED" &&
+    assessment?.batch_id === reservation.batch_id;
+
 if (!job) {
     recoveryDecision = "JOB_NOT_FOUND";
 } else if (!tokenMatches) {
@@ -650,18 +674,21 @@ if (!job) {
 }
 
             console.warn(
-                "[CONNECTOR WATCHDOG] EXPIRED RETRY BULLMQ INSPECTION:",
-                {
-                    batch_id: reservation.batch_id,
-                    queue_name: assignedWorker.queue_name,
-                    job_found: Boolean(job),
-                  job_state: jobState,
-                    token_matches: tokenMatches,
-                    recovery_decision: recoveryDecision,
-                    retry_claim_token: reservation.retry_claim_token,
-                    retry_lease_until: reservation.retry_lease_until
-                }
-            );
+    "[CONNECTOR WATCHDOG] EXPIRED RETRY ASSESSMENT:",
+    {
+        batch_id: reservation.batch_id,
+        queue_name: assignedWorker.queue_name,
+        job_found: Boolean(job),
+        job_state: jobState,
+        token_matches: tokenMatches,
+        database_eligible: databaseEligible,
+        database_reason: assessment?.reason ?? "NO_ASSESSMENT",
+        recovery_decision: recoveryDecision,
+        retry_claim_token: reservation.retry_claim_token,
+        retry_lease_until: reservation.retry_lease_until,
+        action: "OBSERVE_ONLY"
+    }
+);
         } finally {
             await queue.close();
         }
