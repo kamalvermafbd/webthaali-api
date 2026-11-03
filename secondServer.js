@@ -39706,16 +39706,18 @@ if (workerBatchId) {
 
     }
 
-    socket =
-        registry.get(connector_id);
+  socket =
+    registry.get(connector_id);
 
-    console.log(
-        "SOCKET FOUND :",
-        !!socket
-    );
+console.log(
+    "SOCKET STATUS :",
+    {
+        found: !!socket,
+        connected: socket?.connected === true
+    }
+);
 
-    if (!socket) {
-
+if (!socket || socket.connected !== true) {
        return res.status(503).json({
     success: false,
     error: "Connector offline",
@@ -39725,6 +39727,20 @@ if (workerBatchId) {
 });
 
     }
+
+    // Tally application offline before execution
+if (
+    socket.connected === true &&
+    socket.tallyStatus === "OFFLINE"
+) {
+    return res.status(503).json({
+        success: false,
+        error: "Tally application offline",
+        error_code: "HTTP_EXECUTION_NOT_STARTED",
+        reason: "CONNECTOR_OFFLINE",
+        batch_id: sync_batch_id
+    });
+}
 
 
     /* 030926
