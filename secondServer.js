@@ -44151,11 +44151,28 @@ const failureError = isConnectorLoss
       }
     )
   : err;
-          await BatchStatusManager.markFailed({
-          batch_id: sync_batch_id,
-          error: failureError,
-          execution_claim_token: executionClaimToken
-      }); 
+         const connectorOutcomeUncertain =
+    err?.outcomeUnknown === true ||
+    err?.code === "GET_MASTERS_TRANSFER_OUTCOME_UNKNOWN" ||
+    err?.durableClaimUnconfirmed === true ||
+    err?.durableVerificationUnconfirmed === true ||
+    (
+        err?.requestDispatched === true &&
+        err?.connectorResponseReceived !== true
+    );
+
+if (connectorOutcomeUncertain) {
+    console.error(
+        "CONNECTOR OUTCOME UNCERTAIN — FAILURE TRANSITION DEFERRED:",
+        sync_batch_id
+    );
+} else {
+    await BatchStatusManager.markFailed({
+        batch_id: sync_batch_id,
+        error: failureError,
+        execution_claim_token: executionClaimToken
+    });
+}
 
         }
 

@@ -19,13 +19,14 @@ async function runJob(job, serverUrl) {
                 job.batch_id
             );
 
-            const MAX_ATTEMPTS = 1;
+        
+let offlineSince = null;
 
-            for (
-                let attempt = 1;
-                attempt <= MAX_ATTEMPTS;
-                attempt++
-           ) {
+for (
+    let attempt = 1;
+    ;
+    attempt++
+) {
 
     let httpDispatchStarted = false;
 let httpResponseReceived = false;
@@ -116,10 +117,9 @@ return {
     }
 
     console.log(
-        `TALLY_SYNC ATTEMPT ${attempt}/${MAX_ATTEMPTS}:`,
-        job.batch_id
-    );
-
+    `TALLY_SYNC ATTEMPT ${attempt}:`,
+    job.batch_id
+);
 let response;
 
 
@@ -244,24 +244,84 @@ console.log(
         errorData.reason === "CONNECTOR_OFFLINE" &&
         errorData.batch_id === job.batch_id
     ) {
-        const waitingMarked =
-            await BatchStatusManager.markWaitingConnector({
+
+                       if (offlineSince === null) {
+            offlineSince = Date.now();
+        }
+
+        const remainingMs =
+            30000 - (Date.now() - offlineSince);
+
+        if (remainingMs > 0) {
+            console.log(
+                "CONNECTOR OFFLINE — RECOVERY WAIT:",
+                job.batch_id,
+                Math.ceil(remainingMs / 1000)
+            );
+
+            await new Promise(resolve =>
+                setTimeout(resolve, Math.min(2000, remainingMs))
+            );
+
+            continue;
+        }
+
+        const failedMarked =
+            await BatchStatusManager.markConnectorOfflineTimeoutFailed({
                 batch_id: job.batch_id,
                 execution_claim_token: job.execution_claim_token
             });
 
-        if (waitingMarked === true) {
-            return {
-                outcome: "CONNECTOR_WAITING",
-                skipped: true,
-                sync_completed: false,
-                batch_id: job.batch_id,
-                http_status: response.status
-            };
-        }
+      if (failedMarked !== true) {
+    console.error(
+        "⛔ CONNECTOR OFFLINE TIMEOUT — ATOMIC FAILURE REJECTED:",
+        job.batch_id
+    );
+
+    let verifiedBatch;
+
+    try {
+        verifiedBatch = await BatchStatusManager.loadBatch({
+            batch_id: job.batch_id
+        });
+    } catch (verifyError) {
+        throw new Error(
+            "CONNECTOR_OFFLINE_TIMEOUT_OUTCOME_UNKNOWN: " +
+            "Transition rejected and database verification failed: " +
+            verifyError.message
+        );
+    }
+
+    const timeoutConfirmed =
+        verifiedBatch?.batch_id === job.batch_id &&
+        typeof verifiedBatch.execution_claim_token === "string" &&
+        verifiedBatch.execution_claim_token.toLowerCase() ===
+            job.execution_claim_token.toLowerCase() &&
+        verifiedBatch.batch_status === "FAILED" &&
+        verifiedBatch.worker_status === "FAILED" &&
+        verifiedBatch.current_stage === "FAILED" &&
+        verifiedBatch.error_message === "CONNECTOR_OFFLINE_TIMEOUT" &&
+        verifiedBatch.connector_retry_ready === false;
+
+    if (timeoutConfirmed) {
+        return {
+            outcome: "CONNECTOR_OFFLINE_TIMEOUT",
+            skipped: true,
+            sync_completed: false,
+            batch_id: job.batch_id,
+            http_status: response.status
+        };
+    }
+
+    throw new Error(
+        "CONNECTOR_OFFLINE_TIMEOUT_TRANSITION_REJECTED: " +
+        "Expected terminal state not verified for batch " +
+        job.batch_id
+    );
+}
 
         return {
-            outcome: "CONNECTOR_WAITING_TRANSITION_DEFERRED",
+            outcome: "CONNECTOR_OFFLINE_TIMEOUT",
             skipped: true,
             sync_completed: false,
             batch_id: job.batch_id,

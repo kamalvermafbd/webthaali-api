@@ -596,6 +596,7 @@ if (!job) {
                     batch_status,
                     worker_status,
                     worker_id,
+                    execution_claim_token,
                     started_at,
                     heartbeat_at,
                     last_activity_at,
@@ -739,7 +740,102 @@ if (
         continue;
     }
 
-  
+  // ----------------------------------------------------
+// FAILED RECOVERY — READ-ONLY SETTLEMENT ASSESSMENT
+// ----------------------------------------------------
+
+let httpSettled = false;
+let connectorSettled = false;
+let settlementReason = "UNVERIFIED";
+
+if (!batch.execution_claim_token) {
+    settlementReason = "EXECUTION_CLAIM_TOKEN_MISSING";
+} else {
+    try {
+        const [httpResponse, connectorResponse] =
+            await Promise.all([
+                supabase.rpc("assess_sync_http_settlement", {
+                    p_batch_id: batch.batch_id,
+                    p_execution_claim_token: batch.execution_claim_token
+                }),
+                supabase.rpc("assess_sync_connector_settlement", {
+                    p_batch_id: batch.batch_id,
+                    p_execution_claim_token: batch.execution_claim_token
+                })
+            ]);
+
+        if (httpResponse.error || connectorResponse.error) {
+            settlementReason = "SETTLEMENT_RPC_FAILED";
+        } else {
+            const http = Array.isArray(httpResponse.data)
+                ? httpResponse.data[0]
+                : httpResponse.data;
+
+            const connector = Array.isArray(connectorResponse.data)
+                ? connectorResponse.data[0]
+                : connectorResponse.data;
+
+            httpSettled =
+                http?.decision === "TERMINATED" &&
+                http?.execution_state === "TERMINATED" &&
+                Boolean(http?.terminated_at) &&
+                http?.terminal_outcome === "HANDLER_COMPLETED_SUCCESS";
+
+            const total = Number(connector?.operation_count);
+            const prepared = Number(connector?.prepared_count);
+            const dispatchPossible =
+                Number(connector?.dispatch_possible_count);
+            const verified = Number(connector?.verified_count);
+            const unknown = Number(connector?.unknown_count);
+
+            connectorSettled =
+                [
+                    total,
+                    prepared,
+                    dispatchPossible,
+                    verified,
+                    unknown
+                ].every(Number.isSafeInteger) &&
+                total >= 0 &&
+                prepared === 0 &&
+                dispatchPossible === 0 &&
+                unknown === 0 &&
+                verified === total &&
+                (
+                    connector?.decision === "HAS_VERIFIED_OPERATIONS" ||
+                    (
+                        connector?.decision === "NO_OPERATIONS" &&
+                        total === 0
+                    )
+                );
+
+            settlementReason =
+                httpSettled && connectorSettled
+                    ? "SETTLEMENT_ASSESSMENT_PASSED"
+                    : "EXECUTION_SETTLEMENT_UNVERIFIED";
+        }
+    } catch (error) {
+        settlementReason = "SETTLEMENT_ASSESSMENT_ERROR";
+
+        console.error(
+            "[CONNECTOR WATCHDOG] SETTLEMENT ASSESSMENT ERROR:",
+            batch.batch_id,
+            error
+        );
+    }
+}
+
+console.log(
+    "[CONNECTOR WATCHDOG] FAILED SETTLEMENT ASSESSMENT",
+    {
+        batch_id: batch.batch_id,
+        http_settled: httpSettled,
+        connector_settled: connectorSettled,
+        settlement_reason: settlementReason,
+        recovery_allowed: false,
+        action: "OBSERVE_ONLY"
+    }
+);
     // ----------------------------------------------------
 // UNIVERSAL FAILED RECOVERY — CONNECTOR HEALTH VERIFIED
 // All FAILED error categories can reach this evaluation.
@@ -1292,22 +1388,72 @@ const globalWatchdog =
     );
 
 if (
+    !globalWatchdog ||
     globalWatchdog.operation_status !== "FREE" ||
-    !globalWatchdog.available
+    globalWatchdog.available !== true
 ) {
     console.log(
         "⏳ CONNECTOR WATCHDOG: GLOBAL CONNECTOR NOT FREE",
         {
             batch_id: batch.batch_id,
             connector_id: connectorId,
-            operation_status: globalWatchdog.operation_status,
-            lock_ttl_ms: globalWatchdog.lock_ttl_ms
+            operation_status: globalWatchdog?.operation_status ?? "UNKNOWN",
+lock_ttl_ms: globalWatchdog?.lock_ttl_ms ?? null
         }
     );
 
     continue;
 }
 
+// Verify previous HTTP execution settlement before recovery.
+if (!batch.execution_claim_token) {
+    console.warn(
+        "[CONNECTOR WATCHDOG] RECOVERY DEFERRED: CLAIM MISSING",
+        { batch_id: batch.batch_id }
+    );
+    continue;
+}
+
+const { data: settlement, error: settlementError } =
+    await supabase.rpc("assess_sync_http_settlement", {
+        p_batch_id: batch.batch_id,
+        p_execution_claim_token: batch.execution_claim_token
+    });
+
+if (settlementError || !settlement) {
+    console.warn(
+        "[CONNECTOR WATCHDOG] RECOVERY DEFERRED: SETTLEMENT CHECK FAILED",
+        {
+            batch_id: batch.batch_id,
+            error: settlementError?.message || "No settlement result"
+        }
+    );
+    continue;
+}
+
+const httpNotStarted = settlement.decision === "NOT_STARTED";
+
+console.log(
+    "[CONNECTOR WATCHDOG] HTTP SETTLEMENT ASSESSED",
+    {
+        batch_id: batch.batch_id,
+        decision: settlement.decision,
+        http_not_started: httpNotStarted,
+        recovery_allowed: false
+    }
+);
+if (!httpNotStarted) {
+    console.warn(
+        "[CONNECTOR WATCHDOG] RECOVERY BLOCKED: HTTP NOT PROVEN UNSTARTED",
+        {
+            batch_id: batch.batch_id,
+            settlement_decision: settlement.decision,
+            action: "MANUAL_REVIEW_REQUIRED"
+        }
+    );
+
+    continue;
+}
 console.warn(
     "[CONNECTOR WATCHDOG] WAITING_CONNECTOR RESTART DEFERRED",
     {

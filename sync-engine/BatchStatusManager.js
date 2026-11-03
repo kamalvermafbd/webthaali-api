@@ -677,14 +677,24 @@ const originalError =
 const isUncertainOutcome =
     error?.outcomeUnknown === true ||
     error?.code === "GET_MASTERS_TRANSFER_OUTCOME_UNKNOWN" ||
+    error?.durableClaimUnconfirmed === true ||
+    error?.durableVerificationUnconfirmed === true ||
     (
         error?.requestDispatched === true &&
         error?.connectorResponseReceived !== true
     );
 
-const finalErrorMessage = isUncertainOutcome
-    ? `CONNECTOR_OUTCOME_UNKNOWN: ${originalError}`
-    : originalError;
+if (isUncertainOutcome) {
+    console.error(
+        "BATCH FAILURE BLOCKED — CONNECTOR OUTCOME UNCERTAIN:",
+        batch_id,
+        originalError
+    );
+
+    return false;
+}
+
+const finalErrorMessage = originalError;
 
 const { data, error: updateError } = await supabase
     .from(TABLES.SYNC_BATCHES)
@@ -828,6 +838,107 @@ async markWaitingConnector({
     return true;
 }
 
+// ----------------------------------
+// Mark Connector Offline Timeout Failed
+// ----------------------------------
+
+async markConnectorOfflineTimeoutFailed({
+    batch_id,
+    execution_claim_token
+}) {
+    if (
+        typeof execution_claim_token !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            execution_claim_token
+        )
+    ) {
+        throw new Error(
+            "markConnectorOfflineTimeoutFailed requires a valid execution claim token"
+        );
+    }
+
+    let data;
+let error;
+
+try {
+    const response = await supabase.rpc(
+        "mark_sync_batch_waiting_connector_if_not_started",
+        {
+            p_batch_id: batch_id,
+            p_execution_claim_token: execution_claim_token,
+            p_fail_on_timeout: true
+        }
+    );
+
+    data = response.data;
+    error = response.error;
+} catch (rpcError) {
+    error = rpcError;
+}
+
+   if (error) {
+    console.error(
+        "CONNECTOR OFFLINE TIMEOUT RPC ERROR — VERIFYING DATABASE:",
+        batch_id,
+        error
+    );
+
+    let verifiedBatch;
+
+    try {
+        verifiedBatch = await this.loadBatch({
+            batch_id
+        });
+    } catch (verifyError) {
+        throw new Error(
+            "CONNECTOR_OFFLINE_TIMEOUT_OUTCOME_UNKNOWN: " +
+            "RPC failed and database verification failed: " +
+            verifyError.message
+        );
+    }
+
+    const timeoutConfirmed =
+        verifiedBatch?.batch_id === batch_id &&
+        typeof verifiedBatch.execution_claim_token === "string" &&
+        verifiedBatch.execution_claim_token.toLowerCase() ===
+            execution_claim_token.toLowerCase() &&
+        verifiedBatch.batch_status === "FAILED" &&
+        verifiedBatch.worker_status === "FAILED" &&
+        verifiedBatch.current_stage === "FAILED" &&
+        verifiedBatch.error_message === "CONNECTOR_OFFLINE_TIMEOUT" &&
+        verifiedBatch.connector_retry_ready === false;
+
+    if (timeoutConfirmed) {
+        console.log(
+            "CONNECTOR OFFLINE TIMEOUT — DATABASE FAILURE VERIFIED:",
+            batch_id
+        );
+
+        return true;
+    }
+
+    throw new Error(
+        "CONNECTOR_OFFLINE_TIMEOUT_OUTCOME_UNKNOWN: " +
+        "RPC failed and expected terminal state was not verified"
+    );
+}
+
+    if (data !== true) {
+        console.warn(
+            "[BATCH STATUS] CONNECTOR OFFLINE TIMEOUT TRANSITION REJECTED",
+            { batch_id }
+        );
+
+        return false;
+    }
+
+    console.log(
+        "[BATCH STATUS] CONNECTOR OFFLINE TIMEOUT FAILED VERIFIED",
+        { batch_id }
+    );
+
+    return true;
+}
         // ----------------------------------
     // Update Connector State
     // ----------------------------------
