@@ -61,14 +61,9 @@ const existingJob = await syncQueue.getJob(
         );
     }
 
-    await existingJob.remove();
-
-    console.log(
-        "VERIFIED FAILED BULLMQ JOB REMOVED:",
-        batch.batch_id
+    throw new Error(
+        `FAILED_BULLMQ_JOB_REQUIRES_SETTLEMENT_VERIFICATION: ${batch.batch_id}`
     );
-
-    return true;
 }
 
     if (

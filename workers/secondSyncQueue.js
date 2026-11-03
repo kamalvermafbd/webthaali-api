@@ -27,9 +27,10 @@ function getSyncQueue(queueName) {
             connection,
 
             defaultJobOptions: {
-                removeOnComplete: true,
-                removeOnFail: 500
-            }
+    removeOnComplete: false,
+    removeOnFail: false,
+    attempts: 1
+}
         }
     );
 }
