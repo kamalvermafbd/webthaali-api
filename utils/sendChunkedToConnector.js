@@ -628,6 +628,7 @@ function onAck(data) {
 
 pendingAckCleanups.delete(cancelPendingAck);
 
+/* 041126
 if (data.success === false) {
     const connectorError = new Error(
         data.error || "Chunk rejected"
@@ -639,7 +640,19 @@ if (data.success === false) {
 }
 
             resolve();
+*/
 
+if (data.success !== true) {
+    const connectorError = new Error(
+        data.error || "Chunk ACK did not confirm success"
+    );
+
+    connectorError.connectorResponseReceived = true;
+
+    return reject(connectorError);
+}
+
+resolve();
         }
 //latest
     function onDisconnect(reason) {
@@ -813,7 +826,7 @@ if (
 );
 
 pendingAckCleanups.delete(cancelPendingCompleteAck);
-
+/* 041126
 if (data.success === false) {
     const connectorError = new Error(
         data.error || "Complete rejected"
@@ -824,6 +837,18 @@ if (data.success === false) {
     return reject(connectorError);
 }
             resolve();
+            */
+if (data.success !== true) {
+    const connectorError = new Error(
+        data.error || "Complete ACK did not confirm success"
+    );
+
+    connectorError.connectorResponseReceived = true;
+
+    return reject(connectorError);
+}
+
+resolve();
 
         }
 
@@ -1627,6 +1652,16 @@ await activeCompletionTask;
 
 }
 
+}
+
+// A response must not settle successfully until the
+// outgoing request upload has received its final ACK.
+if (activeRequestTransferTask) {
+    await activeRequestTransferTask;
+
+    if (lockLost || operationSettled || signal.aborted) {
+        return;
+    }
 }
 
             if (payload.snapshot === true) {
