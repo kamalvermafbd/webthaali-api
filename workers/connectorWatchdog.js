@@ -1136,6 +1136,45 @@ if (
         continue;
     }
 
+    
+    // =====================================================
+    // UNIVERSAL FAILED RETRY — LATEST BATCH ONLY
+    // =====================================================
+    // Check the latest batch across ALL statuses.
+    // Older FAILED batches must never be retried.
+    // The SQL claim RPC independently rechecks this.
+
+    const { data: latestBatches, error: latestBatchError } =
+        await supabase
+            .from("sync_batches")
+            .select("id, batch_id, batch_status")
+            .eq("company_code", companyCode)
+            .eq("tally_owner", tallyOwner)
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false })
+            .limit(1);
+
+    if (latestBatchError) {
+        throw latestBatchError;
+    }
+
+    const latestBatch = latestBatches?.[0];
+
+    if (!latestBatch || String(latestBatch.id) !== String(batch.id)) {
+        console.log(
+            "[CONNECTOR WATCHDOG] UNIVERSAL RETRY SKIPPED — NOT LATEST BATCH",
+            {
+                batch_id: batch.batch_id,
+                latest_batch_id: latestBatch?.batch_id || null,
+                latest_batch_status: latestBatch?.batch_status || null,
+                action: "SKIP_OLDER_FAILED_BATCH"
+            }
+        );
+
+        continue;
+    }
+
+    
     const connectorField =
         tallyOwner === "CA" ? "ca_connector_id" : "client_connector_id";
 
@@ -1212,7 +1251,7 @@ if (!batch.execution_claim_token) {
             const connector = Array.isArray(connectorResponse.data)
                 ? connectorResponse.data[0]
                 : connectorResponse.data;
-
+/* 041126
            httpSettled =
                 http?.decision === "TERMINATED" &&
                 http?.execution_state === "TERMINATED" &&
@@ -1221,7 +1260,29 @@ if (!batch.execution_claim_token) {
                     "HANDLER_COMPLETED_SUCCESS",
                     "HANDLER_EXITED"
                 ].includes(http?.terminal_outcome);
+*/
 
+            // A batch may safely have no HTTP execution record
+            // when the current execution never reached HTTP start.
+            // This is valid only when connector operations are absent.
+
+            const httpNotStarted =
+                http?.decision === "NOT_STARTED" &&
+                connector?.decision === "NO_OPERATIONS" &&
+                Number(connector?.operation_count) === 0;
+
+            const httpTerminated =
+                http?.decision === "TERMINATED" &&
+                http?.execution_state === "TERMINATED" &&
+                Boolean(http?.terminated_at) &&
+                [
+                    "HANDLER_COMPLETED_SUCCESS",
+                    "HANDLER_EXITED"
+                ].includes(http?.terminal_outcome);
+
+            httpSettled =
+                httpNotStarted === true ||
+                httpTerminated === true;
             const total = Number(connector?.operation_count);
             const prepared = Number(connector?.prepared_count);
             const dispatchPossible =
