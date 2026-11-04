@@ -561,60 +561,86 @@ if (
         );
     }
 
-   const reservationLockedAt = new Date().toISOString();
+   // Atomically reserve worker capacity in PostgreSQL.
+const {
+    data: reservationResult,
+    error: reserveError
+} = await supabase.rpc(
+    "reserve_normal_sync_batch",
+    {
+        p_batch_db_id: batch.id,
+        p_worker_name: workerConfig.worker_name,
+        p_sync_mode: batch.sync_mode ?? null,
+        p_sync_period: batch.sync_period ?? null,
+        p_job_type: batch.job_type ?? null,
+        p_worker_type: batch.worker_type ?? null,
+        p_retry_claim_token: batch.retry_claim_token ?? null
+    }
+);
 
-
-let reservationQuery = supabase
-    .from("sync_batches")
-    .update({
-        worker_id: workerConfig.worker_name,
-        locked_at: reservationLockedAt,
-        sync_mode: batch.sync_mode,
-        sync_period: batch.sync_period,
-        job_type: batch.job_type,
-        worker_type: batch.worker_type
-    })
-    .eq("id", batch.id)
-    .eq("batch_status", "PENDING")
-    .eq("worker_status", "PENDING")
-    .eq("current_stage", "PENDING")
-    .is("worker_id", null)
-    .or(
-        "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
-    );
-
-if (batch.retry_claim_token == null) {
-    reservationQuery = reservationQuery.is(
-        "retry_claim_token",
-        null
-    );
-} else {
-    reservationQuery = reservationQuery.eq(
-        "retry_claim_token",
-        batch.retry_claim_token
+if (reserveError) {
+    throw new Error(
+        "BATCH RESERVATION RPC FAILED: " +
+        reserveError.message
     );
 }
 
-const {
-    data: reserved,
-    error: reserveError
-} = await reservationQuery
-    .select()
-    .maybeSingle();
+const reservation = Array.isArray(reservationResult)
+    ? reservationResult[0]
+    : reservationResult;
 
+if (
+    reservation?.reserved !== true ||
+    reservation?.reserved_batch_id == null ||
+    String(reservation.reserved_batch_id) !== String(batch.id)
+) {
+    throw new Error(
+        `BATCH RESERVATION REJECTED: ${
+            reservation?.reason || "UNKNOWN"
+        }`
+    );
+}
 
-    if (reserveError) {
-        throw new Error(
-            "BATCH RESERVATION FAILED: "
-            + reserveError.message
+// Reload the reserved batch for existing queue logic.
+
+    // Reload the exact reserved batch for existing queue logic.
+    let reloadQuery = supabase
+        .from("sync_batches")
+        .select("*")
+        .eq("id", batch.id)
+        .eq("worker_id", workerConfig.worker_name)
+        .eq("batch_status", "PENDING")
+        .eq("worker_status", "PENDING")
+        .eq("current_stage", "PENDING");
+
+    if (batch.retry_claim_token == null) {
+        reloadQuery = reloadQuery.is(
+            "retry_claim_token",
+            null
+        );
+    } else {
+        reloadQuery = reloadQuery.eq(
+            "retry_claim_token",
+            batch.retry_claim_token
         );
     }
 
-    if (!reserved) {
-        throw new Error(
-            `Batch ${batch.batch_id} is already assigned or processed`
+    const {
+        data: reserved,
+        error: reloadError
+    } = await reloadQuery.maybeSingle();
+
+    if (reloadError || !reserved) {
+        const uncertainError = new Error(
+            `BATCH_RESERVATION_STATE_UNCERTAIN: ${batch.batch_id}`
         );
+
+        uncertainError.code =
+            "BATCH_RESERVATION_STATE_UNCERTAIN";
+
+        throw uncertainError;
     }
+
 
     try {
 
