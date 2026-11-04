@@ -698,11 +698,12 @@ const finalErrorMessage = originalError;
 
 const { data, error: updateError } = await supabase
     .from(TABLES.SYNC_BATCHES)
-    .update({
-        batch_status: BATCH_STATUS.FAILED,
-        worker_status: "FAILED",
-        error_message: finalErrorMessage
-    })
+   .update({
+    batch_status: BATCH_STATUS.FAILED,
+    worker_status: "FAILED",
+    current_stage: "FAILED",
+    error_message: finalErrorMessage
+})
        .eq("batch_id", batch_id)
 .eq("execution_claim_token", execution_claim_token)
 .neq("batch_status", "COMPLETED")

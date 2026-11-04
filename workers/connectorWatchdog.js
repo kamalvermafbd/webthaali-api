@@ -14,6 +14,9 @@ const connectorHealthStore =
 const { getSyncQueue } =
     require("./secondSyncQueue");
 
+const { dispatchUniversalFailedRetry } =
+    require("./secondQueueExistingBatch");
+
 let watchdogTimer = null;
 let watchdogRunning = false;
 
@@ -782,6 +785,234 @@ if (recoveryCandidate) {
     }
 }
 }
+
+// =====================================================
+// UNIVERSAL FAILED RETRY - EXPIRED RESERVATION RECOVERY
+// =====================================================
+// Only terminal, token-matched BullMQ jobs are eligible.
+// Never modify or remove BullMQ jobs here.
+
+const { data: expiredUniversalReservations, error: universalLookupError } =
+    await supabase
+        .from("sync_batches")
+        .select(`
+            id,
+            batch_id,
+            company_code,
+            tally_owner,
+            worker_id,
+            retry_claim_token,
+            retry_lease_until,
+            retry_original_error_message
+        `)
+        .eq("batch_status", "PENDING")
+        .eq("worker_status", "PENDING")
+        .eq("current_stage", "PENDING")
+        .eq("retry_reservation_origin", "UNIVERSAL_FAILED_RETRY")
+        .not("retry_claim_token", "is", null)
+        .lt("retry_lease_until", new Date().toISOString())
+        .order("retry_lease_until", { ascending: true })
+        .limit(25);
+
+if (universalLookupError) {
+    console.error(
+        "[CONNECTOR WATCHDOG] UNIVERSAL RETRY LOOKUP FAILED:",
+        universalLookupError.message
+    );
+} else {
+    for (const reservation of expiredUniversalReservations || []) {
+        try {
+            const { data: assignedWorker, error: workerError } =
+                await supabase
+                    .from("workers")
+                    .select("id, worker_name, queue_name, server_id")
+                    .eq("worker_name", reservation.worker_id)
+                    .maybeSingle();
+
+            if (workerError) {
+                throw workerError;
+            }
+
+            if (!assignedWorker?.queue_name) {
+                console.warn(
+                    "[CONNECTOR WATCHDOG] UNIVERSAL RETRY WORKER QUEUE NOT FOUND:",
+                    reservation.batch_id
+                );
+                continue;
+            }
+
+            const queue = getSyncQueue(assignedWorker.queue_name);
+
+            try {
+                const retryToken = reservation.retry_claim_token;
+
+                const bullJobId =
+                    `${reservation.batch_id}-retry-${retryToken}`;
+
+                const job = await queue.getJob(bullJobId);
+                const jobState = job
+                    ? await job.getState()
+                    : "NOT_FOUND";
+
+                const tokenMatches =
+                    job != null &&
+                    job.data?.batch_id === reservation.batch_id &&
+                    String(job.data?.batch_db_id) ===
+                        String(reservation.id) &&
+                    job.data?.worker_name === assignedWorker.worker_name &&
+                    String(job.data?.worker_id) ===
+                        String(assignedWorker.id) &&
+                    String(job.data?.server_id) ===
+                        String(assignedWorker.server_id) &&
+                    job.data?.retry_claim_token === retryToken;
+
+                // Database assessment is read-only.
+                const { data: assessmentData, error: assessmentError } =
+                    await supabase.rpc(
+                        "assess_expired_universal_retry_reservation",
+                        {
+                            p_batch_db_id: reservation.id,
+                            p_retry_claim_token: retryToken
+                        }
+                    );
+
+                if (assessmentError) {
+                    throw assessmentError;
+                }
+
+                const assessment = Array.isArray(assessmentData)
+                    ? assessmentData[0]
+                    : assessmentData;
+
+                const databaseEligible =
+                    assessment?.eligible === true &&
+                    assessment?.reason ===
+                        "DB_ELIGIBLE_BULLMQ_UNVERIFIED" &&
+                    assessment?.batch_id === reservation.batch_id;
+
+                const terminalJob =
+                    jobState === "failed" ||
+                    jobState === "completed";
+
+                let recoveryDecision = "OBSERVE_ONLY";
+
+                if (!job) {
+                    recoveryDecision = "JOB_NOT_FOUND";
+                } else if (!tokenMatches) {
+                    recoveryDecision = "TOKEN_MISMATCH";
+                } else if (!terminalJob) {
+                    recoveryDecision =
+                        `NON_TERMINAL_JOB:${jobState}`;
+                } else if (!databaseEligible) {
+                    recoveryDecision =
+                        `DATABASE_NOT_ELIGIBLE:${assessment?.reason || "UNKNOWN"}`;
+                } else {
+                    const { data: recoveryData, error: recoveryError } =
+                        await supabase.rpc(
+                            "recover_expired_universal_retry_reservation",
+                            {
+                                p_batch_db_id: reservation.id,
+                                p_retry_claim_token: retryToken
+                            }
+                        );
+
+              if (recoveryError) {
+    // RPC response lost ho sakta hai even after DB commit.
+    // Verify actual database state before reporting outcome.
+    const { data: current, error: readError } =
+        await supabase
+            .from("sync_batches")
+            .select(`
+                batch_id,
+                batch_status,
+                worker_status,
+                current_stage,
+                error_message,
+                retry_claim_token,
+                retry_lease_until,
+                retry_reservation_origin
+            `)
+            .eq("id", reservation.id)
+            .maybeSingle();
+
+    if (readError || !current) {
+        throw new Error(
+            "UNIVERSAL_RECOVERY_OUTCOME_UNKNOWN"
+        );
+    }
+
+    const recoveryCommitted =
+        current.batch_id === reservation.batch_id &&
+        current.batch_status === "FAILED" &&
+        current.worker_status === "FAILED" &&
+        current.current_stage === "FAILED" &&
+        current.error_message ===
+            reservation.retry_original_error_message &&
+        current.retry_claim_token === null &&
+        current.retry_lease_until === null &&
+        current.retry_reservation_origin === null;
+
+    if (recoveryCommitted) {
+        console.warn(
+            "[CONNECTOR WATCHDOG] UNIVERSAL RECOVERY COMMIT OBSERVED AFTER RPC ERROR",
+            {
+                batch_id: reservation.batch_id,
+                action: "READBACK_CONFIRMED",
+                automatic_retry: false
+            }
+        );
+    }
+
+    throw new Error(
+        recoveryCommitted
+            ? "UNIVERSAL_RECOVERY_COMMIT_OBSERVED"
+            : "UNIVERSAL_RECOVERY_OUTCOME_UNKNOWN"
+    );
+}
+
+                    const recovery = Array.isArray(recoveryData)
+                        ? recoveryData[0]
+                        : recoveryData;
+
+                    recoveryDecision =
+                        recovery?.recovered === true &&
+                        recovery?.reason === "RECOVERED" &&
+                        recovery?.recovered_batch_id === reservation.batch_id
+                            ? "RECOVERED"
+                            : `RECOVERY_REJECTED:${recovery?.reason || "INVALID_RESPONSE"}`;
+                }
+
+                console.warn(
+                    "[CONNECTOR WATCHDOG] UNIVERSAL EXPIRED RETRY ASSESSMENT:",
+                    {
+                        batch_id: reservation.batch_id,
+                        queue_name: assignedWorker.queue_name,
+                        job_state: jobState,
+                        token_matches: tokenMatches,
+                        database_eligible: databaseEligible,
+                        database_reason: assessment?.reason ?? "UNKNOWN",
+                        recovery_decision: recoveryDecision,
+                        retry_claim_token: retryToken,
+                        automatic_retry: false
+                    }
+                );
+            } finally {
+                await queue.close();
+            }
+        } catch (error) {
+            console.error(
+                "[CONNECTOR WATCHDOG] UNIVERSAL EXPIRED RETRY INSPECTION FAILED:",
+                reservation.batch_id,
+                error.message
+            );
+        }
+    }
+}
+
+// =====================================================
+// END UNIVERSAL FAILED RETRY RECOVERY
+// =====================================================
+
       // ----------------------------------------------------
 // 1. Get batches requiring connector monitoring
 //
@@ -935,11 +1166,12 @@ if (
     heartbeatAge >= HEARTBEAT_TIMEOUT_MS
 ) {
    console.warn(
-    "[CONNECTOR WATCHDOG] RETRY READINESS RESET DEFERRED",
+    "[CONNECTOR WATCHDOG] UNIVERSAL FAILED RETRY DEFERRED",
     {
         batch_id: batch.batch_id,
-        reason: "Connector unavailable; previous Tally execution settlement unverified",
-        action: "OBSERVE_ONLY"
+        connector_id: connectorId,
+        reason: "Connector socket unavailable, Tally offline, or heartbeat not fresh",
+        action: "DEFER_RETRY"
     }
 );
 
@@ -981,11 +1213,14 @@ if (!batch.execution_claim_token) {
                 ? connectorResponse.data[0]
                 : connectorResponse.data;
 
-            httpSettled =
+           httpSettled =
                 http?.decision === "TERMINATED" &&
                 http?.execution_state === "TERMINATED" &&
                 Boolean(http?.terminated_at) &&
-                http?.terminal_outcome === "HANDLER_COMPLETED_SUCCESS";
+                [
+                    "HANDLER_COMPLETED_SUCCESS",
+                    "HANDLER_EXITED"
+                ].includes(http?.terminal_outcome);
 
             const total = Number(connector?.operation_count);
             const prepared = Number(connector?.prepared_count);
@@ -1031,33 +1266,40 @@ if (!batch.execution_claim_token) {
     }
 }
 
+const executionSettled =
+    httpSettled === true &&
+    connectorSettled === true;
+
 console.log(
     "[CONNECTOR WATCHDOG] FAILED SETTLEMENT ASSESSMENT",
     {
         batch_id: batch.batch_id,
         http_settled: httpSettled,
         connector_settled: connectorSettled,
+        execution_settled: executionSettled,
         settlement_reason: settlementReason,
-        recovery_allowed: false,
-        action: "OBSERVE_ONLY"
+        action: executionSettled
+            ? "CHECK_CONNECTOR_AVAILABILITY"
+            : "DEFER_RETRY"
     }
 );
-    // ----------------------------------------------------
+  // ----------------------------------------------------
 // UNIVERSAL FAILED RECOVERY — CONNECTOR HEALTH VERIFIED
-// All FAILED error categories can reach this evaluation.
-// Connector health alone does not prove execution settlement.
-// Retry dispatch remains disabled.
+// Connector is healthy, but retry eligibility depends
+// on verified settlement and global connector availability.
 // ----------------------------------------------------
 
-console.warn(
-    "[CONNECTOR WATCHDOG] FAILED RECOVERY SETTLEMENT UNVERIFIED",
+console.log(
+    "[CONNECTOR WATCHDOG] FAILED RECOVERY READINESS",
     {
         batch_id: batch.batch_id,
         original_error: batch.error_message || null,
         connector_id: connectorId,
         connector_healthy: true,
-        execution_settled: false,
-        action: "OBSERVE_ONLY"
+        execution_settled: executionSettled,
+        action: executionSettled
+            ? "CHECK_GLOBAL_CONNECTOR_AVAILABILITY"
+            : "DEFER_RETRY"
     }
 );
 // ----------------------------------------------------
@@ -1071,9 +1313,12 @@ const globalWatchdog =
 const connectorFree =
     globalWatchdog?.operation_status === "FREE" &&
     globalWatchdog?.available === true &&
+    String(globalWatchdog?.socket_id || "").trim() ===
+        String(socket.id || "").trim() &&
+    socket.connected === true &&
     socket.tallyRequestActive !== true;
 
-console.warn(
+console.log(
     "[CONNECTOR WATCHDOG] UNIVERSAL FAILED RECOVERY DECISION",
     {
         batch_id: batch.batch_id,
@@ -1083,17 +1328,43 @@ console.warn(
         global_operation_status:
             globalWatchdog?.operation_status || "UNKNOWN",
         retry_count: Number(batch.retry_count ?? 0),
-        execution_settled: false,
-        recovery_allowed: false,
-        reason: connectorFree
-            ? "Previous execution settlement not independently verified"
-            : "Connector unavailable or busy; execution settlement unverified",
-        action: "DEFER_RETRY"
+        execution_settled: executionSettled,
+        recovery_allowed:
+            executionSettled === true &&
+            connectorFree === true,
+        reason: !executionSettled
+            ? "Previous execution settlement unverified"
+            : !connectorFree
+                ? "Global connector unavailable or busy"
+                : "Ready for atomic retry claim",
+        action:
+            executionSettled === true && connectorFree === true
+                ? "ATTEMPT_ATOMIC_RETRY_CLAIM"
+                : "DEFER_RETRY"
     }
 );
 
-// Never activate retry readiness or enqueue a batch
-// without independently verified execution settlement.
+if (
+    httpSettled !== true ||
+    connectorSettled !== true ||
+    connectorFree !== true
+) {
+    continue;
+}
+// Dispatch only after settlement and connector availability
+// checks pass. The dispatch function performs the final
+// atomic database claim and original-worker validation.
+const retryDispatchResult =
+    await dispatchUniversalFailedRetry(batch);
+
+console.log(
+    "[CONNECTOR WATCHDOG] UNIVERSAL FAILED RETRY DISPATCH",
+    {
+        batch_id: batch.batch_id,
+        result: retryDispatchResult
+    }
+);
+
 continue;
 }
 

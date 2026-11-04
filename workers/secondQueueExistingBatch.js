@@ -478,6 +478,181 @@ throw queueError;
 
 }
 
+async function dispatchUniversalFailedRetry(batch) {
+    if (!batch?.id || !batch?.batch_id) {
+        throw new Error("Universal retry batch id missing");
+    }
+
+    const batchError = String(batch.error_message || "");
+
+    if (
+        batch.batch_status !== "FAILED" ||
+        batch.worker_status !== "FAILED" ||
+        batch.current_stage !== "FAILED" ||
+        !batch.worker_id ||
+        !batch.execution_claim_token ||
+        !batchError ||
+        batchError.startsWith("HTTP_OUTCOME_UNKNOWN:") ||
+        batchError.startsWith("CONNECTOR_OUTCOME_UNKNOWN:") ||
+        Number(batch.retry_count || 0) >= 3
+    ) {
+        return {
+            success: false,
+            queued: false,
+            reason: "NOT_ELIGIBLE"
+        };
+    }
+
+    // Universal retry must use the original worker.
+    const workerConfig = await resolveWorkerForBatch(batch, {
+        connectorLossRetry: true,
+        universalFailedRetry: true
+    });
+
+    if (
+        !workerConfig?.worker_name ||
+        !workerConfig?.queue_name ||
+        workerConfig.worker_name !== batch.worker_id
+    ) {
+        return {
+            success: false,
+            queued: false,
+            reason: "ORIGINAL_WORKER_UNAVAILABLE"
+        };
+    }
+
+    const retryClaimToken = randomUUID();
+
+    // SQL performs atomic eligibility, FIFO and capacity checks.
+    const { data: claimResult, error: claimError } =
+        await supabase.rpc(
+            "claim_universal_failed_sync_retry",
+            {
+                p_company_code: batch.company_code,
+                p_tally_owner: batch.tally_owner,
+                p_expected_batch_id: batch.batch_id,
+                p_worker_name: workerConfig.worker_name,
+                p_retry_claim_token: retryClaimToken
+            }
+        );
+
+    if (claimError) {
+        throw new Error(
+            `UNIVERSAL_RETRY_CLAIM_UNCERTAIN: ${batch.batch_id}: ${claimError.message}`
+        );
+    }
+
+    const retryClaim = Array.isArray(claimResult)
+        ? claimResult[0]
+        : claimResult;
+
+    if (
+        retryClaim?.claimed !== true ||
+        retryClaim.claimed_batch_id !== batch.batch_id
+    ) {
+        return {
+            success: false,
+            queued: false,
+            reason: retryClaim?.reason || "CLAIM_REJECTED"
+        };
+    }
+
+    // Reload the exact reservation owned by this dispatcher.
+    const { data: reserved, error: reloadError } =
+        await supabase
+            .from("sync_batches")
+            .select("*")
+            .eq("id", batch.id)
+            .eq("batch_id", batch.batch_id)
+            .eq("worker_id", workerConfig.worker_name)
+            .eq("batch_status", "PENDING")
+            .eq("worker_status", "PENDING")
+            .eq("current_stage", "PENDING")
+            .eq("retry_reservation_origin", "UNIVERSAL_FAILED_RETRY")
+            .eq("retry_claim_token", retryClaimToken)
+            .gt("retry_lease_until", new Date().toISOString())
+            .maybeSingle();
+
+    if (reloadError || !reserved) {
+        throw new Error(
+            `UNIVERSAL_RETRY_RESERVATION_UNCERTAIN: ${batch.batch_id}`
+        );
+    }
+
+    try {
+        await addBatchToQueue(reserved, workerConfig);
+
+        console.log(
+            "[UNIVERSAL RETRY] QUEUED",
+            {
+                batch_id: batch.batch_id,
+                worker_name: workerConfig.worker_name,
+                queue_name: workerConfig.queue_name
+            }
+        );
+
+        return {
+            success: true,
+            queued: true,
+            batch: reserved,
+            worker: workerConfig
+        };
+    } catch (queueError) {
+        // Queue add may have succeeded even if its response was lost.
+        let queueCheck;
+
+        try {
+            queueCheck = await inspectConnectorRetryJob(
+                workerConfig.queue_name,
+                reserved,
+                workerConfig
+            );
+        } catch (inspectError) {
+            console.error(
+                "[UNIVERSAL RETRY] QUEUE INSPECTION FAILED",
+                batch.batch_id,
+                inspectError.message
+            );
+
+            throw queueError;
+        }
+
+        const activeStates = [
+            "waiting",
+            "active",
+            "delayed",
+            "prioritized",
+            "waiting-children"
+        ];
+
+        if (
+            queueCheck.matches === true &&
+            activeStates.includes(queueCheck.state)
+        ) {
+            return {
+                success: true,
+                queued: true,
+                reason: "JOB_ALREADY_EXISTS",
+                batch: reserved,
+                worker: workerConfig
+            };
+        }
+
+        // Never rollback an uncertain reservation.
+        // Recovery must independently verify queue and execution state.
+        console.error(
+            "[UNIVERSAL RETRY] QUEUE HANDOFF UNCERTAIN",
+            {
+                batch_id: batch.batch_id,
+                queue_state: queueCheck.state,
+                assignment_matches: queueCheck.matches,
+                error: queueError.message
+            }
+        );
+
+        throw queueError;
+    }
+}
 
 async function inspectNormalBatchJob(
     batch,
@@ -1018,5 +1193,6 @@ function startBatchQueueDispatcher() {
 module.exports = {
     //startBatchQueueDispatcher
     dispatchBatch,
-    dispatchConnectorLossRetry
+    dispatchConnectorLossRetry,
+    dispatchUniversalFailedRetry
 };
