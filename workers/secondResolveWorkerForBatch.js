@@ -77,7 +77,11 @@ async function resolveWorkerForBatch(batch, options = {}) {
 
         // Connector-loss retry: use the batch's original worker.
     // sync_batches.worker_id stores worker_name, not workers.id.
-    if (options.connectorLossRetry && batch.worker_id) {
+    if (
+    options.connectorLossRetry === true &&
+    options.universalFailedRetry !== true &&
+    batch.worker_id
+) {
         const originalWorkerName = String(batch.worker_id).trim();
 
         const { data: worker, error: workerError } =

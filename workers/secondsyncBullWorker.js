@@ -170,16 +170,23 @@ const runtimeHeartbeat = setInterval(
                     worker.server_id
                 );
 
-                if (
-                    job.data.worker_name !==
-                    worker.worker_name
-                ) {
-
-                    throw new Error(
-                        `Job assigned to ${job.data.worker_name}, ` +
-                        `but this worker is ${worker.worker_name}`
-                    );
-                }
+             // Verify BullMQ job belongs to this exact worker and server.
+if (
+    job.data.worker_name !== worker.worker_name ||
+    String(job.data.worker_id) !== String(worker.id) ||
+    String(job.data.server_id) !== String(worker.server_id)
+) {
+    throw new Error(
+        `BULLMQ_JOB_ASSIGNMENT_MISMATCH: ` +
+        `batch=${job.data.batch_id}, ` +
+        `job_worker=${job.data.worker_name}, ` +
+        `job_worker_id=${job.data.worker_id}, ` +
+        `job_server=${job.data.server_id}, ` +
+        `runtime_worker=${worker.worker_name}, ` +
+        `runtime_worker_id=${worker.id}, ` +
+        `runtime_server=${worker.server_id}`
+    );
+}
 
     const lockInput = {
     ...job,

@@ -489,7 +489,6 @@ async function dispatchUniversalFailedRetry(batch) {
         batch.batch_status !== "FAILED" ||
         batch.worker_status !== "FAILED" ||
         batch.current_stage !== "FAILED" ||
-        !batch.worker_id ||
         !batch.execution_claim_token ||
         !batchError ||
         batchError.startsWith("HTTP_OUTCOME_UNKNOWN:") ||
@@ -503,23 +502,25 @@ async function dispatchUniversalFailedRetry(batch) {
         };
     }
 
-    // Universal retry must use the original worker.
-    const workerConfig = await resolveWorkerForBatch(batch, {
-        connectorLossRetry: true,
-        universalFailedRetry: true
-    });
+   // Resolve an eligible worker for the universal FAILED retry.
+// The original worker may be unavailable or NULL.
+const workerConfig = await resolveWorkerForBatch(batch, {
+    connectorLossRetry: true,
+    universalFailedRetry: true
+});
 
-    if (
-        !workerConfig?.worker_name ||
-        !workerConfig?.queue_name ||
-        workerConfig.worker_name !== batch.worker_id
-    ) {
-        return {
-            success: false,
-            queued: false,
-            reason: "ORIGINAL_WORKER_UNAVAILABLE"
-        };
-    }
+if (
+    !workerConfig?.worker_name ||
+    !workerConfig?.queue_name ||
+    !workerConfig?.id ||
+    !workerConfig?.server_id
+) {
+    return {
+        success: false,
+        queued: false,
+        reason: "RETRY_WORKER_UNAVAILABLE"
+    };
+}
 
     const retryClaimToken = randomUUID();
 
