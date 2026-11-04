@@ -53,12 +53,22 @@ async function sendChunkedToConnector(
             connectorId,
             async (lockedSocket, signal) => {
 
-                if (lockedSocket !== socket || signal.aborted) {
-                    throw new Error(
-                        `CONNECTOR_SOCKET_CHANGED_OR_ABORTED: ${connectorId}`
-                    );
-                }
+             if (lockedSocket !== socket || signal.aborted) {
+    throw new Error(
+        `CONNECTOR_SOCKET_CHANGED_OR_ABORTED: ${connectorId}`
+    );
+}
 
+// A cancelled protocol receiver cannot safely handle
+// another master transfer on the same socket.
+if (
+    event === "getMasters" &&
+    lockedSocket.protocolReceiver?.collectionCancelled === true
+) {
+    throw new Error(
+        `MASTER_PROTOCOL_RECEIVER_CANCELLED_RECONNECT_REQUIRED: ${connectorId}`
+    );
+}
                 // Durable dispatch authorization must happen
                 // inside the global connector lock.
                 if (executionContext?.request_id) {
@@ -456,16 +466,17 @@ function onGetMastersTransferComplete(data) {
         return;
     }
 
-    if (transferCompleteReceived) {
-        socket.emit("getMastersTransferCompleteAck", {
-            requestId,
-            success: true
-        });
-        return;
-    }
-
+     // Validate failure BEFORE handling duplicate success.
     if (data.success !== true) {
+
         operationSettled = true;
+
+        if (activeProtocolTask) {
+            socket.protocolReceiver?.cancelCollection(
+                `Master final completion failed: ${requestId}`
+            );
+        }
+
         cleanup();
 
         return reject(
@@ -473,6 +484,17 @@ function onGetMastersTransferComplete(data) {
                 `GET_MASTERS_FINAL_COMPLETION_FAILED: requestId=${requestId}; error=${data.error || "Invalid completion status"}`
             )
         );
+    }
+
+    // Duplicate successful final notification.
+    if (transferCompleteReceived) {
+
+        socket.emit("getMastersTransferCompleteAck", {
+            requestId,
+            success: true
+        });
+
+        return;
     }
 
     transferCompleteReceived = true;
@@ -483,6 +505,8 @@ function onGetMastersTransferComplete(data) {
     });
 
     tryCompleteGetMasters();
+
+   
 }
 function cleanup() {
     if (transferCompleteTimer !== null) {
@@ -648,6 +672,8 @@ if (data.success !== true) {
     );
 
     connectorError.connectorResponseReceived = true;
+    connectorError.outcomeUnknown = true;
+    connectorError.code = "CONNECTOR_CHUNK_ACK_REJECTED";
 
     return reject(connectorError);
 }
@@ -844,6 +870,8 @@ if (data.success !== true) {
     );
 
     connectorError.connectorResponseReceived = true;
+    connectorError.outcomeUnknown = true;
+    connectorError.code = "CONNECTOR_COMPLETE_ACK_REJECTED";
 
     return reject(connectorError);
 }
@@ -1050,8 +1078,15 @@ async function onResult(data) {
 
     operationSettled = true;
 
-    cleanup();
+    // A failed master transfer must not leave receiveAll()
+    // waiting while the global connector lock is held.
+    if (event === "getMasters" && activeProtocolTask) {
+        socket.protocolReceiver?.cancelCollection(
+            `Master transfer failed: ${requestId}`
+        );
+    }
 
+    cleanup();
     const connectorError = new Error(
     data.error || "Unknown error"
 );

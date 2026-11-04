@@ -80,7 +80,7 @@ this.socket.emit(EVENTS.ERROR, {
         }
     );
 }
-
+/* 041126
     sendReceived(
     collection,
     batchId,
@@ -99,7 +99,26 @@ this.socket.emit(EVENTS.ERROR, {
     );
 
 }
+*/
+    sendReceived(
+    collection,
+    batchId,
+    chunkIndex,
+    requestId
+) {
 
+    this.socket.emit(
+        EVENTS.RECEIVED,
+        {
+            collection,
+            batchId,
+            chunkIndex,
+            requestId,
+            success: true
+        }
+    );
+
+}
 sendCompleted(
     collection,
     batchId,

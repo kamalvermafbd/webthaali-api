@@ -377,22 +377,35 @@ if (
         http_status: response.status
     };
 }
-                   if (
-                        errorData?.error_code === "CONNECTOR_OUTCOME_UNKNOWN"
-                    ) {
-                        console.error(
-                            "⛔ UNCERTAIN CONNECTOR OUTCOME — RETRY BLOCKED:",
-                            job.batch_id
-                        );
+                if (
+    errorData?.error_code === "CONNECTOR_OUTCOME_UNKNOWN"
+) {
+    const marked =
+        await BatchStatusManager.markHttpOutcomeUnknown({
+            batch_id: job.batch_id,
+            error: "CONNECTOR_OUTCOME_UNKNOWN",
+            execution_claim_token: job.execution_claim_token
+        });
 
-                        return {
-                            outcome: "CONNECTOR_OUTCOME_UNKNOWN",
-                            skipped: true,
-                            sync_completed: false,
-                            batch_id: job.batch_id,
-                            http_status: response.status
-                        };
-                    }
+    if (marked !== true) {
+        throw new Error(
+            "CONNECTOR_OUTCOME_UNKNOWN_MARK_NOT_CONFIRMED"
+        );
+    }
+
+    console.error(
+        "⛔ UNCERTAIN CONNECTOR OUTCOME — DURABLE MARK VERIFIED:",
+        job.batch_id
+    );
+
+    return {
+        outcome: "CONNECTOR_OUTCOME_UNKNOWN",
+        skipped: true,
+        sync_completed: false,
+        batch_id: job.batch_id,
+        http_status: response.status
+    };
+}
                     if (
     errorData?.success === false &&
     (
@@ -538,11 +551,24 @@ throw new Error(
 
                  if (responseData?.success !== true) {
 
-   if (
+  if (
     responseData?.error_code === "CONNECTOR_OUTCOME_UNKNOWN"
 ) {
+    const marked =
+        await BatchStatusManager.markHttpOutcomeUnknown({
+            batch_id: job.batch_id,
+            error: "CONNECTOR_OUTCOME_UNKNOWN",
+            execution_claim_token: job.execution_claim_token
+        });
+
+    if (marked !== true) {
+        throw new Error(
+            "CONNECTOR_OUTCOME_UNKNOWN_MARK_NOT_CONFIRMED"
+        );
+    }
+
     console.error(
-        "⛔ UNCERTAIN CONNECTOR OUTCOME — RETRY BLOCKED:",
+        "⛔ UNCERTAIN CONNECTOR OUTCOME — DURABLE MARK VERIFIED:",
         job.batch_id
     );
 
