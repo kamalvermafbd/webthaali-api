@@ -620,6 +620,8 @@ try {
 } catch (error) {
     lockLost = true;
 
+    operationAbortController.abort();
+
     console.error(
         `[GLOBAL LOCK] Release failed: ${lock.connectorId}`,
         error

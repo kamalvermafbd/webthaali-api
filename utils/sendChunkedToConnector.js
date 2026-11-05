@@ -4,6 +4,10 @@ const fs = require("fs");
 
 const { buildChunks } = require("./ChunkBuilder");
 const { withGlobalConnectorLock } = require("../socketio/connectorOperationCoordinator");
+const connectorRegistry = require("../socketio/connectorRegistry");
+
+const masterFinalAckReceipts =
+    require("./masterFinalAckReceipts");
 
 /*
 const ServerProtocolReceiver =
@@ -45,11 +49,12 @@ async function sendChunkedToConnector(
     }
 
     const dispatchState = {
-        dispatched: false
-    };
+    dispatched: false,
+    removeVerificationAbortListener: null
+};
 
     try {
-        return await withGlobalConnectorLock(
+        const result = await withGlobalConnectorLock(
             connectorId,
             async (lockedSocket, signal) => {
 
@@ -121,15 +126,79 @@ if (typeof executionContext.after_transfer === "function") {
         );
     }
 
+    if (signal.aborted) {
+    dispatchState.disposeAcceptedFinalAck?.();
+    throw new Error(
+        `CONNECTOR_LOCK_LOST_BEFORE_VERIFICATION: ${connectorId}`
+    );
+}
+
+const retainedAckAbortHandler =
+    dispatchState.disposeAcceptedFinalAck;
+
+dispatchState.removeVerificationAbortListener = () => {
+    signal.removeEventListener(
+        "abort",
+        retainedAckAbortHandler
+    );
+};
+
+signal.addEventListener(
+    "abort",
+    retainedAckAbortHandler,
+    { once: true }
+);
+
+try {
+    if (signal.aborted) {
+        dispatchState.disposeAcceptedFinalAck?.();
+
+        throw new Error(
+            `CONNECTOR_LOCK_LOST_BEFORE_VERIFICATION: ${connectorId}`
+        );
+    }
+
     return await executionContext.after_transfer(
         transferResult,
         signal
     );
+} catch (verificationError) {
+    dispatchState.disposeAcceptedFinalAck?.();
+    throw verificationError;
+}
 }
 
 return transferResult;
             }
         );
+
+        const receipt = dispatchState.masterFinalReceipt;
+
+        if (
+            event === "getMasters" &&
+            receipt &&
+            result?.success === true &&
+            result.requestId === receipt.requestId &&
+            (
+                !executionContext?.request_id ||
+                typeof executionContext.after_transfer === "function"
+            )
+        ) {
+            try {
+    masterFinalAckReceipts.publish(receipt.candidate);
+} catch (publishError) {
+    console.error(
+        "MASTER_FINAL_ACK_RECEIPT_PUBLISH_FAILED",
+        {
+            connectorId,
+            requestId: receipt.requestId,
+            error: publishError?.message || String(publishError)
+        }
+    );
+}
+        }
+
+           return result;
 
     } catch (error) {
         if (error && typeof error === "object") {
@@ -142,7 +211,10 @@ return transferResult;
         }
 
         throw error;
-    }
+  } finally {
+    dispatchState.removeVerificationAbortListener?.();
+    dispatchState.disposeAcceptedFinalAck?.();
+}
 }
 
 async function executeChunkedTransfer(
@@ -254,6 +326,8 @@ let requestDispatched = false;
 function onGlobalLockAbort() {
     lockLost = true;
 
+    dispatchState.disposeAcceptedFinalAck?.();
+
     console.error(
         "GLOBAL CONNECTOR LOCK ABORTED:",
         connectorId,
@@ -277,9 +351,23 @@ signal.addEventListener(
 try {
     return await new Promise((resolve, reject) => {
 
-        let operationSettled = false;
+  let operationSettled = false;
+let preserveAcceptedFinalAck = false;
+const originalSocketId = socket.id;
 const pendingAckCleanups = new Set();
 
+function disposeAcceptedFinalAck() {
+    preserveAcceptedFinalAck = false;
+
+    socket.off(
+        "getMastersTransferComplete",
+        onGetMastersTransferComplete
+    );
+
+    socket.off("disconnect", disposeAcceptedFinalAck);
+}
+
+dispatchState.disposeAcceptedFinalAck = disposeAcceptedFinalAck;
         function rejectOnLockLost() {
     if (operationSettled) return;
 
@@ -299,6 +387,8 @@ cleanup();
 
 if (lockLost || signal.aborted) {
     operationSettled = true;
+
+    disposeAcceptedFinalAck();
 
     reject(
         new Error(
@@ -336,6 +426,18 @@ if (
 
 const requestId =
     durableRequestId || crypto.randomUUID();
+
+if (event === "getMasters") {
+    dispatchState.masterFinalReceipt = {
+        requestId,
+        candidate: masterFinalAckReceipts.begin({
+            socket,
+            connectorId,
+            requestId,
+            signal
+        })
+    };
+}
 
         let masterResult = null;
 
@@ -390,9 +492,13 @@ function tryCompleteGetMasters() {
         return;
     }
 
-    operationSettled = true;
-    cleanup();
-    resolve(masterResult);
+  preserveAcceptedFinalAck = true;
+
+socket.once("disconnect", disposeAcceptedFinalAck);
+
+operationSettled = true;
+cleanup();
+resolve(masterResult);
 }
 
 function startGetMastersFinalTimer() {
@@ -458,13 +564,33 @@ function onGetMastersTransferComplete(data) {
         return;
     }
 
+   if (
+    lockLost ||
+    signal.aborted
+) {
+    return;
+}
+
+if (operationSettled) {
     if (
-        operationSettled ||
-        lockLost ||
-        signal.aborted
-    ) {
-        return;
+   preserveAcceptedFinalAck &&
+transferCompleteReceived &&
+data.success === true &&
+socket.connected === true &&
+socket.id === originalSocketId &&
+socket.protocolReceiver?.collectionCancelled === false &&
+socket.connectorIds instanceof Set &&
+socket.connectorIds.has(connectorId) &&
+connectorRegistry.get(connectorId) === socket
+) {
+        socket.emit("getMastersTransferCompleteAck", {
+            requestId,
+            success: true
+        });
     }
+
+    return;
+}
 
      // Validate failure BEFORE handling duplicate success.
     if (data.success !== true) {
@@ -518,12 +644,12 @@ function cleanup() {
     socket.off(chunkEvent, onChunk);
     socket.off(completeEvent, onComplete);
 
-    if (event === "getMasters") {
-        socket.off(
-            "getMastersTransferComplete",
-            onGetMastersTransferComplete
-        );
-    }
+    if (
+    event === "getMasters" &&
+    !preserveAcceptedFinalAck
+) {
+    disposeAcceptedFinalAck();
+}
 
     socket.off("disconnect", onDisconnect);
 

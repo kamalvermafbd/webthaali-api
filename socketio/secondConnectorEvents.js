@@ -30,6 +30,8 @@ const supabase =
 const ServerProtocolReceiver =
     require("../utils/protocol/ServerProtocolReceiver");
 
+const masterFinalAckReceipts =
+    require("../utils/masterFinalAckReceipts");
 
 const {
     updateSyncProgress
@@ -388,7 +390,9 @@ console.log(
                 socket
             );
 
-        socket.protocolReceiver.start();
+                socket.protocolReceiver.start();
+
+        masterFinalAckReceipts.install(socket);
 
 socket.on("identifyConnector", async (data) => {
 
