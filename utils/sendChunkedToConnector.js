@@ -48,6 +48,33 @@ async function sendChunkedToConnector(
         );
     }
 
+        // getMasters must use an authorized durable execution.
+    // Reject legacy dispatch before acquiring the global lock.
+    if (event === "getMasters") {
+        const validDurableRequest =
+            typeof executionContext?.request_id === "string" &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                executionContext.request_id
+            ) &&
+            typeof executionContext.before_dispatch === "function" &&
+            typeof executionContext.after_transfer === "function" &&
+            typeof executionContext.identity_scope === "string" &&
+            executionContext.identity_scope.trim().length > 0 &&
+            typeof executionContext.company_identity === "string" &&
+            executionContext.company_identity.startsWith("guid:") &&
+            executionContext.company_identity.length > 5 &&
+            typeof executionContext.payload_fingerprint === "string" &&
+            /^sha256:[0-9a-f]{64}$/i.test(
+                executionContext.payload_fingerprint
+            );
+
+        if (!validDurableRequest) {
+            throw new Error(
+                "GET_MASTERS_DURABLE_EXECUTION_REQUIRED"
+            );
+        }
+    }
+    
     const dispatchState = {
     dispatched: false,
     removeVerificationAbortListener: null
@@ -1230,6 +1257,24 @@ if (isExplicitOutcomeUnknown) {
 
     // An uncertainty report is not a settled connector result.
     connectorError.connectorResponseReceived = false;
+} else if (
+    data.outcomeUnknown === true &&
+    [
+        "getMastersVoucherGuids",
+        "getMastersGroupGuids",
+        "getMastersLedgerGuids",
+        "getMastersStockGroupGuids",
+        "getMastersStockGuids",
+        "getMastersUnitGuids",
+        "getMastersGodownGuids",
+        "getMastersCostCentreGuids",
+        "ledgerByGuid",
+        "stockByGuid",
+        "voucherByGuid"
+    ].includes(event)
+) {
+    connectorError.outcomeUnknown = true;
+    connectorError.connectorResponseReceived = false;
 } else {
     connectorError.connectorResponseReceived = true;
 }
@@ -1379,11 +1424,34 @@ activeChunkTasks.add(chunkTask);
 
                 return;
             }
+if (
+    typeof data.batchId !== "string" ||
+    data.batchId.trim().length === 0
+) {
+    console.error(
+        "Rejecting chunk with missing or invalid batchId:",
+        data.batchId
+    );
+
+    socket.emit(ackEvent, {
+        batchId: data.batchId,
+        requestId,
+        chunkIndex: data.chunkIndex,
+        success: false,
+        error: "Invalid batchId"
+    });
+
+    return;
+}
+/*061126
 if (!responseBatchId) {
     responseBatchId = data.batchId;
 }
-
-if (data.batchId !== responseBatchId) {
+*/
+if (
+    responseBatchId !== null &&
+    data.batchId !== responseBatchId
+) {
     console.error(
         "Ignoring chunk from unexpected batch:",
         data.batchId
@@ -1435,7 +1503,10 @@ if (
     return;
 }
 
-
+// Reserve response batch only after chunk metadata validation.
+if (!responseBatchId) {
+    responseBatchId = data.batchId;
+}
 
 if (expectedChunks === null) {
     expectedChunks = data.totalChunks;
@@ -1613,14 +1684,17 @@ async function onComplete(data) {
             return;
         }
 
-        if (!data?.batchId) {
+      if (
+    typeof data?.batchId !== "string" ||
+    data.batchId.trim().length === 0
+) {
     operationSettled = true;
 
     cleanup();
 
     return reject(
         new Error(
-            "Complete event missing batchId"
+            "Complete event missing or invalid batchId"
         )
     );
 }

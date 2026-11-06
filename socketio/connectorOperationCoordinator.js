@@ -604,17 +604,41 @@ try {
         quarantineError
     );
 }
+
+if (lock.socket.connected) {
+    lock.socket.disconnect(true);
+}
+
+if (operationCompletedSafely) {
+    throw new Error(
+        `GLOBAL_CONNECTOR_UNSAFE_FINALIZATION: ${lock.connectorId}`
+    );
+}
 } else {
     try {
     const released = await releaseConnectorAndSocketLock(
-        lock.connectorId,
-        lock.socketId,
-        lock.ownerToken
-    );
+    lock.connectorId,
+    lock.socketId,
+    lock.ownerToken
+);
 
-   if (!released) {
+if (!released) {
     throw new Error(
         `Global lock release ownership mismatch: ${lock.connectorId}`
+    );
+}
+
+// Recheck after asynchronous Redis release.
+// Socket or registry may have changed while release was pending.
+if (
+    lockLost ||
+    operationAbortController.signal.aborted ||
+    !lock.socket.connected ||
+    !lock.socket.protocolReceiver ||
+    registry.get(lock.connectorId) !== lock.socket
+) {
+    throw new Error(
+        `GLOBAL_CONNECTOR_UNSAFE_AFTER_RELEASE: ${lock.connectorId}`
     );
 }
 } catch (error) {

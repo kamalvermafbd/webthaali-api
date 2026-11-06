@@ -370,14 +370,26 @@ const { result, salesResult } = await withGlobalConnectorLock(
     },
     { signal }
 );
-        if (!result?.success) {
+      if (result?.outcomeUnknown === true) {
+    const error = new Error(
+        result?.error ||
+        "Tally Mapping Data operation outcome unknown"
+    );
+
+    error.outcomeUnknown = true;
+    error.code = "TALLY_OPERATION_OUTCOME_UNKNOWN";
+
+    throw error;
+}
+
+if (!result?.success) {
     return {
         result,
         salesResult: null
     };
 }
 
-        const salesResult = await sendToConnector(
+       const salesResult = await sendToConnector(
     lockedSocket,
     "getSalesVouchers",
     {
@@ -386,7 +398,19 @@ const { result, salesResult } = await withGlobalConnectorLock(
     { signal }
 );
 
-               return { result, salesResult };
+if (salesResult?.outcomeUnknown === true) {
+    const error = new Error(
+        salesResult?.error ||
+        "Sales Vouchers operation outcome unknown"
+    );
+
+    error.outcomeUnknown = true;
+    error.code = "TALLY_OPERATION_OUTCOME_UNKNOWN";
+
+    throw error;
+}
+
+return { result, salesResult };
     }
 );
 
