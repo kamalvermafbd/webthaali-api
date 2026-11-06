@@ -219,17 +219,20 @@ const snapshotRows = rows
                     null
                 ),
 
-        master_id:
-            entity_type === "VOUCHER"
-                ? row.masterid
-                : (
-                    row.masterId ??
-                    row.master_id ??
-                    row.masterid ??
-                    null
-                )
+      master_id:
+    entity_type === "VOUCHER"
+        ? row.masterid
+        : (
+            row.masterId ??
+            row.master_id ??
+            row.masterid ??
+            null
+        ),
 
-    }));
+status: "COMPLETED",
+is_deleted: false
+
+}));
 
     
 const fs = require("fs");

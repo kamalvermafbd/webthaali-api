@@ -225,6 +225,21 @@ const snapshotRows = rows;
 
         }
 
+        // Reject snapshot rows with missing or invalid state flags.
+// Never silently convert deleted or unknown rows to active.
+if (
+    rows.some(row =>
+        !row ||
+        typeof row.status !== "string" ||
+        row.status.trim().length === 0 ||
+        typeof row.is_deleted !== "boolean"
+    )
+) {
+    throw new Error(
+        "SNAPSHOT_STATE_FLAGS_REQUIRED"
+    );
+}
+
        await this.processChunks({
 
 
