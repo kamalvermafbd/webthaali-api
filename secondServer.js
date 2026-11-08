@@ -134,6 +134,11 @@ const { sendToConnector } =
 const sendToConnectorWithGlobalLock =
   require("./socketio/sendToConnectorWithGlobalLock");
 
+const {
+    sendReconcileRequestWithGlobalLock
+} = require("./socketio/sendReconcileRequestWithGlobalLock");
+
+
 const registry =
   require("./socketio/connectorRegistry");
 
@@ -3766,13 +3771,19 @@ app.post("/sync/start", async (req, res) => {
         // ==========================================
         // ALREADY ACTIVE
         // ==========================================
-
+/* 081126
         if (result.already_active) {
 
             return res.status(409).json(result);
 
         }
-
+*/
+if (
+    result.already_active ||
+    result.reason === "RECONCILE_IN_PROGRESS"
+) {
+    return res.status(409).json(result);
+}
         return res.status(200).json(result);
 
     } catch (err) {
@@ -39270,6 +39281,206 @@ const result = await getTrialBalance({
 
     }
 
+});
+
+// ==============================================
+// RECONCILE NOW — REQUEST VALIDATION ONLY
+// ==============================================
+
+app.post("/reconcileNow", async (req, res) => {
+    const body = req.body || {};
+
+    const companyCode =
+        typeof body.company_code === "string"
+            ? body.company_code.trim()
+            : "";
+
+    const tallyOwner =
+        typeof body.tally_owner === "string"
+            ? body.tally_owner.trim()
+            : "";
+
+    const batchId =
+        typeof body.sync_batch_id === "string"
+            ? body.sync_batch_id.trim()
+            : "";
+
+    const executionClaimToken =
+        String(req.get("X-Execution-Claim-Token") || "").trim();
+
+    const uuidPattern =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    if (
+        !companyCode ||
+        !["USER", "CA"].includes(tallyOwner) ||
+        !uuidPattern.test(batchId) ||
+        !uuidPattern.test(executionClaimToken)
+    ) {
+        return res.status(400).json({
+            success: false,
+            error_code: "RECONCILE_REQUEST_INVALID"
+        });
+    }
+
+        // ==============================================
+    // RECONCILE NOW — DATABASE COMPANY IDENTITY
+    // ==============================================
+
+    try {
+        const isCA = tallyOwner === "CA";
+
+        const { data: companyRow, error: companyError } =
+            await supabase
+                .from("company")
+                .select(
+                    "company_code, " +
+                    "client_connector_id, ca_connector_id, " +
+                    "client_tally_company, ca_tally_company, " +
+                    "client_tally_company_guid, ca_tally_company_guid"
+                )
+                .eq("company_code", companyCode)
+                .single();
+
+        if (companyError || !companyRow) {
+            return res.status(404).json({
+                success: false,
+                error_code: "RECONCILE_COMPANY_NOT_FOUND"
+            });
+        }
+
+      const connectorId = String(
+    (isCA ? companyRow.ca_connector_id
+          : companyRow.client_connector_id) || ""
+).trim();
+
+        const tallyCompany = String(
+            (isCA
+                ? companyRow.ca_tally_company
+                : companyRow.client_tally_company) || ""
+        ).trim();
+
+        const tallyCompanyGuid = String(
+            (isCA
+                ? companyRow.ca_tally_company_guid
+                : companyRow.client_tally_company_guid) || ""
+        ).trim();
+
+        if (!connectorId || !tallyCompany || !tallyCompanyGuid) {
+            return res.status(409).json({
+                success: false,
+                error_code: "RECONCILE_COMPANY_NOT_PAIRED"
+            });
+        }
+
+    } catch (error) {
+        console.error(
+            "[RECONCILE NOW] COMPANY LOOKUP FAILED",
+            error
+        );
+
+
+        return res.status(500).json({
+            success: false,
+            error_code: "RECONCILE_COMPANY_LOOKUP_FAILED"
+        });
+    }
+
+        // ==============================================
+    // RECONCILE NOW — BATCH ELIGIBILITY (READ ONLY)
+    // ==============================================
+
+    try {
+        const { data: batch, error: batchError } =
+            await supabase
+                .from("sync_batches")
+                .select(
+                    "batch_id, company_code, tally_owner, " +
+                    "batch_status, worker_status, batch_closed, " +
+                    "ledger_reconciliation_completed, " +
+                    "execution_claim_token, error_message, " +
+                    "retry_claim_token, retry_lease_until, " +
+                    "cleanup_claim_token, cleanup_lease_until"
+                )
+                .eq("batch_id", batchId)
+                .maybeSingle();
+
+        if (batchError) {
+            throw batchError;
+        }
+
+        if (
+            !batch ||
+            batch.company_code !== companyCode ||
+            batch.tally_owner !== tallyOwner ||
+            batch.batch_status !== "COMPLETED" ||
+            batch.worker_status !== "COMPLETED" ||
+            batch.batch_closed !== false ||
+            batch.ledger_reconciliation_completed !== false ||
+            batch.execution_claim_token?.toLowerCase() !==
+    executionClaimToken.toLowerCase() ||
+            /^(CONNECTOR_OUTCOME_UNKNOWN:|HTTP_OUTCOME_UNKNOWN:)/.test(
+                batch.error_message || ""
+            )
+        ) {
+            return res.status(409).json({
+                success: false,
+                error_code: "RECONCILE_BATCH_NOT_ELIGIBLE"
+            });
+        }
+
+                // Verify the original execution claim using the DB RPC.
+        const { error: claimError } = await supabase.rpc(
+            "assert_sync_batch_reconciliation_claim",
+            {
+                p_batch_id: batchId,
+                p_execution_claim_token: executionClaimToken
+            }
+        );
+
+        if (claimError) {
+            return res.status(409).json({
+                success: false,
+                error_code: "RECONCILE_EXECUTION_CLAIM_INVALID"
+            });
+        }
+
+        if (
+            batch.retry_claim_token ||
+            batch.cleanup_claim_token ||
+            (
+                batch.retry_lease_until &&
+                new Date(batch.retry_lease_until).getTime() > Date.now()
+            ) ||
+            (
+                batch.cleanup_lease_until &&
+                new Date(batch.cleanup_lease_until).getTime() > Date.now()
+            )
+        ) {
+            return res.status(409).json({
+                success: false,
+                error_code: "RECONCILE_BATCH_OPERATION_ACTIVE"
+            });
+        }
+
+    } catch (error) {
+        console.error(
+            "[RECONCILE NOW] BATCH LOOKUP FAILED",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            error_code: "RECONCILE_BATCH_LOOKUP_FAILED"
+        });
+    }
+    // No batch claim, connector request, or database write yet.
+    return res.status(501).json({
+        success: false,
+        error_code: "RECONCILE_NOT_IMPLEMENTED",
+        message:
+            "Request format valid; batch eligibility and ownership verification pending"
+    });
 });
 
 // =========================

@@ -399,12 +399,24 @@ async hasCompletedSync({
 
             const result = Array.isArray(data) ? data[0] : data;
 
-            if (!result || !result.batch_id ||
-                typeof result.claimed !== "boolean" ||
-                typeof result.reason !== "string" ||
-                (result.worker_id !== null &&
-                 typeof result.worker_id !== "string")) {
-
+           if (
+    !result ||
+    typeof result.claimed !== "boolean" ||
+    typeof result.reason !== "string" ||
+    (
+        !result.batch_id &&
+        !(
+            result.claimed === false &&
+            result.reason === "RECONCILE_IN_PROGRESS" &&
+            result.batch_id === null &&
+            result.worker_id === null
+        )
+    ) ||
+    (
+        result.worker_id !== null &&
+        typeof result.worker_id !== "string"
+    )
+) {
                 throw new Error(
                     "Invalid HTTP sync batch claim result"
                 );

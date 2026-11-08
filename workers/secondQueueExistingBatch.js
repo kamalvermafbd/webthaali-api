@@ -766,6 +766,18 @@ const reservation = Array.isArray(reservationResult)
     : reservationResult;
 
 if (
+    reservation?.reserved === false &&
+    reservation?.reason === "RECONCILE_IN_PROGRESS" &&
+    reservation?.reserved_batch_id == null
+) {
+    return {
+        success: false,
+        queued: false,
+        reason: "RECONCILE_IN_PROGRESS"
+    };
+}
+
+if (
     reservation?.reserved !== true ||
     reservation?.reserved_batch_id == null ||
     String(reservation.reserved_batch_id) !== String(batch.id)

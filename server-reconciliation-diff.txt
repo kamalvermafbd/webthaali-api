@@ -1,0 +1,673 @@
+﻿diff --git a/secondServer.js b/secondServer.js
+index 6dfbaa5..546395c 100644
+--- a/secondServer.js
++++ b/secondServer.js
+@@ -134,6 +134,11 @@ const { sendToConnector } =
+ const sendToConnectorWithGlobalLock =
+   require("./socketio/sendToConnectorWithGlobalLock");
+ 
++const {
++    sendReconcileRequestWithGlobalLock
++} = require("./socketio/sendReconcileRequestWithGlobalLock");
++
++
+ const registry =
+   require("./socketio/connectorRegistry");
+ 
+@@ -39272,6 +39277,206 @@ const result = await getTrialBalance({
+ 
+ });
+ 
++// ==============================================
++// RECONCILE NOW ΓÇö REQUEST VALIDATION ONLY
++// ==============================================
++
++app.post("/reconcileNow", async (req, res) => {
++    const body = req.body || {};
++
++    const companyCode =
++        typeof body.company_code === "string"
++            ? body.company_code.trim()
++            : "";
++
++    const tallyOwner =
++        typeof body.tally_owner === "string"
++            ? body.tally_owner.trim()
++            : "";
++
++    const batchId =
++        typeof body.sync_batch_id === "string"
++            ? body.sync_batch_id.trim()
++            : "";
++
++    const executionClaimToken =
++        String(req.get("X-Execution-Claim-Token") || "").trim();
++
++    const uuidPattern =
++        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++
++    if (
++        !companyCode ||
++        !["USER", "CA"].includes(tallyOwner) ||
++        !uuidPattern.test(batchId) ||
++        !uuidPattern.test(executionClaimToken)
++    ) {
++        return res.status(400).json({
++            success: false,
++            error_code: "RECONCILE_REQUEST_INVALID"
++        });
++    }
++
++        // ==============================================
++    // RECONCILE NOW ΓÇö DATABASE COMPANY IDENTITY
++    // ==============================================
++
++    try {
++        const isCA = tallyOwner === "CA";
++
++        const { data: companyRow, error: companyError } =
++            await supabase
++                .from("company")
++                .select(
++                    "company_code, " +
++                    "client_connector_id, ca_connector_id, " +
++                    "client_tally_company, ca_tally_company, " +
++                    "client_tally_company_guid, ca_tally_company_guid"
++                )
++                .eq("company_code", companyCode)
++                .single();
++
++        if (companyError || !companyRow) {
++            return res.status(404).json({
++                success: false,
++                error_code: "RECONCILE_COMPANY_NOT_FOUND"
++            });
++        }
++
++      const connectorId = String(
++    (isCA ? companyRow.ca_connector_id
++          : companyRow.client_connector_id) || ""
++).trim();
++
++        const tallyCompany = String(
++            (isCA
++                ? companyRow.ca_tally_company
++                : companyRow.client_tally_company) || ""
++        ).trim();
++
++        const tallyCompanyGuid = String(
++            (isCA
++                ? companyRow.ca_tally_company_guid
++                : companyRow.client_tally_company_guid) || ""
++        ).trim();
++
++        if (!connectorId || !tallyCompany || !tallyCompanyGuid) {
++            return res.status(409).json({
++                success: false,
++                error_code: "RECONCILE_COMPANY_NOT_PAIRED"
++            });
++        }
++
++    } catch (error) {
++        console.error(
++            "[RECONCILE NOW] COMPANY LOOKUP FAILED",
++            error
++        );
++
++
++        return res.status(500).json({
++            success: false,
++            error_code: "RECONCILE_COMPANY_LOOKUP_FAILED"
++        });
++    }
++
++        // ==============================================
++    // RECONCILE NOW ΓÇö BATCH ELIGIBILITY (READ ONLY)
++    // ==============================================
++
++    try {
++        const { data: batch, error: batchError } =
++            await supabase
++                .from("sync_batches")
++                .select(
++                    "batch_id, company_code, tally_owner, " +
++                    "batch_status, worker_status, batch_closed, " +
++                    "ledger_reconciliation_completed, " +
++                    "execution_claim_token, error_message, " +
++                    "retry_claim_token, retry_lease_until, " +
++                    "cleanup_claim_token, cleanup_lease_until"
++                )
++                .eq("batch_id", batchId)
++                .maybeSingle();
++
++        if (batchError) {
++            throw batchError;
++        }
++
++        if (
++            !batch ||
++            batch.company_code !== companyCode ||
++            batch.tally_owner !== tallyOwner ||
++            batch.batch_status !== "COMPLETED" ||
++            batch.worker_status !== "COMPLETED" ||
++            batch.batch_closed !== false ||
++            batch.ledger_reconciliation_completed !== false ||
++            batch.execution_claim_token?.toLowerCase() !==
++    executionClaimToken.toLowerCase() ||
++            /^(CONNECTOR_OUTCOME_UNKNOWN:|HTTP_OUTCOME_UNKNOWN:)/.test(
++                batch.error_message || ""
++            )
++        ) {
++            return res.status(409).json({
++                success: false,
++                error_code: "RECONCILE_BATCH_NOT_ELIGIBLE"
++            });
++        }
++
++                // Verify the original execution claim using the DB RPC.
++        const { error: claimError } = await supabase.rpc(
++            "assert_sync_batch_reconciliation_claim",
++            {
++                p_batch_id: batchId,
++                p_execution_claim_token: executionClaimToken
++            }
++        );
++
++        if (claimError) {
++            return res.status(409).json({
++                success: false,
++                error_code: "RECONCILE_EXECUTION_CLAIM_INVALID"
++            });
++        }
++
++        if (
++            batch.retry_claim_token ||
++            batch.cleanup_claim_token ||
++            (
++                batch.retry_lease_until &&
++                new Date(batch.retry_lease_until).getTime() > Date.now()
++            ) ||
++            (
++                batch.cleanup_lease_until &&
++                new Date(batch.cleanup_lease_until).getTime() > Date.now()
++            )
++        ) {
++            return res.status(409).json({
++                success: false,
++                error_code: "RECONCILE_BATCH_OPERATION_ACTIVE"
++            });
++        }
++
++    } catch (error) {
++        console.error(
++            "[RECONCILE NOW] BATCH LOOKUP FAILED",
++            error
++        );
++
++        return res.status(500).json({
++            success: false,
++            error_code: "RECONCILE_BATCH_LOOKUP_FAILED"
++        });
++    }
++    // No batch claim, connector request, or database write yet.
++    return res.status(501).json({
++        success: false,
++        error_code: "RECONCILE_NOT_IMPLEMENTED",
++        message:
++            "Request format valid; batch eligibility and ownership verification pending"
++    });
++});
++
+ // =========================
+ // GET MASTERS
+ // =========================
+diff --git a/socketio/secondConnectorEvents.js b/socketio/secondConnectorEvents.js
+index 7dda06e..332204c 100644
+--- a/socketio/secondConnectorEvents.js
++++ b/socketio/secondConnectorEvents.js
+@@ -1,4 +1,4 @@
+-const registry = require("./connectorRegistry");
++∩╗┐const registry = require("./connectorRegistry");
+ 
+ 
+ const {
+@@ -201,7 +201,7 @@ async function recoverWaitingBatchesForCompanies({
+             if (batchError) {
+ 
+                 console.error(
+-                    "Γ¥î WAITING BATCH LOOKUP FAILED:",
++                    "├ó┬¥┼Æ WAITING BATCH LOOKUP FAILED:",
+                     {
+                         company_code:
+                             company.company_code,
+@@ -238,7 +238,7 @@ async function recoverWaitingBatchesForCompanies({
+                 .startsWith("CONNECTOR_OUTCOME_UNKNOWN:")
+         ) {
+             console.warn(
+-                "[WAITING BATCH RECOVERY] UNCERTAIN OUTCOME ΓÇö MANUAL REVIEW:",
++                "[WAITING BATCH RECOVERY] UNCERTAIN OUTCOME ├óΓé¼ΓÇ¥ MANUAL REVIEW:",
+                 batch.batch_id
+             );
+             continue;
+@@ -255,7 +255,7 @@ async function recoverWaitingBatchesForCompanies({
+                 watchdog.operation_status !== "FREE"
+             ) {
+                 console.log(
+-                    "ΓÅ│ WAITING BATCH RECOVERY DEFERRED: WATCHDOG NOT AVAILABLE",
++                    "├ó┬Å┬│ WAITING BATCH RECOVERY DEFERRED: WATCHDOG NOT AVAILABLE",
+         {
+             batch_id: batch.batch_id,
+             connector_id: company.connector_id,
+@@ -278,7 +278,7 @@ async function recoverWaitingBatchesForCompanies({
+             registry.get(String(company.connector_id)) !== socket
+         ) {
+             console.warn(
+-                "ΓÜá∩╕Å WAITING BATCH RECOVERY STOPPED: CONNECTOR NOT READY",
++                "├ó┼í┬á├»┬╕┬Å WAITING BATCH RECOVERY STOPPED: CONNECTOR NOT READY",
+                 {
+                     batch_id: batch.batch_id,
+                     connector_id: company.connector_id
+@@ -287,7 +287,7 @@ async function recoverWaitingBatchesForCompanies({
+             break;
+         }
+                     console.log(
+-                        "≡ƒöä TALLY COMPANY BACK: RECOVERING WAITING BATCH",
++                        "├░┼╕ΓÇ¥ΓÇ₧ TALLY COMPANY BACK: RECOVERING WAITING BATCH",
+                         {
+                             batch_id:
+                                 batch.batch_id,
+@@ -320,7 +320,7 @@ continue;
+                 } catch (batchRecoveryError) {
+ 
+                     console.error(
+-                        "Γ¥î WAITING BATCH RECOVERY ERROR:",
++                        "├ó┬¥┼Æ WAITING BATCH RECOVERY ERROR:",
+                         {
+                             batch_id:
+                                 batch.batch_id,
+@@ -342,7 +342,7 @@ continue;
+        } catch (error) {
+ 
+         console.error(
+-            "Γ¥î COMPANY BATCH RECOVERY ERROR:",
++            "├ó┬¥┼Æ COMPANY BATCH RECOVERY ERROR:",
+             error
+         );
+ 
+@@ -357,7 +357,7 @@ function registerEvents(io) {
+     io.on("connection", (socket) => {
+ 
+         console.log("================================");
+-        console.log("Γ£à Connector Connected");
++        console.log("├ó┼ôΓÇª Connector Connected");
+         console.log("Socket ID :", socket.id);
+         console.log("================================");
+ 
+@@ -376,7 +376,7 @@ registry.registerPending(
+ );
+ 
+ console.log(
+-    "≡ƒåò TEMP CONNECTOR CREATED:",
++    "├░┼╕ΓÇáΓÇó TEMP CONNECTOR CREATED:",
+     {
+         socket_id: socket.id,
+         pending_connector_id:
+@@ -476,7 +476,7 @@ if (isNewerQueueStatus) {
+     );
+ }
+ 
+-console.log("≡ƒôï CONNECTOR TALLY QUEUE STATUS:", {
++console.log("├░┼╕ΓÇ£ΓÇ╣ CONNECTOR TALLY QUEUE STATUS:", {
+     socket_id: socket.id,
+     queue_status: socket.reportedTallyQueueStatus || null
+ });
+@@ -497,7 +497,7 @@ console.log("≡ƒôï CONNECTOR TALLY QUEUE STATUS:", {
+        if (!company_guids.length) {
+ 
+     console.error(
+-        "Γ¥î No Tally company GUIDs received"
++        "├ó┬¥┼Æ No Tally company GUIDs received"
+     );
+ 
+     socket.emit("connector:registration:status", {
+@@ -581,7 +581,7 @@ console.log("≡ƒôï CONNECTOR TALLY QUEUE STATUS:", {
+     company_guids;
+ 
+ console.log(
+-    "≡ƒôï TALLY GUIDS AVAILABLE ON SOCKET:",
++    "├░┼╕ΓÇ£ΓÇ╣ TALLY GUIDS AVAILABLE ON SOCKET:",
+     {
+         socket_id: socket.id,
+         company_guids: socket.companyGuids
+@@ -602,7 +602,7 @@ const connectorIds = [
+ 
+ if (connectorIds.length === 0) {
+     console.warn(
+-        "ΓÜá∩╕Å CONNECTOR IDENTIFICATION: NO DATABASE MAPPING",
++        "├ó┼í┬á├»┬╕┬Å CONNECTOR IDENTIFICATION: NO DATABASE MAPPING",
+         {
+             socket_id: socket.id,
+             company_guid_count: company_guids.length
+@@ -636,7 +636,7 @@ for (const connectorId of connectorIds) {
+         socket.id
+     ).catch((error) => {
+         console.error(
+-            "Γ¥î AUTO-REGISTER OWNERSHIP CLAIM FAILED",
++            "├ó┬¥┼Æ AUTO-REGISTER OWNERSHIP CLAIM FAILED",
+             {
+                 socket_id: socket.id,
+                 connector_id: connectorId,
+@@ -689,7 +689,7 @@ for (const connectorId of connectorIds) {
+ 
+     if (!claimed.claimed) {
+         console.warn(
+-            "ΓÜá∩╕Å EXISTING CONNECTOR AUTO-REGISTER SKIPPED: ownership unavailable",
++            "├ó┼í┬á├»┬╕┬Å EXISTING CONNECTOR AUTO-REGISTER SKIPPED: ownership unavailable",
+             {
+                socket_id: socket.id,
+ connector_id: connectorId,
+@@ -722,7 +722,7 @@ socket.emit("connector:registration:status", {
+             }
+         ).catch((error) => {
+             console.error(
+-                "Γ¥î AUTO-REGISTER OWNERSHIP ROLLBACK FAILED",
++                "├ó┬¥┼Æ AUTO-REGISTER OWNERSHIP ROLLBACK FAILED",
+                 {
+                     connector_id: connectorId,
+                     error: error.message
+@@ -731,7 +731,7 @@ socket.emit("connector:registration:status", {
+         });
+ 
+         console.error(
+-            "Γ¥î EXISTING CONNECTOR AUTO REGISTER FAILED",
++            "├ó┬¥┼Æ EXISTING CONNECTOR AUTO REGISTER FAILED",
+             {
+                 socket_id: socket.id,
+                 connector_id: connectorId
+@@ -767,7 +767,7 @@ socket.emit("connector:registration:status", {
+             );
+     } catch (error) {
+         console.error(
+-            "Γ¥î AUTO-REGISTER HEALTH UPDATE FAILED",
++            "├ó┬¥┼Æ AUTO-REGISTER HEALTH UPDATE FAILED",
+             {
+                 socket_id: socket.id,
+                 connector_id: connectorId,
+@@ -810,7 +810,7 @@ socket.emit("connector:registration:status", {
+ 
+     if (!healthUpdate.updated) {
+         console.error(
+-            "Γ¥î AUTO-REGISTER HEALTH UPDATE REJECTED",
++            "├ó┬¥┼Æ AUTO-REGISTER HEALTH UPDATE REJECTED",
+             {
+                 socket_id: socket.id,
+                 connector_id: connectorId
+@@ -833,7 +833,7 @@ socket.emit("connector:registration:status", {
+             rollbackUpdated = rollback.updated;
+         } catch (error) {
+             console.error(
+-                "Γ¥î AUTO-REGISTER OWNERSHIP ROLLBACK FAILED",
++                "├ó┬¥┼Æ AUTO-REGISTER OWNERSHIP ROLLBACK FAILED",
+                 {
+                     connector_id: connectorId,
+                     socket_id: socket.id,
+@@ -893,7 +893,7 @@ socket.emit("connector:registration:status", {
+     }
+ 
+    console.log(
+-    "Γ£à EXISTING CONNECTOR AUTO REGISTERED WITH OWNERSHIP",
++    "├ó┼ôΓÇª EXISTING CONNECTOR AUTO REGISTERED WITH OWNERSHIP",
+     {
+         socket_id: socket.id,
+         connector_id: connectorId
+@@ -978,13 +978,13 @@ socket.emit("connector:registration:status", {
+         });
+     } else {
+         console.log(
+-            "ΓÅ│ WAITING BATCH RECOVERY DEFERRED: TALLY NOT CONFIRMED ONLINE",
++            "├ó┬Å┬│ WAITING BATCH RECOVERY DEFERRED: TALLY NOT CONFIRMED ONLINE",
+             { socket_id: socket.id, tally_status: socket.tallyStatus || "UNKNOWN" }
+         );
+     }
+         } else {
+             console.warn(
+-                "ΓÜá∩╕Å BATCH RECOVERY SKIPPED: SOCKET OWNS NO REGISTERED CONNECTOR",
++                "├ó┼í┬á├»┬╕┬Å BATCH RECOVERY SKIPPED: SOCKET OWNS NO REGISTERED CONNECTOR",
+                 {
+                     socket_id: socket.id,
+                     connector_ids: connectorIds
+@@ -995,7 +995,7 @@ socket.emit("connector:registration:status", {
+    } catch (err) {
+ 
+     console.error(
+-        "Γ¥î CONNECTOR IDENTITY ERROR:",
++        "├ó┬¥┼Æ CONNECTOR IDENTITY ERROR:",
+         err
+     );
+ 
+@@ -1024,7 +1024,7 @@ socket.emit("connector:registration:status", {
+ 
+             if (!connectorId) {
+                 console.error(
+-                    "Γ¥î CONNECTOR REGISTRATION REJECTED: connector_id missing",
++                    "├ó┬¥┼Æ CONNECTOR REGISTRATION REJECTED: connector_id missing",
+                     { socket_id: socket.id }
+                 );
+                 return;
+@@ -1037,7 +1037,7 @@ socket.emit("connector:registration:status", {
+                 socket.id
+             ).catch((error) => {
+                 console.error(
+-                    "Γ¥î CONNECTOR OWNERSHIP CLAIM FAILED",
++                    "├ó┬¥┼Æ CONNECTOR OWNERSHIP CLAIM FAILED",
+                     {
+                         socket_id: socket.id,
+                         connector_id: connectorId,
+@@ -1080,7 +1080,7 @@ socket.emit("connector:registration:status", {
+ 
+             if (!claimed.claimed) {
+                 console.error(
+-                    "Γ¥î CONNECTOR REGISTRATION REJECTED: ownership unavailable",
++                    "├ó┬¥┼Æ CONNECTOR REGISTRATION REJECTED: ownership unavailable",
+                     {
+                         socket_id: socket.id,
+ connector_id: connectorId,
+@@ -1110,7 +1110,7 @@ if (!registered) {
+                     );
+                 } catch (error) {
+                     console.error(
+-                        "Γ¥î OWNERSHIP ROLLBACK FAILED",
++                        "├ó┬¥┼Æ OWNERSHIP ROLLBACK FAILED",
+                         {
+                             socket_id: socket.id,
+                             connector_id: connectorId,
+@@ -1126,7 +1126,7 @@ if (!registered) {
+                 registry.remove(connectorId, socket);
+ 
+                 console.error(
+-                    "Γ¥î CONNECTOR REGISTRATION REJECTED",
++                    "├ó┬¥┼Æ CONNECTOR REGISTRATION REJECTED",
+                     {
+                         socket_id: socket.id,
+                         connector_id: connectorId,
+@@ -1172,7 +1172,7 @@ socket.connectorId = connectorId;
+                     );
+             } catch (error) {
+                 console.error(
+-                    "Γ¥î CONNECTOR HEALTH UPDATE FAILED",
++                    "├ó┬¥┼Æ CONNECTOR HEALTH UPDATE FAILED",
+                     {
+                         socket_id: socket.id,
+                         connector_id: connectorId,
+@@ -1225,7 +1225,7 @@ socket.connectorId = connectorId;
+                     );
+                 } catch (error) {
+                     console.error(
+-                        "Γ¥î CONNECTOR OWNERSHIP ROLLBACK FAILED",
++                        "├ó┬¥┼Æ CONNECTOR OWNERSHIP ROLLBACK FAILED",
+                         {
+                             socket_id: socket.id,
+                             connector_id: connectorId,
+@@ -1237,7 +1237,7 @@ socket.connectorId = connectorId;
+                 registry.remove(connectorId, socket);
+ 
+                 console.error(
+-                    "Γ¥î CONNECTOR REGISTRATION ROLLED BACK",
++                    "├ó┬¥┼Æ CONNECTOR REGISTRATION ROLLED BACK",
+                     {
+                         socket_id: socket.id,
+                         connector_id: connectorId
+@@ -1277,7 +1277,7 @@ socket.connectorId = connectorId;
+                 return;
+             }
+ 
+-            console.log("Γ£à CONNECTOR REGISTERED WITH OWNERSHIP", {
++            console.log("├ó┼ôΓÇª CONNECTOR REGISTERED WITH OWNERSHIP", {
+                 socket_id: socket.id,
+                 connector_id: connectorId,
+                 company_code: data.company_code
+@@ -1287,7 +1287,7 @@ socket.connectorId = connectorId;
+         socket.on("testExport", () => {
+ 
+             console.log("================================");
+-            console.log("≡ƒôª Test Export Request");
++            console.log("├░┼╕ΓÇ£┬ª Test Export Request");
+             console.log("Sending XML to Connector...");
+             console.log("================================");
+ 
+@@ -1320,7 +1320,7 @@ socket.on("getMastersProgress", async (data) => {
+     });
+ 
+     console.log(
+-        "≡ƒôè TALLY PROGRESS :",
++        "├░┼╕ΓÇ£┼á TALLY PROGRESS :",
+         {
+             batchId: data.batchId,
+             stage: data.stage,
+@@ -1345,7 +1345,7 @@ socket.on("getMastersProgress", async (data) => {
+     } catch (err) {
+ 
+         console.error(
+-            "Γ¥î SYNC PROGRESS UPDATE FAILED:",
++            "├ó┬¥┼Æ SYNC PROGRESS UPDATE FAILED:",
+             err.message
+         );
+ 
+@@ -1356,7 +1356,7 @@ socket.on("getMastersProgress", async (data) => {
+ 
+ 
+         // ============================================================
+-        // SHARED HEALTH UPDATES ΓÇö CURRENT SOCKET OWNER ONLY
++        // SHARED HEALTH UPDATES ├óΓé¼ΓÇ¥ CURRENT SOCKET OWNER ONLY
+         // ============================================================
+ 
+         async function updateOwnedSocketHealth(patch) {
+@@ -1376,7 +1376,7 @@ socket.on("getMastersProgress", async (data) => {
+ 
+                     if (!result.updated) {
+                         console.warn(
+-                            "ΓÜá∩╕Å SHARED HEALTH UPDATE SKIPPED: SOCKET IS NOT OWNER",
++                            "├ó┼í┬á├»┬╕┬Å SHARED HEALTH UPDATE SKIPPED: SOCKET IS NOT OWNER",
+                             {
+                                 socket_id: socket.id,
+                                 connector_id: connectorId
+@@ -1385,7 +1385,7 @@ socket.on("getMastersProgress", async (data) => {
+                     }
+                 } catch (error) {
+                     console.error(
+-                        "Γ¥î SHARED HEALTH UPDATE FAILED",
++                        "├ó┬¥┼Æ SHARED HEALTH UPDATE FAILED",
+                         {
+                             socket_id: socket.id,
+                             connector_id: connectorId,
+@@ -1441,7 +1441,7 @@ socket.on("getMastersProgress", async (data) => {
+             socket
+         }).catch(error => {
+             console.error(
+-                "Γ¥î TALLY ONLINE WAITING BATCH RECOVERY FAILED:",
++                "├ó┬¥┼Æ TALLY ONLINE WAITING BATCH RECOVERY FAILED:",
+                 error
+             );
+         });
+@@ -1605,7 +1605,7 @@ socket.on("getMastersProgress", async (data) => {
+                         : null
+             });
+ 
+-            console.log("≡ƒƒó TALLY REQUEST START:", data?.batchId);
++            console.log("├░┼╕┼╕┬ó TALLY REQUEST START:", data?.batchId);
+         });
+ 
+         // ============================================================
+@@ -1631,7 +1631,7 @@ socket.on("getMastersProgress", async (data) => {
+                         : null
+             });
+ 
+-            console.log("Γ£à TALLY REQUEST END:", data?.batchId);
++            console.log("├ó┼ôΓÇª TALLY REQUEST END:", data?.batchId);
+             if (
+     socket.tallyStatus === "ONLINE" &&
+     Array.isArray(socket.companyGuids) &&
+@@ -1642,7 +1642,7 @@ socket.on("getMastersProgress", async (data) => {
+         socket
+     }).catch(error => {
+         console.error(
+-            "Γ¥î CONNECTOR FREE WAITING BATCH RECOVERY FAILED:",
++            "├ó┬¥┼Æ CONNECTOR FREE WAITING BATCH RECOVERY FAILED:",
+             error
+         );
+     });
+@@ -1674,16 +1674,16 @@ socket.on("getMastersProgress", async (data) => {
+ 
+ 
+ 
+-            console.log("Γ¥î TALLY REQUEST ERROR:", data?.batchId);
++            console.log("├ó┬¥┼Æ TALLY REQUEST ERROR:", data?.batchId);
+         });
+ 
+         // ============================================================
+-        // DISCONNECT ΓÇö ONLY THE CURRENT OWNER CAN MARK DISCONNECTED
++        // DISCONNECT ├óΓé¼ΓÇ¥ ONLY THE CURRENT OWNER CAN MARK DISCONNECTED
+         // ============================================================
+ 
+         socket.on("disconnect", async (reason) => {
+     console.log("================================");
+-    console.log("Γ¥î Connector Disconnected");
++    console.log("├ó┬¥┼Æ Connector Disconnected");
+     console.log("Socket ID :", socket.id);
+     console.log("Reason :", reason);
+ 
+@@ -1697,7 +1697,8 @@ socket.on("getMastersProgress", async (data) => {
+                 ...(socket.connectorIds || []),
+                 socket.connectorId
+             ].filter(Boolean));
+-
++// Remove pending selection state before awaiting Redis.
++registry.remove(null, socket);
+             for (const connectorId of connectorIds) {
+                 try {
+                     const result =
+@@ -1712,7 +1713,7 @@ socket.on("getMastersProgress", async (data) => {
+ 
+                     if (!result.updated) {
+                         console.log(
+-                            "Γä╣∩╕Å DISCONNECT HEALTH UPDATE SKIPPED: SOCKET NO LONGER OWNS CONNECTOR",
++                            "├óΓÇ₧┬╣├»┬╕┬Å DISCONNECT HEALTH UPDATE SKIPPED: SOCKET NO LONGER OWNS CONNECTOR",
+                             {
+                                 socket_id: socket.id,
+                                 connector_id: connectorId
+@@ -1721,7 +1722,7 @@ socket.on("getMastersProgress", async (data) => {
+                     }
+                 } catch (error) {
+                     console.error(
+-                        "Γ¥î DISCONNECT HEALTH UPDATE FAILED",
++                        "├ó┬¥┼Æ DISCONNECT HEALTH UPDATE FAILED",
+                         {
+                             socket_id: socket.id,
+                             connector_id: connectorId,
+@@ -1744,4 +1745,4 @@ socket.on("getMastersProgress", async (data) => {
+ 
+ module.exports = {
+     registerEvents
+-};
+\ No newline at end of file
++};

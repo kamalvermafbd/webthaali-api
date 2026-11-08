@@ -151,6 +151,21 @@ if (
                 throw error;
             }
 
+            if (
+    dispatchResult?.success === false &&
+    dispatchResult?.queued === false &&
+    dispatchResult?.reason === "RECONCILE_IN_PROGRESS"
+) {
+    return {
+        success: false,
+        queued: false,
+        already_active: false,
+        recovered: false,
+        reason: "RECONCILE_IN_PROGRESS",
+        batch_id: existingBatch.batch_id,
+        worker_id: null
+    };
+}
             return {
 
                 success: true,
@@ -298,7 +313,20 @@ try {
     throw error;
 }
 
-
+if (
+    dispatchResult?.success === false &&
+    dispatchResult?.queued === false &&
+    dispatchResult?.reason === "RECONCILE_IN_PROGRESS"
+) {
+    return {
+        success: false,
+        queued: false,
+        already_active: false,
+        reason: "RECONCILE_IN_PROGRESS",
+        batch_id,
+        worker_id: null
+    };
+}
 // =========================================
 // FINAL RESPONSE
 // =========================================
