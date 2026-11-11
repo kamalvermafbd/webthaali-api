@@ -22959,7 +22959,7 @@ app.post(
 
   }
 );
-
+/* 11126
 app.post(
   "/sendConsolidatedShareEmail",
   async (req, res) => {
@@ -23143,6 +23143,209 @@ app.post(
 
   }
 );
+*/
+
+
+app.post("/sendConsolidatedShareEmail", async (req, res) => {
+  try {
+    const {
+      token,
+      email,
+      companyName,
+      companyEmail,
+      periodText
+    } = req.body || {};
+
+    if (!token || !email) {
+      return res.status(400).json({
+        success: false,
+        error: "Token and recipient email are required"
+      });
+    }
+
+    const apiKey = process.env.BREVO_API_KEY;
+    const senderEmail = process.env.RAM_ALERT_FROM;
+
+    if (!apiKey || !senderEmail) {
+      return res.status(500).json({
+        success: false,
+        error: "Brevo email configuration is missing"
+      });
+    }
+
+    const escapeHtml = value =>
+      String(value ?? "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[char]);
+
+    const safeCompanyName = escapeHtml(companyName || "Company");
+    const safePeriod = escapeHtml(periodText || "");
+    const safeCompanyEmail = escapeHtml(companyEmail || "");
+
+    const shareUrl =
+      `https://www.billey.in/share-consolidated/${encodeURIComponent(token)}`;
+
+    const html = `
+      <div style="
+        font-family:Arial,sans-serif;
+        max-width:600px;
+        margin:auto;
+        line-height:1.6;
+        color:#333;
+      ">
+        <h2>Consolidated Invoice Statement</h2>
+
+        <p>
+          Please find the consolidated invoice statement
+          shared by <strong>${safeCompanyName}</strong>.
+        </p>
+
+        ${periodText ? `
+          <p>Period: <strong>${safePeriod}</strong></p>
+        ` : ""}
+
+        <p>
+          This link contains all invoices included
+          in the selected period.
+        </p>
+
+        <p style="margin:25px 0;">
+          <a href="${shareUrl}" style="
+            background:#2563eb;
+            color:#ffffff;
+            padding:12px 20px;
+            text-decoration:none;
+            border-radius:6px;
+            display:inline-block;
+          ">
+            View Invoice Statement
+          </a>
+        </p>
+
+        <p>
+          If the button does not work, copy this link:
+        </p>
+
+        <p>
+          <a href="${shareUrl}">${shareUrl}</a>
+        </p>
+
+        <hr />
+
+        <p>
+          Regards,<br />
+          <strong>${safeCompanyName}</strong>
+        </p>
+
+        ${companyEmail ? `
+          <p>Contact: ${safeCompanyEmail}</p>
+        ` : ""}
+
+        <p style="color:#666;font-size:12px;">
+          Sent securely via Billey.
+        </p>
+      </div>
+    `;
+
+    const payload = {
+      sender: {
+        name: "Billey",
+        email: senderEmail
+      },
+      to: [{ email }],
+      subject:
+        `${companyName || "Company"} - Consolidated Invoice Statement`,
+      htmlContent: html
+    };
+
+    if (companyEmail) {
+      payload.replyTo = {
+        email: companyEmail
+      };
+    }
+
+    const https = require("https");
+
+    const result = await new Promise((resolve, reject) => {
+      const body = JSON.stringify(payload);
+
+      const request = https.request({
+        hostname: "api.brevo.com",
+        path: "/v3/smtp/email",
+        method: "POST",
+        headers: {
+          "api-key": apiKey,
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body)
+        },
+        timeout: 15000
+      }, response => {
+        let responseBody = "";
+
+        response.on("data", chunk => {
+          responseBody += chunk;
+        });
+
+        response.on("end", () => {
+          let data;
+
+          try {
+            data = JSON.parse(responseBody);
+          } catch {
+            data = { message: responseBody };
+          }
+
+          resolve({
+            status: response.statusCode,
+            data
+          });
+        });
+      });
+
+      request.on("timeout", () => {
+        request.destroy(new Error("Brevo request timed out"));
+      });
+
+      request.on("error", reject);
+
+      request.write(body);
+      request.end();
+    });
+
+    if (result.status < 200 || result.status >= 300) {
+      console.error("BREVO EMAIL FAILED:", result.status, result.data);
+
+      return res.status(502).json({
+        success: false,
+        error: result.data?.message || "Brevo email delivery request failed"
+      });
+    }
+
+    console.log("CONSOLIDATED EMAIL ACCEPTED BY BREVO:", {
+      messageId: result.data?.messageId
+    });
+
+    return res.json({
+      success: true,
+      message: "Email accepted by Brevo",
+      data: {
+        messageId: result.data?.messageId
+      }
+    });
+
+  } catch (error) {
+    console.error("CONSOLIDATED EMAIL ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: error.message || "Email request failed"
+    });
+  }
+});
 
 app.get(
   "/getConsolidatedShare/:token",
