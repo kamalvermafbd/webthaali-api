@@ -40100,6 +40100,18 @@ else {
             newBatch
         );
 
+        if (
+    dispatchResult?.success === false &&
+    dispatchResult?.queued === false &&
+    dispatchResult?.reason === "RECONCILE_IN_PROGRESS"
+) {
+    return res.status(409).json({
+        success: false,
+        queued: false,
+        reason: "RECONCILE_IN_PROGRESS",
+        batch_id: sync_batch_id
+    });
+}
 
     console.log(
         "SYNC BATCH DISPATCHED:",

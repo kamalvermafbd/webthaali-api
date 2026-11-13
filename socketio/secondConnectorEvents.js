@@ -430,10 +430,13 @@ socket.on("identifyConnector", async (data) => {
        rawQueueStatus.runningOperations >= 0 &&
     Number.isSafeInteger(rawQueueStatus.operationGeneration) &&
     rawQueueStatus.operationGeneration >= 0 &&
-    rawQueueStatus.idle === (
-    rawQueueStatus.pendingOperations === 0 &&
-    rawQueueStatus.runningOperations === 0
-);
+  (
+    rawQueueStatus.idle === false ||
+    (
+        rawQueueStatus.pendingOperations === 0 &&
+        rawQueueStatus.runningOperations === 0
+    )
+)
 
 const tallyQueueStatus = isValidQueueStatus
     ? {
@@ -1494,10 +1497,13 @@ socket.on("getMastersProgress", async (data) => {
         data.runningOperations >= 0 &&
         Number.isSafeInteger(data.operationGeneration) &&
         data.operationGeneration >= 0 &&
-        data.idle === (
-            data.pendingOperations === 0 &&
-            data.runningOperations === 0
-        );
+       (
+    data.idle === false ||
+    (
+        data.pendingOperations === 0 &&
+        data.runningOperations === 0
+    )
+);
 
     if (!valid || !socket.connected) {
         console.warn(

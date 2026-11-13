@@ -115,23 +115,39 @@ async function quarantineConnectorAndSocket(
         throw new Error("socketId is required");
     }
 
-    const record = JSON.stringify({
+   const token = String(ownerToken || "").trim();
+
+if (!token) {
+    throw new Error("QUARANTINE_OWNER_TOKEN_REQUIRED");
+}
+
+const record = JSON.stringify({
     connector_id: id,
     socket_id: sid,
-    owner_token: ownerToken
-        ? String(ownerToken).trim()
-        : null,
+    owner_token: token,
     reason: String(reason || "OPERATION_STATE_UNKNOWN"),
     quarantined_at: new Date().toISOString()
 });
 
-    await ensureConnected();
-
+await ensureConnected();
    const result = await redis.eval(
     `
         local connectorRecord = redis.call("GET", KEYS[1])
         local socketRecord = redis.call("GET", KEYS[2])
+      -- Reject another owner's locks or persistent markers.
+for i = 3, 6 do
+    local currentOwner = redis.call("GET", KEYS[i])
 
+    if currentOwner and currentOwner ~= ARGV[4] then
+        return 0
+    end
+end
+
+-- Both persistent markers must belong to this operation.
+if redis.call("GET", KEYS[5]) ~= ARGV[4]
+    or redis.call("GET", KEYS[6]) ~= ARGV[4] then
+    return 0
+end
         -- Never overwrite or partially create quarantine records.
     if connectorRecord or socketRecord then
     if not connectorRecord or not socketRecord
@@ -155,13 +171,17 @@ redis.call("SET", KEYS[1], ARGV[1])
 
         return 1
     `,
-  2,
-getConnectorQuarantineKey(id),
-getSocketQuarantineKey(sid),
-record,
-id,
-sid,
-ownerToken ? String(ownerToken).trim() : ""
+     6,
+    getConnectorQuarantineKey(id),
+    getSocketQuarantineKey(sid),
+    `billey:connector:operation-lock:${id}`,
+    `billey:socket:operation-lock:${sid}`,
+    getConnectorActiveOperationKey(id),
+    getSocketActiveOperationKey(sid),
+    record,
+    id,
+    sid,
+    token
 );
 
 if (Number(result) !== 1) {
@@ -628,10 +648,13 @@ async function updateConnectorTallyQueueStatus(
         status.runningOperations < 0 ||
         !Number.isSafeInteger(status.operationGeneration) ||
         status.operationGeneration < 0 ||
-        status.idle !== (
-            status.pendingOperations === 0 &&
-            status.runningOperations === 0
-        )
+      (
+    status.idle === true &&
+    (
+        status.pendingOperations !== 0 ||
+        status.runningOperations !== 0
+    )
+)
     ) {
         throw new Error("Invalid Tally queue status");
     }

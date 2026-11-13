@@ -1,0 +1,605 @@
+===== secondServer.js Lines 1-100 =====
+     1: require("dotenv").config();
+     2: 
+     3: const express = require("express");
+     4: 
+     5: 
+     6: const { google } = require("googleapis");
+     7: 
+     8: const http = require("http");
+     9: 
+    10: 
+    11: const cors = require("cors");
+    12: const crypto = require("crypto");
+    13: // Unique identity for this secondServer.js process.
+    14: // Changes automatically after every PM2 restart.
+    15: const CLEANUP_SERVER_INSTANCE_ID = crypto.randomUUID();
+    16: const bcrypt = require("bcrypt");
+    17: 
+    18: const fs = require("fs");
+    19: const path = require("path");
+    20: 
+    21: const LOG_DIR =
+    22:   path.join(__dirname, "logs");
+    23: 
+    24: if (!fs.existsSync(LOG_DIR)) {
+    25: 
+    26:   fs.mkdirSync(LOG_DIR, {
+    27:     recursive: true
+    28:   });
+    29: 
+    30: }
+    31: 
+    32: 
+    33: function logServerMemory(label = 'MEMORY CHECK') {
+    34:   const m = process.memoryUsage();
+    35: 
+    36:   const toMiB = bytes => (bytes / 1024 / 1024).toFixed(1);
+    37: 
+    38:   const line =
+    39:     `[${new Date().toISOString()}] ${label} | ` +
+    40:     `RSS=${toMiB(m.rss)} MiB | ` +
+    41:     `HeapUsed=${toMiB(m.heapUsed)} MiB | ` +
+    42:     `HeapTotal=${toMiB(m.heapTotal)} MiB | ` +
+    43:     `External=${toMiB(m.external)} MiB`;
+    44: 
+    45:   console.log(line);
+    46: }
+    47: 
+    48: setInterval(() => {
+    49:   logServerMemory('PERIODIC MEMORY');
+    50: }, 5 * 60 * 1000).unref();
+    51: 
+    52: 
+    53: function masterFlowDebug(data){
+    54: 
+    55:     fs.appendFileSync(
+    56:         "./logs/master-flow-debug.jsonl",
+    57:         JSON.stringify({
+    58: 
+    59:             time:
+    60:             new Date().toISOString(),
+    61: 
+    62:             ...data
+    63: 
+    64:         }) + "\n"
+    65:     );
+    66: 
+    67: }
+    68: 
+    69: function syncDebug(data){
+    70: 
+    71:     fs.appendFileSync(
+    72:         "./logs/master-flow-debug.jsonl",
+    73:         JSON.stringify({
+    74:             time:new Date().toISOString(),
+    75:             ...data
+    76:         }) + "\n"
+    77:     );
+    78: 
+    79: }
+    80: 
+    81: 
+    82: const nodemailer =
+    83:   require("nodemailer");
+    84: 
+    85: const rateLimit =
+    86:   require("express-rate-limit");
+    87: 
+    88: const { Resend } = require("resend");
+    89: 
+    90: const {
+    91:     getSyncMasterData,
+    92:     getTrialBalance,
+    93:     getStockGodownBalance
+    94: } = require("./services/syncService");
+    95: const {
+    96: 
+    97:   sendToTally,
+    98:   createUnit,
+    99:   createStockItem,
+   100:   createSalesLedger,
+===== secondServer.js Lines 32140-32210 =====
+ 32140: company:
+ 32141:   company,
+ 32142: 
+ 32143:   unitName:
+ 32144:   row.unitName,
+ 32145: 
+ 32146:   uqcCode:
+ 32147:     row.uqcCode,
+ 32148: 
+ 32149:   });
+ 32150: 
+ 32151:   // =========================
+ 32152: // SAVE UNIT XML
+ 32153: // =========================
+ 32154: 
+ 32155: fs.appendFileSync(
+ 32156: 
+ 32157:   path.join(
+ 32158:     __dirname,
+ 32159:     "unit-debug.log"
+ 32160:   ),
+ 32161: 
+ 32162:   "========== XML ==========\n\n" +
+ 32163: 
+ 32164:   xml +
+ 32165: 
+ 32166:   "\n\n"
+ 32167: 
+ 32168: );
+ 32169: 
+ 32170:  const response =
+ 32171:   await sendToConnector(
+ 32172: 
+ 32173:     socket,
+ 32174: 
+ 32175:     "createUnitsInTally",
+ 32176: 
+ 32177:     {
+ 32178:       xml
+ 32179:     }
+ 32180: 
+ 32181: );
+ 32182:   // =========================
+ 32183: // SAVE UNIT RESPONSE
+ 32184: // =========================
+ 32185: 
+ 32186: fs.appendFileSync(
+ 32187: 
+ 32188:   path.join(
+ 32189:     __dirname,
+ 32190:     "unit-debug.log"
+ 32191:   ),
+ 32192: 
+ 32193:   "========== RESPONSE ==========\n\n" +
+ 32194: 
+ 32195:   response +
+ 32196: 
+ 32197:   "\n\n"
+ 32198: 
+ 32199: );
+ 32200: 
+ 32201:     if (response.includes("<LINEERROR>")) {
+ 32202: 
+ 32203:   return res.json({
+ 32204: 
+ 32205:     success: false,
+ 32206: 
+ 32207:     error: response
+ 32208: 
+ 32209:   });
+ 32210: 
+===== secondServer.js Lines 33500-33570 =====
+ 33500: 
+ 33501:  roundOff: roundOffAmount,
+ 33502: 
+ 33503:   roundOffIsNegative,
+ 33504: 
+ 33505:   roundOffLedger:
+ 33506:   exportSettings.round_off_ledger,
+ 33507: 
+ 33508:   transporterName: invoice.transporter_name,
+ 33509: 
+ 33510: vehicleNo: invoice.vehicle_no,
+ 33511: 
+ 33512: grRRNo: invoice.gr_rr_no,
+ 33513: 
+ 33514: ewayBillNo: invoice.eway_bill_no,
+ 33515: 
+ 33516: dispatchDate: invoice.invoice_date.replaceAll("-", ""),
+ 33517: 
+ 33518: lrDate: invoice.lr_date
+ 33519:   ? invoice.lr_date.replaceAll("-", "")
+ 33520:   : "",
+ 33521: 
+ 33522: ewayDate: invoice.eway_date
+ 33523:   ? invoice.eway_date.replaceAll("-", "")
+ 33524:   : "",
+ 33525: 
+ 33526: creditPeriod: invoice.credit_period,
+ 33527: 
+ 33528: });
+ 33529: 
+ 33530: const connectorResult =
+ 33531:   await sendToConnector(
+ 33532: 
+ 33533:     socket,
+ 33534: 
+ 33535:     "exportSalesToTally",
+ 33536: 
+ 33537:     {
+ 33538:       xml: result
+ 33539:     }
+ 33540: 
+ 33541:   );
+ 33542: 
+ 33543: console.log(
+ 33544:   "SALES EXPORT CONNECTOR RESULT:",
+ 33545:   invoice.invoice_number,
+ 33546:   connectorResult
+ 33547: );
+ 33548: 
+ 33549: // =========================
+ 33550: // VALIDATE TALLY RESPONSE
+ 33551: // =========================
+ 33552: 
+ 33553: const tallyResponse =
+ 33554:   String(connectorResult || "");
+ 33555: 
+ 33556: const getTallyValue = (tag) => {
+ 33557: 
+ 33558:   const match = tallyResponse.match(
+ 33559:     new RegExp(
+ 33560:       `<${tag}>(.*?)</${tag}>`,
+ 33561:       "i"
+ 33562:     )
+ 33563:   );
+ 33564: 
+ 33565:   return match
+ 33566:     ? Number(match[1])
+ 33567:     : 0;
+ 33568: 
+ 33569: };
+ 33570: 
+===== secondServer.js Lines 36350-36420 =====
+ 36350: 
+ 36351:   stockName: stock.stockName,
+ 36352: 
+ 36353:   hsn: stock.hsn,
+ 36354: 
+ 36355:   unit: stock.unit,
+ 36356: 
+ 36357:   gstRate: stock.gstRate,
+ 36358: 
+ 36359: });
+ 36360: 
+ 36361: 
+ 36362: const xml =
+ 36363:   await createStockItem({
+ 36364: 
+ 36365:     company,
+ 36366: 
+ 36367:     stockName:
+ 36368:       stock.stockName,
+ 36369: 
+ 36370:     hsn:
+ 36371:       stock.hsn,
+ 36372: 
+ 36373:     unit:
+ 36374:       stock.unit,
+ 36375: 
+ 36376:     gstRate:
+ 36377:       stock.gstRate,
+ 36378: 
+ 36379:   });
+ 36380: 
+ 36381: console.log("XML TYPE :", typeof xml);
+ 36382: console.log("XML START :", String(xml).substring(0, 80));
+ 36383: 
+ 36384: const result =
+ 36385:   await sendToConnector(
+ 36386: 
+ 36387:     socket,
+ 36388: 
+ 36389:     "createStocksInTally",
+ 36390: 
+ 36391:     {
+ 36392:       xml
+ 36393:     }
+ 36394: 
+ 36395:   );
+ 36396: 
+ 36397:           
+ 36398: 
+ 36399: console.log(
+ 36400:   "createStockItem RESULT",
+ 36401:   result
+ 36402: );
+ 36403: 
+ 36404: 
+ 36405:         results.push(result);
+ 36406: 
+ 36407:       }
+ 36408: 
+ 36409:       res.json({
+ 36410: 
+ 36411:         success: true,
+ 36412: 
+ 36413:         results,
+ 36414: 
+ 36415:       });
+ 36416: 
+ 36417:     } catch (err) {
+ 36418: 
+ 36419:       console.error(err);
+ 36420: 
+===== secondServer.js Lines 36610-36680 =====
+ 36610:           error:
+ 36611:             "Invalid request"
+ 36612: 
+ 36613:         });
+ 36614: 
+ 36615:       }
+ 36616: 
+ 36617:       const results = [];
+ 36618: 
+ 36619:       for (const ledger of ledgers) {
+ 36620: 
+ 36621:         try {
+ 36622:         console.log("LEDGER FROM FRONTEND", ledger);
+ 36623: 
+ 36624:         console.log(
+ 36625:           "LEDGER NAME:",
+ 36626:           ledger.ledgerName
+ 36627:         );
+ 36628: 
+ 36629:           const xml =
+ 36630:             await createSalesLedger({
+ 36631: 
+ 36632:               company,
+ 36633: 
+ 36634:               ledgerName:
+ 36635:                 ledger.ledgerName,
+ 36636: 
+ 36637:             });
+ 36638: 
+ 36639:           const result =
+ 36640:             await sendToConnector(
+ 36641: 
+ 36642:               socket,
+ 36643: 
+ 36644:               "createSalesLedgersInTally",
+ 36645: 
+ 36646:               {
+ 36647:                 xml
+ 36648:               }
+ 36649: 
+ 36650:             );
+ 36651: 
+ 36652:               console.log(
+ 36653:               "createSalesLedger RESULT",
+ 36654:               result
+ 36655:             );
+ 36656: 
+ 36657:                     results.push({
+ 36658: 
+ 36659:               ledger:
+ 36660:                 ledger.ledgerName,
+ 36661: 
+ 36662:               success: true,
+ 36663: 
+ 36664:               result
+ 36665: 
+ 36666:             });
+ 36667: 
+ 36668:         }
+ 36669: 
+ 36670:         catch (err) {
+ 36671: 
+ 36672:          results.push({
+ 36673: 
+ 36674:           ledger:
+ 36675:             ledger.ledgerName,
+ 36676: 
+ 36677:           success: false,
+ 36678: 
+ 36679:           error:
+ 36680:             err.message
+===== secondServer.js Lines 36820-36890 =====
+ 36820:       }
+ 36821: 
+ 36822:       const results = [];
+ 36823: 
+ 36824:       for (const ledger of ledgers) {
+ 36825: 
+ 36826:         try {
+ 36827: 
+ 36828:           console.log(
+ 36829:             "LEDGER FROM FRONTEND",
+ 36830:             ledger
+ 36831:           );
+ 36832: 
+ 36833:           console.log(
+ 36834:             "LEDGER NAME:",
+ 36835:             ledger.ledgerName
+ 36836:           );
+ 36837: 
+ 36838:           const xml =
+ 36839:             await createTaxLedger({
+ 36840: 
+ 36841:               company,
+ 36842: 
+ 36843:               ledgerName:
+ 36844:                 ledger.ledgerName,
+ 36845: 
+ 36846:             });
+ 36847: 
+ 36848:           const result =
+ 36849:             await sendToConnector(
+ 36850: 
+ 36851:               socket,
+ 36852: 
+ 36853:               "createTaxLedgersInTally",
+ 36854: 
+ 36855:               {
+ 36856:                 xml
+ 36857:               }
+ 36858: 
+ 36859:             );
+ 36860: 
+ 36861:           console.log(
+ 36862:             "createTaxLedger RESULT",
+ 36863:             result
+ 36864:           );
+ 36865: 
+ 36866:           results.push({
+ 36867: 
+ 36868:             ledger:
+ 36869:               ledger.ledgerName,
+ 36870: 
+ 36871:             success: true,
+ 36872: 
+ 36873:             result
+ 36874: 
+ 36875:           });
+ 36876: 
+ 36877:         }
+ 36878: 
+ 36879:         catch (err) {
+ 36880: 
+ 36881:           results.push({
+ 36882: 
+ 36883:             ledger:
+ 36884:               ledger.ledgerName,
+ 36885: 
+ 36886:             success: false,
+ 36887: 
+ 36888:             error:
+ 36889:               err.message
+ 36890: 
+===== secondServer.js Lines 37110-37180 =====
+ 37110:     state:
+ 37111:       client.bill_state,
+ 37112: 
+ 37113:     pincode:
+ 37114:       client.bill_pincode,
+ 37115: 
+ 37116:     mobile:
+ 37117:       client.mobile,
+ 37118: 
+ 37119:     email:
+ 37120:       client.email,
+ 37121: 
+ 37122:     contactPerson:
+ 37123:       client.contact_person,
+ 37124: 
+ 37125:     creditPeriod:
+ 37126:       client.credit_period,
+ 37127: 
+ 37128:     openingBalance:
+ 37129:       client.opening_balance,
+ 37130: 
+ 37131:     gstRegistered:
+ 37132:       client.gst_registered,
+ 37133: 
+ 37134:     country:
+ 37135:       companyInfo.country
+ 37136: 
+ 37137:   });
+ 37138:           const result =
+ 37139:             await sendToConnector(
+ 37140: 
+ 37141:               socket,
+ 37142: 
+ 37143:               "createDebtorsInTally",
+ 37144: 
+ 37145:               {
+ 37146:                 xml
+ 37147:               }
+ 37148: 
+ 37149:             );
+ 37150: 
+ 37151:           console.log(
+ 37152:             "createDebtor RESULT",
+ 37153:             result
+ 37154:           );
+ 37155: 
+ 37156:           if (
+ 37157:   result?.success === false
+ 37158: ) {
+ 37159: 
+ 37160:   throw new Error(
+ 37161: 
+ 37162:     result.error ||
+ 37163: 
+ 37164:     "Debtor creation failed"
+ 37165: 
+ 37166:   );
+ 37167: 
+ 37168: }
+ 37169: 
+ 37170:       
+ 37171:           results.push({
+ 37172:     ledger: ledger.ledgerName,
+ 37173:     success: result.success,
+ 37174:     result
+ 37175: });
+ 37176: 
+ 37177:         }
+ 37178: 
+ 37179:         catch (err) {
+ 37180: 
+===== secondServer.js Lines 39440-39510 =====
+ 39440: 
+ 39441:         if (claimError) {
+ 39442:             return res.status(409).json({
+ 39443:                 success: false,
+ 39444:                 error_code: "RECONCILE_EXECUTION_CLAIM_INVALID"
+ 39445:             });
+ 39446:         }
+ 39447: 
+ 39448:         if (
+ 39449:             batch.retry_claim_token ||
+ 39450:             batch.cleanup_claim_token ||
+ 39451:             (
+ 39452:                 batch.retry_lease_until &&
+ 39453:                 new Date(batch.retry_lease_until).getTime() > Date.now()
+ 39454:             ) ||
+ 39455:             (
+ 39456:                 batch.cleanup_lease_until &&
+ 39457:                 new Date(batch.cleanup_lease_until).getTime() > Date.now()
+ 39458:             )
+ 39459:         ) {
+ 39460:             return res.status(409).json({
+ 39461:                 success: false,
+ 39462:                 error_code: "RECONCILE_BATCH_OPERATION_ACTIVE"
+ 39463:             });
+ 39464:         }
+ 39465: 
+ 39466:     } catch (error) {
+ 39467:         console.error(
+ 39468:             "[RECONCILE NOW] BATCH LOOKUP FAILED",
+ 39469:             error
+ 39470:         );
+ 39471: 
+ 39472:         return res.status(500).json({
+ 39473:             success: false,
+ 39474:             error_code: "RECONCILE_BATCH_LOOKUP_FAILED"
+ 39475:         });
+ 39476:     }
+ 39477:     // No batch claim, connector request, or database write yet.
+ 39478:     return res.status(501).json({
+ 39479:         success: false,
+ 39480:         error_code: "RECONCILE_NOT_IMPLEMENTED",
+ 39481:         message:
+ 39482:             "Request format valid; batch eligibility and ownership verification pending"
+ 39483:     });
+ 39484: });
+ 39485: 
+ 39486: // =========================
+ 39487: // GET MASTERS
+ 39488: // =========================
+ 39489: 
+ 39490: app.get("/getMasters", async (req, res) => {
+ 39491: 
+ 39492: let sync_batch_id;
+ 39493: let executionClaimToken = null;
+ 39494: let httpWorkerId;
+ 39495: let socket;
+ 39496: let connector_id;
+ 39497: let batchCompletedSuccessfully = false;
+ 39498: let httpSyncExecutionStarted = false;
+ 39499: 
+ 39500: let httpExecutionInvocationId = null;
+ 39501: let httpExecutionStartUnverified = false;
+ 39502: 
+ 39503: let httpExecutionGuardAttempted = false;
+ 39504: let httpExecutionGuardAcquired = false;
+ 39505: let httpExecutionGuardOwnerToken = null;
+ 39506: 
+ 39507: async function finalizeHttpExecution() {
+ 39508:     if (!httpExecutionInvocationId) {
+ 39509:         return {
+ 39510:             confirmed: false,
