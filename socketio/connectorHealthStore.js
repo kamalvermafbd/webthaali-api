@@ -1498,6 +1498,186 @@ token
     return Number(result) === 1;
 }
 
+
+ // ==========================================
+ // MANUAL RECONCILIATION ATOMIC RELEASE RECEIPT
+ // ==========================================
+
+async function releaseManualReconcileLockWithReceipt({
+    connectorId,
+    socketId,
+    ownerToken,
+    attemptId,
+    executionId,
+    serverInstanceId
+}) {
+    const id = normalizeConnectorId(connectorId);
+    const sid = String(socketId || "").trim();
+    const token = String(ownerToken || "").trim();
+
+      const UUID =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    if (
+        !sid ||
+        !UUID.test(token) ||
+        !UUID.test(attemptId || "") ||
+        !UUID.test(executionId || "") ||
+        !UUID.test(serverInstanceId || "")
+    ) {
+        throw new Error(
+            "MANUAL_RECONCILE_RELEASE_IDENTITY_INVALID"
+        );
+    }
+
+    await ensureConnected();
+
+    const receipt = {
+        attemptId,
+        executionId,
+        serverInstanceId,
+        connectorId: id,
+        socketId: sid,
+        ownerToken: token,
+        redisReleaseConfirmed: true
+    };
+
+    const receiptKey =
+        `billey:manual-reconcile:release-receipt:${attemptId}`;
+
+    const result = await redis.eval(
+        `
+        local existing = redis.call("GET", KEYS[7])
+
+        -- Existing receipt is immutable.
+        -- Replay must not modify any ownership keys.
+        if existing then
+            if existing == ARGV[2] then
+                return 2
+            end
+
+            return -1
+        end
+
+        -- All four ownership values must match.
+        if redis.call("GET", KEYS[1]) ~= ARGV[1]
+            or redis.call("GET", KEYS[2]) ~= ARGV[1]
+            or redis.call("GET", KEYS[3]) ~= ARGV[1]
+            or redis.call("GET", KEYS[4]) ~= ARGV[1] then
+            return 0
+        end
+
+        -- Never release quarantined ownership.
+        if redis.call("EXISTS", KEYS[5]) == 1
+            or redis.call("EXISTS", KEYS[6]) == 1 then
+            return 0
+        end
+
+        -- Record the receipt and release ownership
+        -- in one atomic Redis execution.
+        redis.call("SET", KEYS[7], ARGV[2])
+
+        redis.call(
+            "DEL",
+            KEYS[1],
+            KEYS[2],
+            KEYS[3],
+            KEYS[4]
+        )
+
+        return 1
+        `,
+        7,
+        `billey:connector:operation-lock:${id}`,
+        `billey:socket:operation-lock:${sid}`,
+        getConnectorActiveOperationKey(id),
+        getSocketActiveOperationKey(sid),
+        getConnectorQuarantineKey(id),
+        getSocketQuarantineKey(sid),
+        receiptKey,
+        token,
+        JSON.stringify(receipt)
+    );
+
+    const code = Number(result);
+
+    if (code === -1) {
+        throw new Error(
+            "MANUAL_RECONCILE_RELEASE_RECEIPT_CONFLICT"
+        );
+    }
+
+    if (code === 0) {
+        return {
+            released: false,
+            replayed: false,
+            receipt: null
+        };
+    }
+
+    if (code !== 1 && code !== 2) {
+        throw new Error(
+            "MANUAL_RECONCILE_RELEASE_RESULT_INVALID"
+        );
+    }
+
+    return {
+        released: true,
+        replayed: code === 2,
+        receipt
+    };
+}
+
+async function readManualReconcileReleaseReceipt(attemptId) {
+      const UUID =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    if (!UUID.test(attemptId || "")) {
+        throw new Error(
+            "MANUAL_RECONCILE_RECEIPT_ATTEMPT_INVALID"
+        );
+    }
+
+    await ensureConnected();
+
+    const raw = await redis.get(
+        `billey:manual-reconcile:release-receipt:${attemptId}`
+    );
+
+    if (raw === null) {
+        return null;
+    }
+
+    let receipt;
+
+    try {
+        receipt = JSON.parse(raw);
+    } catch {
+        throw new Error(
+            "MANUAL_RECONCILE_RECEIPT_CORRUPT"
+        );
+    }
+
+    if (
+        !receipt ||
+        receipt.attemptId !== attemptId ||
+        receipt.redisReleaseConfirmed !== true ||
+        !UUID.test(receipt.executionId || "") ||
+        !UUID.test(receipt.serverInstanceId || "") ||
+        !UUID.test(receipt.ownerToken || "") ||
+        typeof receipt.connectorId !== "string" ||
+        !receipt.connectorId ||
+        typeof receipt.socketId !== "string" ||
+        !receipt.socketId
+    ) {
+        throw new Error(
+            "MANUAL_RECONCILE_RECEIPT_INVALID"
+        );
+    }
+
+    return receipt;
+}
+
 // ==========================================
 // ATOMIC CONNECTOR + SOCKET LOCK RENEWAL
 // ==========================================
@@ -1900,7 +2080,9 @@ module.exports = {
     renewSocketOperationLock,
     getSocketOperationStatus,
     acquireConnectorAndSocketLock,
-    releaseConnectorAndSocketLock,
+       releaseConnectorAndSocketLock,
+    releaseManualReconcileLockWithReceipt,
+    readManualReconcileReleaseReceipt,
     renewConnectorAndSocketLock,
        quarantineConnectorAndSocket,
     clearVerifiedConnectorRecovery,

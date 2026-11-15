@@ -659,21 +659,28 @@ async function runManualReconciliationSession({
         const identity = envelope.result.identity;
         const receipt = envelope.releaseEvidence;
 
-        if (
-            !identity ||
-            !receipt ||
-            receipt.redisReleaseConfirmed !== true ||
-            receipt.attemptId !== attemptId ||
-            receipt.executionId !== executionId ||
-            receipt.serverInstanceId !== serverInstanceId ||
-            receipt.connectorId !== connectorId ||
-            receipt.socketId !== identity.socketId ||
-            receipt.ownerToken !== identity.ownerToken
-        ) {
-            throw new Error(
-                "RECONCILE_RELEASE_EVIDENCE_INVALID"
-            );
-        }
+       if (
+    !identity ||
+    identity.attemptId !== attemptId ||
+    identity.executionId !== executionId ||
+    identity.serverInstanceId !== serverInstanceId ||
+    identity.connectorId !== connectorId ||
+    typeof identity.socketId !== "string" ||
+    !identity.socketId ||
+    !UUID.test(identity.ownerToken || "") ||
+    !receipt ||
+    receipt.redisReleaseConfirmed !== true ||
+    receipt.attemptId !== attemptId ||
+    receipt.executionId !== executionId ||
+    receipt.serverInstanceId !== serverInstanceId ||
+    receipt.connectorId !== connectorId ||
+    receipt.socketId !== identity.socketId ||
+    receipt.ownerToken !== identity.ownerToken
+) {
+    throw new Error(
+        "RECONCILE_RELEASE_EVIDENCE_INVALID"
+    );
+}
 
            readings = envelope.result.readings;
         releaseIdentity = identity;

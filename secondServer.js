@@ -157,6 +157,10 @@ const {
 } = require("./services/manualReconciliation/ManualReconciliationSession");
 
 const {
+    recoverManualReconciliation
+} = require("./services/manualReconciliation/recoverManualReconciliation");
+
+const {
     executeDurableConnectorOperation
 } = require("./utils/executeDurableConnectorOperation");
 const {
@@ -39615,6 +39619,79 @@ app.post("/reconcileNow", async (req, res) => {
     }
 });
 
+
+ // ==============================================
+ // MANUAL RECONCILIATION — CONTROLLED RECOVERY
+ // ==============================================
+
+app.post("/reconcileRecovery", async (req, res) => {
+    // Remain disabled until caller authorization is
+    // enforced at the deployment boundary.
+    if (
+        process.env.MANUAL_RECONCILE_RECOVERY_ENABLED !== "true"
+    ) {
+        return res.status(503).json({
+            success: false,
+            error_code: "RECONCILE_RECOVERY_NOT_ACTIVATED"
+        });
+    }
+
+    const attemptId =
+        typeof req.body?.attempt_id === "string"
+            ? req.body.attempt_id.trim()
+            : "";
+
+    const uuidPattern =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    if (!uuidPattern.test(attemptId)) {
+        return res.status(400).json({
+            success: false,
+            error_code: "RECONCILE_RECOVERY_REQUEST_INVALID"
+        });
+    }
+
+    try {
+        const result = await recoverManualReconciliation({
+            supabase,
+            attemptId
+        });
+
+        if (result.recovered !== true) {
+            return res.status(409).json({
+                success: false,
+                error_code: "RECONCILE_RECOVERY_NOT_COMPLETED",
+                recovery_required: true,
+                attempt_id: attemptId,
+                recovery_state: result.reason
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            recovered: true,
+            attempt_id: attemptId,
+            recovery_state: result.reason
+        });
+
+    } catch (error) {
+        // Do not expose internal recovery evidence,
+        // database errors or original operation tokens.
+        console.error(
+            "[RECONCILE RECOVERY] FAILED",
+            {
+                error_code: "RECONCILE_RECOVERY_FAILED"
+            }
+        );
+
+        return res.status(503).json({
+            success: false,
+            error_code: "RECONCILE_RECOVERY_FAILED",
+            recovery_required: true,
+            attempt_id: attemptId
+        });
+    }
+});
 
 // =========================
 // GET MASTERS

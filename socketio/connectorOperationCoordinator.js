@@ -7,6 +7,7 @@ const registry = require("./connectorRegistry");
 const {
     acquireConnectorAndSocketLock,
     releaseConnectorAndSocketLock,
+    releaseManualReconcileLockWithReceipt,
     renewConnectorAndSocketLock,
     quarantineConnectorAndSocket,
     getConnectorWatchdogStatus
@@ -1192,23 +1193,42 @@ if (operationCompletedSafely) {
 }
 } else {
     try {
-   const released = identityEnabled
+   const releaseResult = receiptRequested
     ? await runOptInRedisCommand(
-        () => releaseConnectorAndSocketLock(
-            lock.connectorId,
-            lock.socketId,
-            lock.ownerToken
-        ),
+        () => releaseManualReconcileLockWithReceipt({
+            connectorId: lock.connectorId,
+            socketId: lock.socketId,
+            ownerToken: lock.ownerToken,
+            attemptId: completionIdentity.attemptId,
+            executionId: completionIdentity.executionId,
+            serverInstanceId: completionIdentity.serverInstanceId
+        }),
         `GLOBAL_CONNECTOR_RELEASE_TIMEOUT: ${lock.connectorId}`
     )
-       : await bounded(
-        releaseConnectorAndSocketLock(
-            lock.connectorId,
-            lock.socketId,
-            lock.ownerToken
-        ),
-        `GLOBAL_CONNECTOR_DEFAULT_RELEASE_TIMEOUT: ${lock.connectorId}`
-    );
+    : identityEnabled
+        ? await runOptInRedisCommand(
+            () => releaseConnectorAndSocketLock(
+                lock.connectorId,
+                lock.socketId,
+                lock.ownerToken
+            ),
+            `GLOBAL_CONNECTOR_RELEASE_TIMEOUT: ${lock.connectorId}`
+        )
+        : await bounded(
+            releaseConnectorAndSocketLock(
+                lock.connectorId,
+                lock.socketId,
+                lock.ownerToken
+            ),
+            `GLOBAL_CONNECTOR_DEFAULT_RELEASE_TIMEOUT: ${lock.connectorId}`
+        );
+
+const released = receiptRequested
+    ? (
+        releaseResult?.released === true &&
+        releaseResult?.replayed === false
+    )
+    : releaseResult === true;
 
 if (!released) {
     throw new Error(
@@ -1253,14 +1273,25 @@ if (
 // Only expose release evidence after confirmed Redis release
 // and final socket/registry validation.
 if (receiptRequested) {
+    const receipt = releaseResult?.receipt;
+
+    if (
+        !receipt ||
+        receipt.attemptId !== completionIdentity.attemptId ||
+        receipt.executionId !== completionIdentity.executionId ||
+        receipt.serverInstanceId !== completionIdentity.serverInstanceId ||
+        receipt.connectorId !== lock.connectorId ||
+        receipt.socketId !== lock.socketId ||
+        receipt.ownerToken !== lock.ownerToken ||
+        receipt.redisReleaseConfirmed !== true
+    ) {
+        throw new Error(
+            `GLOBAL_CONNECTOR_RELEASE_RECEIPT_INVALID: ${lock.connectorId}`
+        );
+    }
+
     completion.releaseEvidence = Object.freeze({
-        attemptId: completionIdentity.attemptId,
-        executionId: completionIdentity.executionId,
-        serverInstanceId: completionIdentity.serverInstanceId,
-        connectorId: lock.connectorId,
-        socketId: lock.socketId,
-        ownerToken: lock.ownerToken,
-        redisReleaseConfirmed: true
+        ...receipt
     });
 }
 } catch (error) {
