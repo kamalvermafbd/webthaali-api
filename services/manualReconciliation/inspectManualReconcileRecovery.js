@@ -59,53 +59,100 @@ function sameJson(a, b) {
     return false;
 }
 
-async function readOne(supabase, table, field, value) {
-    const { data, error } = await supabase
-        .from(table)
-        .select("*")
-        .eq(field, value)
-        .maybeSingle();
+async function readManualReconcileRecoverySnapshot(
+    supabase,
+    attemptId
+) {
+    if (
+        !supabase ||
+        typeof supabase.rpc !== "function" ||
+        typeof attemptId !== "string" ||
+        !UUID.test(attemptId)
+    ) {
+        fail("INPUT_INVALID");
+    }
 
-    if (error) {
+    let response;
+
+    try {
+        response = await supabase.rpc(
+            "read_manual_reconcile_recovery_snapshot_v1",
+            {
+                p_attempt_id: attemptId
+            }
+        );
+    } catch (cause) {
         throw new Error(
-            `RECONCILE_RECOVERY_READ_FAILED:${table}`,
-            { cause: error }
+            "RECONCILE_RECOVERY_SNAPSHOT_READ_FAILED",
+            { cause }
         );
     }
 
-    return data;
-}
+    if (response?.error) {
+        throw new Error(
+            "RECONCILE_RECOVERY_SNAPSHOT_READ_FAILED",
+            { cause: response.error }
+        );
+    }
 
-async function readOperations(supabase, attemptId) {
-    const rows = [];
-    const pageSize = 500;
+    const snapshot = response?.data;
 
-    for (let offset = 0; ; offset += pageSize) {
-        const { data, error } = await supabase
-            .from("manual_reconcile_operations")
-            .select(
-                "operation_id, attempt_id, reservation_id, " +
-                "operation_token, execution_id, operation_ordinal, " +
-                "operation_type, state, source_fetch_operation_id"
+    const record = value =>
+        value !== null &&
+        typeof value === "object" &&
+        !Array.isArray(value);
+
+    if (
+        !record(snapshot) ||
+        snapshot.version !== 1 ||
+        snapshot.attemptId !== attemptId.toLowerCase() ||
+        snapshot.complete !== true ||
+        !Array.isArray(snapshot.operations) ||
+        typeof snapshot.operationCount !== "string" ||
+        !/^(0|[1-9][0-9]*)$/.test(snapshot.operationCount) ||
+        BigInt(snapshot.operationCount) !==
+            BigInt(snapshot.operations.length)
+    ) {
+        fail("SNAPSHOT_RESULT_INVALID");
+    }
+
+    for (const key of [
+        "attempt",
+        "execution",
+        "checkpoint",
+        "finalization",
+        "status"
+    ]) {
+        if (
+            !Object.prototype.hasOwnProperty.call(snapshot, key) ||
+            (
+                snapshot[key] !== null &&
+                !record(snapshot[key])
             )
-            .eq("attempt_id", attemptId)
-            .order("operation_ordinal", { ascending: true })
-            .order("operation_id", { ascending: true })
-            .range(offset, offset + pageSize - 1);
-
-        if (error || !Array.isArray(data)) {
-            throw new Error(
-                "RECONCILE_RECOVERY_JOURNAL_READ_FAILED",
-                { cause: error }
-            );
-        }
-
-        rows.push(...data);
-
-        if (data.length < pageSize) {
-            return rows;
+        ) {
+            fail("SNAPSHOT_RESULT_INVALID");
         }
     }
+
+    if (snapshot.attempt === null) {
+        if (
+            snapshot.operations.length !== 0 ||
+            [
+                "execution",
+                "checkpoint",
+                "finalization",
+                "status"
+            ].some(key => snapshot[key] !== null)
+        ) {
+            fail("SNAPSHOT_RESULT_INVALID");
+        }
+    } else if (
+        snapshot.attempt.attempt_id !== snapshot.attemptId
+    ) {
+        fail("ATTEMPT_IDENTITY_INVALID");
+    }
+
+    return snapshot;
 }
 
 function inspectJournal(operations, attempt, execution) {
@@ -341,21 +388,21 @@ async function inspectManualReconcileRecovery({
     supabase,
     attemptId
 }) {
-    if (
+       if (
         !supabase ||
-        typeof supabase.from !== "function" ||
+        typeof supabase.rpc !== "function" ||
         typeof attemptId !== "string" ||
         !UUID.test(attemptId)
     ) {
         fail("INPUT_INVALID");
     }
 
-    const attempt = await readOne(
+       const snapshot = await readManualReconcileRecoverySnapshot(
         supabase,
-        "manual_reconcile_attempts",
-        "attempt_id",
         attemptId
     );
+
+    const attempt = snapshot.attempt;
 
     if (!attempt) {
         return {
@@ -365,41 +412,16 @@ async function inspectManualReconcileRecovery({
         };
     }
 
-    const [
+    const {
         execution,
         checkpoint,
         finalization,
         status,
-        operations,
-        redisReceipt
-    ] = await Promise.all([
-        readOne(
-            supabase,
-            "manual_reconcile_executions",
-            "attempt_id",
-            attemptId
-        ),
-        readOne(
-            supabase,
-            "manual_reconcile_pre_release_checkpoints",
-            "attempt_id",
-            attemptId
-        ),
-        readOne(
-            supabase,
-            "manual_reconcile_finalizations",
-            "attempt_id",
-            attemptId
-        ),
-        readOne(
-            supabase,
-            "manual_reconcile_status",
-            "id",
-            attempt.reservation_id
-        ),
-        readOperations(supabase, attemptId),
-        readManualReconcileReleaseReceipt(attemptId)
-    ]);
+        operations
+    } = snapshot;
+
+    const redisReceipt =
+        await readManualReconcileReleaseReceipt(attemptId);
 
     if (
         !status ||
@@ -491,5 +513,6 @@ async function inspectManualReconcileRecovery({
 }
 
 module.exports = {
-    inspectManualReconcileRecovery
+    inspectManualReconcileRecovery,
+    readManualReconcileRecoverySnapshot
 };

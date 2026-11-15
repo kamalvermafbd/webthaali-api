@@ -2,7 +2,8 @@
 "use strict";
 
 const {
-    inspectManualReconcileRecovery
+    inspectManualReconcileRecovery,
+    readManualReconcileRecoverySnapshot
 } = require("./inspectManualReconcileRecovery");
 
 const UUID =
@@ -32,7 +33,6 @@ async function recoverManualReconciliation({
 }) {
     if (
         !supabase ||
-        typeof supabase.from !== "function" ||
         typeof supabase.rpc !== "function" ||
         typeof attemptId !== "string" ||
         !UUID.test(attemptId)
@@ -63,19 +63,19 @@ async function recoverManualReconciliation({
         };
     }
 
-    // Re-read the immutable original attempt identity.
-    // Never use a token supplied by an HTTP client.
-    const { data: attempt, error: attemptError } =
-        await supabase
-            .from("manual_reconcile_attempts")
-            .select(
-                "attempt_id, operation_token, reservation_id"
-            )
-            .eq("attempt_id", attemptId)
-            .maybeSingle();
+        // Re-read the immutable original attempt identity
+    // through the privileged recovery snapshot RPC.
+    // Never accept an operation token from an HTTP client.
+
+    const snapshot =
+        await readManualReconcileRecoverySnapshot(
+            supabase,
+            attemptId
+        );
+
+    const attempt = snapshot.attempt;
 
     if (
-        attemptError ||
         !attempt ||
         attempt.attempt_id !== attemptId ||
         !UUID.test(attempt.operation_token || "")
