@@ -190,9 +190,94 @@ function makeHarness(options = {}) {
         }
     };
 
-    const supabase = {
+       const supabase = {
+        from(table) {
+            assert.equal(table, "tally_voucher_ledgers");
+            assert.equal(lockActive, true);
+
+            const query = {
+                select(columns) {
+                    assert.equal(columns, "voucher_guid");
+                    return this;
+                },
+
+                eq(column, value) {
+                    if (column === "company_code") {
+                        assert.equal(value, "C0053");
+                    } else if (column === "tally_owner") {
+                        assert.equal(value, "USER");
+                    } else {
+                        throw new Error(`UNEXPECTED_EQ:${column}`);
+                    }
+
+                    return this;
+                },
+
+                in(column, values) {
+                    assert.equal(column, "ledger_guid");
+                    assert.ok(Array.isArray(values));
+                    return this;
+                },
+
+                order(column, config) {
+                    assert.equal(column, "voucher_guid");
+                    assert.equal(config.ascending, true);
+                    return this;
+                },
+
+                async range(from, to) {
+                    assert.equal(from, 0);
+                    assert.equal(to, 999);
+
+                    return {
+                        data: [],
+                        error: null
+                    };
+                }
+            };
+
+            return query;
+        },
+
         async rpc(name, args) {
             events.push(name);
+
+                        if (name === "start_manual_reconcile_claimed_v1") {
+                assert.equal(lockActive, false);
+                assert.equal(args.p_company_code, "C0053");
+                assert.equal(args.p_tally_owner, "USER");
+                assert.equal(args.p_reconcile_type, "LEDGER");
+                assert.equal(
+                    args.p_batch_id,
+                    "11111111-1111-4111-8111-111111111111"
+                );
+                assert.equal(
+                    args.p_execution_claim_token,
+                    "22222222-2222-4222-8222-222222222222"
+                );
+
+                events.push("admission");
+
+                if (options.admissionFailure) {
+                    throw new Error("ADMISSION_UNKNOWN");
+                }
+
+                const admission = options.admission || {
+                    acquired: true,
+                    reason: "ACQUIRED",
+                    reservationToken: TOKEN
+                };
+
+                return {
+                    data: [{
+                        acquired: admission.acquired,
+                        reason: admission.reason,
+                        reservation_token:
+                            admission.reservationToken ?? null
+                    }],
+                    error: null
+                };
+            }
 
             if (
                 name ===
@@ -314,7 +399,7 @@ function makeHarness(options = {}) {
 
     return {
         state,
-        async run() {
+               async run() {
             return run({
                 supabase,
                 companyCode: "C0053",
@@ -322,7 +407,9 @@ function makeHarness(options = {}) {
                 connectorId: "connector-1",
                 tallyCompanyName: "Test Company",
                 tallyCompanyGuid: "company-guid-1",
-                booksBeginningFrom: "20260401"
+                booksBeginningFrom: "20260401",
+                batchId: "11111111-1111-4111-8111-111111111111",
+                executionClaimToken: "22222222-2222-4222-8222-222222222222"
             });
         }
     };

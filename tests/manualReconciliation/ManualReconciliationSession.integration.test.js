@@ -198,7 +198,7 @@ async function withHarness(mode, body) {
                 events.push("redis:renew");
                 return true;
             },
-            async releaseConnectorAndSocketLock(connector, socketId, owner) {
+                       async releaseConnectorAndSocketLock(connector, socketId, owner) {
                 requireLock(connector, socketId, owner);
                 assert.equal(state.checkpoint, true, "checkpoint must precede release");
                 events.push("redis:release");
@@ -207,6 +207,67 @@ async function withHarness(mode, body) {
                 events.push("redis:release:confirmed");
                 return true;
             },
+
+                        async releaseManualReconcileLockWithReceipt(args) {
+                requireLock(
+                    args.connectorId,
+                    args.socketId,
+                    args.ownerToken
+                );
+
+                assert.equal(
+                    state.checkpoint,
+                    true,
+                    "checkpoint must precede atomic release"
+                );
+
+                assert.equal(
+                    args.attemptId,
+                    state.binding.p_attempt_id
+                );
+
+                assert.equal(
+                    args.executionId,
+                    state.binding.p_execution_id
+                );
+
+                assert.equal(
+                    args.serverInstanceId,
+                    state.binding.p_server_instance_id
+                );
+
+                events.push("redis:release");
+
+                if (mode === "release-failure") {
+                    return {
+                        released: false,
+                        replayed: false,
+                        receipt: null
+                    };
+                }
+
+                const receipt = {
+                    attemptId: args.attemptId,
+                    executionId: args.executionId,
+                    serverInstanceId: args.serverInstanceId,
+                    connectorId: args.connectorId,
+                    socketId: args.socketId,
+                    ownerToken: args.ownerToken,
+                    redisReleaseConfirmed: true
+                };
+
+                state.lock = null;
+
+                events.push("redis:release:confirmed");
+
+                return {
+                    released: true,
+                    replayed: false,
+                    receipt
+                };
+            },
+
+           
             async quarantineConnectorAndSocket(connector, socketId, reason, owner) {
                 requireLock(connector, socketId, owner);
                 state.quarantines.push(reason);

@@ -2,7 +2,8 @@
 "use strict";
 
 const MAX_ID = 9223372036854775807n;
-const MAX_PAISE = BigInt(Number.MAX_SAFE_INTEGER);
+const MONEY_SCALE = 1000000n;
+const MAX_MONEY_UNITS = BigInt(Number.MAX_SAFE_INTEGER);
 
 const GUID = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/;
 
@@ -34,10 +35,8 @@ function normalizeMoney(value, signed) {
         );
     }
 
-    // PostgreSQL numeric::text may omit trailing zeroes.
-    // Normalize without JavaScript floating-point conversion.
     const match =
-        /^(-?)(0|[1-9]\d*)(?:\.(\d{1,2}))?$/.exec(value);
+        /^(-?)(0|[1-9]\d*)(?:\.(\d{1,6}))?$/.exec(value);
 
     if (
         !match ||
@@ -49,23 +48,24 @@ function normalizeMoney(value, signed) {
     }
 
     const fraction =
-        (match[3] || "").padEnd(2, "0");
+        (match[3] || "").padEnd(6, "0");
 
-    const paise =
-        BigInt(match[2]) * 100n +
+    const units =
+        BigInt(match[2]) * MONEY_SCALE +
         BigInt(fraction);
 
-    if (paise > MAX_PAISE) {
+    if (units > MAX_MONEY_UNITS) {
         throw new Error(
             "RECONCILE_VOUCHER_SQL_AMOUNT_INVALID"
         );
     }
 
-    const sign = match[1] === "-" ? "-" : "";
+    const sign =
+        match[1] === "-" && units !== 0n ? "-" : "";
 
-    return `${sign}${paise / 100n}.${String(
-        paise % 100n
-    ).padStart(2, "0")}`;
+    return `${sign}${units / MONEY_SCALE}.${String(
+        units % MONEY_SCALE
+    ).padStart(6, "0")}`;
 }
 
 function validateAllocations(value) {
@@ -125,160 +125,129 @@ async function fetchSqlVoucherEntries({
         folded.add(guid.toLowerCase());
     }
 
-    const pageSize = 500;
+    const { data, error } = await supabase.rpc(
+        "get_manual_reconcile_voucher_entries_snapshot_v1",
+        {
+            p_company_code: companyCode,
+            p_tally_owner: tallyOwner,
+            p_voucher_guids: voucherGuids
+        }
+    );
+
+    if (error) {
+        throw error;
+    }
+
+    if (
+        !data ||
+        typeof data !== "object" ||
+        Array.isArray(data) ||
+        data.complete !== true ||
+        !Array.isArray(data.rows) ||
+        data.rows.length > 10000
+    ) {
+        throw new Error(
+            "RECONCILE_VOUCHER_SQL_SNAPSHOT_INVALID"
+        );
+    }
+
     const allRows = [];
     const seenIds = new Set();
+    let previousId = 0n;
 
-    let afterId = 0n;
+    for (const row of data.rows) {
+        if (
+            !row ||
+            typeof row !== "object" ||
+            Array.isArray(row)
+        ) {
+            throw new Error(
+                "RECONCILE_VOUCHER_SQL_ROW_INVALID"
+            );
+        }
 
-    while (true) {
-        const { data, error } = await supabase.rpc(
-            "get_manual_reconcile_voucher_entries_page_v1",
-            {
-                p_company_code: companyCode,
-                p_tally_owner: tallyOwner,
-                p_voucher_guids: voucherGuids,
-                p_after_entry_id: afterId.toString(),
-                p_page_size: pageSize
-            }
-        );
+        const id = parseId(row.id);
 
-        if (error) {
-            throw error;
+        if (id <= previousId || seenIds.has(row.id)) {
+            throw new Error(
+                "RECONCILE_VOUCHER_SQL_ORDER_INVALID"
+            );
         }
 
         if (
-            !Array.isArray(data) ||
-            data.length > pageSize
+            row.company_code !== companyCode ||
+            row.tally_owner !== tallyOwner ||
+            !requested.has(row.voucher_guid) ||
+            typeof row.ledger_guid !== "string" ||
+            !GUID.test(row.ledger_guid)
         ) {
             throw new Error(
-                "RECONCILE_VOUCHER_SQL_PAGE_INVALID"
+                "RECONCILE_VOUCHER_SQL_SCOPE_INVALID"
             );
         }
 
-        for (const row of data) {
-            if (
-                !row ||
-                typeof row !== "object" ||
-                Array.isArray(row)
-            ) {
-                throw new Error(
-                    "RECONCILE_VOUCHER_SQL_ROW_INVALID"
-                );
-            }
-
-            const id = parseId(row.id);
-
-            if (
-                id <= afterId ||
-                seenIds.has(row.id)
-            ) {
-                throw new Error(
-                    "RECONCILE_VOUCHER_SQL_PAGINATION_INVALID"
-                );
-            }
-
-            if (
-                row.company_code !== companyCode ||
-                row.tally_owner !== tallyOwner ||
-                !requested.has(row.voucher_guid) ||
-                typeof row.ledger_guid !== "string" ||
-                !GUID.test(row.ledger_guid)
-            ) {
-                throw new Error(
-                    "RECONCILE_VOUCHER_SQL_SCOPE_INVALID"
-                );
-            }
-
-            // Deleted or unknown-state entries are unsafe.
-            if (row.is_deleted !== false) {
-                throw new Error(
-                    "RECONCILE_VOUCHER_SQL_DELETED_STATE_UNSAFE"
-                );
-            }
-
-            // Preserve allocation evidence for later classification.
-            const billAllocations =
-                validateAllocations(
-                    row.bill_allocations
-                );
-
-            const costcentreAllocations =
-                validateAllocations(
-                    row.costcentre_allocations
-                );
-
-            const amount = normalizeMoney(
-                row.amount,
-                true
+        if (row.is_deleted !== false) {
+            throw new Error(
+                "RECONCILE_VOUCHER_SQL_DELETED_STATE_UNSAFE"
             );
-
-            const debit = normalizeMoney(
-                row.debit,
-                false
-            );
-
-            const credit = normalizeMoney(
-                row.credit,
-                false
-            );
-
-            const amountPaise = BigInt(
-                amount
-                    .replace(/^-/, "")
-                    .replace(".", "")
-            );
-
-            const debitPaise = BigInt(
-                debit.replace(".", "")
-            );
-
-            const creditPaise = BigInt(
-                credit.replace(".", "")
-            );
-
-            if (
-                (
-                    debitPaise > 0n &&
-                    creditPaise > 0n
-                ) ||
-                (
-    amountPaise !== (debitPaise + creditPaise)
-)
-            ) {
-                throw new Error(
-                    "RECONCILE_VOUCHER_SQL_AMOUNT_INCONSISTENT"
-                );
-            }
-
-            seenIds.add(row.id);
-            afterId = id;
-
-            allRows.push({
-                id: row.id,
-                company_code: row.company_code,
-                tally_owner: row.tally_owner,
-                voucher_guid: row.voucher_guid,
-                ledger_guid: row.ledger_guid,
-                amount,
-                debit,
-                credit,
-                is_deleted: row.is_deleted,
-                bill_allocations: billAllocations,
-                costcentre_allocations:
-                    costcentreAllocations,
-                requiresStructuralReview:
-                    billAllocations.length > 0 ||
-                    costcentreAllocations.length > 0
-            });
         }
 
-        if (data.length < pageSize) {
-            break;
+        const billAllocations = validateAllocations(
+            row.bill_allocations
+        );
+
+        const costcentreAllocations = validateAllocations(
+            row.costcentre_allocations
+        );
+
+        const amount = normalizeMoney(row.amount, true);
+        const debit = normalizeMoney(row.debit, false);
+        const credit = normalizeMoney(row.credit, false);
+
+        const amountUnits = BigInt(amount.replace(".", ""));
+        const debitUnits = BigInt(debit.replace(".", ""));
+        const creditUnits = BigInt(credit.replace(".", ""));
+
+        if (
+            (debitUnits > 0n && creditUnits > 0n) ||
+            amountUnits !== (creditUnits - debitUnits)
+        ) {
+            throw new Error(
+                "RECONCILE_VOUCHER_SQL_AMOUNT_INCONSISTENT"
+            );
         }
+
+        seenIds.add(row.id);
+        previousId = id;
+
+        allRows.push({
+            id: row.id,
+            company_code: row.company_code,
+            tally_owner: row.tally_owner,
+            voucher_guid: row.voucher_guid,
+            ledger_guid: row.ledger_guid,
+            amount,
+            debit,
+            credit,
+            is_deleted: row.is_deleted,
+            bill_allocations: billAllocations,
+            costcentre_allocations: costcentreAllocations,
+            requiresStructuralReview:
+                billAllocations.length > 0 ||
+                costcentreAllocations.length > 0
+        });
     }
 
-    return allRows;
+    // SQL snapshot completeness evidence only.
+    // This does not establish Tally-side completeness
+    // or atomic consistency across SQL and Tally.
+    return {
+        entries: allRows,
+        sqlSnapshot: {
+            complete: data.complete === true,
+            requestedVoucherGuids: [...requested]
+        }
+    };
 }
 
 module.exports = {

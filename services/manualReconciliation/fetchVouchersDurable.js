@@ -7,9 +7,11 @@ const { sendDurableReconcileRequest } = require("../../socketio/sendDurableRecon
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{8}$/;
 const GUID = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/;
-const MONEY = /^(?:0|[1-9][0-9]*)\.[0-9]{2}$/;
-const MAX_PAISE = 9007199254740991n;
-const SIGNED_MONEY = /^-?(?:0|[1-9][0-9]*)\.[0-9]{2}$/;
+
+const MONEY = /^(?:0|[1-9][0-9]*)\.[0-9]{6}$/;
+const MAX_UNITS = BigInt(Number.MAX_SAFE_INTEGER);
+const SIGNED_MONEY = /^-?(?:0|[1-9][0-9]*)\.[0-9]{6}$/;
+
 function requireString(value, label) {
     if (typeof value !== "string" || !value.trim()) {
         throw new Error(`DURABLE_VOUCHER_${label}_INVALID`);
@@ -54,7 +56,7 @@ function validateEntries(raw, companyCode, tallyOwner, requested) {
     }
 
    const seen = new Set();
-const seenPairs = new Set();
+
 const requestedCaseIndex = new Map();
 const ledgerCaseIndex = new Map();
 
@@ -103,7 +105,13 @@ const ledgerCaseIndex = new Map();
 
         ledgerCaseIndex.set(foldedLedgerGuid, entry.ledgerGuid);
 
-     const amount = entry.amount;
+if (typeof entry.requiresStructuralReview !== "boolean") {
+    throw new Error(
+        "DURABLE_VOUCHER_STRUCTURAL_EVIDENCE_MISSING"
+    );
+}
+
+const amount = entry.amount;
 const debit = entry.debit;
 const credit = entry.credit;
 
@@ -121,34 +129,27 @@ if (
     throw new Error("DURABLE_VOUCHER_ENTRY_AMOUNT_INVALID");
 }
 
-const amountPaise = BigInt(
+
+const amountUnits = BigInt(
     amount.replace(/^-/, "").replace(".", "")
 );
-const debitPaise = BigInt(debit.replace(".", ""));
-const creditPaise = BigInt(credit.replace(".", ""));
+
+const debitUnits = BigInt(debit.replace(".", ""));
+const creditUnits = BigInt(credit.replace(".", ""));
 
 if (
-    amountPaise > MAX_PAISE ||
-    debitPaise > MAX_PAISE ||
-    creditPaise > MAX_PAISE ||
-    (debitPaise > 0n && creditPaise > 0n) ||
-   (
-    amountPaise !== (debitPaise + creditPaise)
-)
+    amountUnits > MAX_UNITS ||
+    debitUnits > MAX_UNITS ||
+    creditUnits > MAX_UNITS ||
+    (debitUnits > 0n && creditUnits > 0n) ||
+    amountUnits !== debitUnits + creditUnits
 ) {
     throw new Error("DURABLE_VOUCHER_ENTRY_AMOUNT_INVALID");
 }
-const pairKey = JSON.stringify([
-    entry.voucherGuid,
-    entry.ledgerGuid
-]);
 
-if (seenPairs.has(pairKey)) {
-    throw new Error("DURABLE_VOUCHER_DUPLICATE_LEDGER_PAIR");
-}
 
-seenPairs.add(pairKey);
 seen.add(entry.voucherGuid);
+
 
 return {
     companyCode,
@@ -157,8 +158,11 @@ return {
     ledgerGuid: entry.ledgerGuid,
     amount,
     debit,
-    credit
+    credit,
+    requiresStructuralReview:
+        entry.requiresStructuralReview
 };
+
     });
 
     if (seen.size !== requested.size) {
@@ -387,15 +391,124 @@ async function fetchVouchersDurable({
         );
     }
 
+    
     let entries;
 
     try {
+        if (
+            !raw ||
+            typeof raw !== "object" ||
+            Array.isArray(raw) ||
+            !Array.isArray(raw.presentGuids) ||
+            !Array.isArray(raw.missingGuids)
+        ) {
+            throw new Error(
+                "DURABLE_VOUCHER_COVERAGE_EVIDENCE_MISSING"
+            );
+        }
+
+        const requested = new Set(voucherGuids);
+        const present = new Set();
+        const missing = new Set();
+
+        for (const [values, target] of [
+            [raw.presentGuids, present],
+            [raw.missingGuids, missing]
+        ]) {
+            for (const value of values) {
+                if (
+                    typeof value !== "string" ||
+                    !GUID.test(value) ||
+                    !requested.has(value) ||
+                    present.has(value) ||
+                    missing.has(value)
+                ) {
+                    throw new Error(
+                        "DURABLE_VOUCHER_COVERAGE_INVALID"
+                    );
+                }
+
+                target.add(value);
+            }
+        }
+
+        if (present.size + missing.size !== requested.size) {
+            throw new Error(
+                "DURABLE_VOUCHER_COVERAGE_INCOMPLETE"
+            );
+        }
+
+        // Missing GUIDs have no independent absence proof.
+        // Never promote them to verified absence.
+        if (missing.size !== 0) {
+            throw new Error(
+                "DURABLE_VOUCHER_ABSENCE_NOT_VERIFIED"
+            );
+        }
+
+        // Connector evidence is diagnostic only.
+        // No independent completeness or atomic snapshot
+        // proof has been established.
+
+        const coverage = raw.snapshotCoverage;
+        const occurrence = raw.occurrenceVerification;
+
+        if (
+            !coverage ||
+            typeof coverage !== "object" ||
+            Array.isArray(coverage) ||
+            !Array.isArray(
+                coverage.tallyCompleteVoucherGuids
+            ) ||
+            coverage.tallyCompleteVoucherGuids.length !== 0 ||
+            !Array.isArray(
+                coverage.tallyUnverifiedMissingGuids
+            ) ||
+            coverage.tallyUnverifiedMissingGuids.length !== 0
+        ) {
+            throw new Error(
+                "DURABLE_VOUCHER_COMPLETENESS_EVIDENCE_INVALID"
+            );
+        }
+
+        if (
+            !occurrence ||
+            typeof occurrence !== "object" ||
+            Array.isArray(occurrence) ||
+            occurrence.schemaVersion !== 1 ||
+            ![
+                "NOT_RUN",
+                "COUNT_AGREEMENT_UNVERIFIED"
+            ].includes(occurrence.status) ||
+            occurrence.runtimeSemanticsVerified !== false ||
+            occurrence.atomicSnapshotVerified !== false ||
+            occurrence.settlementEligible !== false ||
+            raw.settlementEligible !== false
+        ) {
+            throw new Error(
+                "DURABLE_VOUCHER_OCCURRENCE_EVIDENCE_INVALID"
+            );
+        }
+
         entries = validateEntries(
             raw,
             companyCode,
             tallyOwner,
-            new Set(voucherGuids)
+            requested
         );
+
+        const entryGuids = new Set(
+            entries.map(entry => entry.voucherGuid)
+        );
+
+        if (
+            entryGuids.size !== present.size ||
+            [...present].some(guid => !entryGuids.has(guid))
+        ) {
+            throw new Error(
+                "DURABLE_VOUCHER_COVERAGE_ENTRY_MISMATCH"
+            );
+        }
     } catch (cause) {
         throw recoveryError(
             "DURABLE_VOUCHER_RESULT_INVALID",
@@ -403,6 +516,7 @@ async function fetchVouchersDurable({
             cause
         );
     }
+
 
     if (signal?.aborted) {
         throw recoveryError(
@@ -419,7 +533,16 @@ async function fetchVouchersDurable({
                 p_attempt_id: attemptId,
                 p_operation_token: operationToken,
                 p_request_id: requestId,
-                p_result_payload: { entries },
+           
+                p_result_payload: {
+                    entries,
+                    presentGuids: raw.presentGuids,
+                    missingGuids: raw.missingGuids,
+                    snapshotCoverage: raw.snapshotCoverage,
+                    occurrenceVerification: raw.occurrenceVerification,
+                    settlementEligible: raw.settlementEligible
+                },
+
                 p_execution_id: executionId
             }
         );
@@ -453,12 +576,21 @@ async function fetchVouchersDurable({
         );
     }
 
+  
     return {
         entries,
+        presentGuids: [...raw.presentGuids],
+        missingGuids: [],
+      
+        snapshotCoverage: raw.snapshotCoverage,
+        occurrenceVerification: raw.occurrenceVerification,
+        settlementEligible: raw.settlementEligible,
+
         fetchOperationId: operationId,
         fetchRequestId: requestId,
         fetchOperationOrdinal: operationOrdinal
     };
+
 }
 
 module.exports = { fetchVouchersDurable };

@@ -6,7 +6,7 @@ const {
 } = require("../../socketio/connectorHealthStore");
 
 const UUID =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const VERIFIED = "RESULT_VERIFIED";
 
@@ -172,6 +172,7 @@ function inspectJournal(operations, attempt, execution) {
             !execution ||
             !same(operation.execution_id, execution.execution_id) ||
             !OPERATION_TYPES.has(operation.operation_type) ||
+            operation.operation_type === "VOUCHER_APPLY" ||
             !Number.isSafeInteger(operation.operation_ordinal) ||
             operation.operation_ordinal < 0 ||
             ids.has(operation.operation_id) ||
@@ -233,10 +234,7 @@ function inspectJournal(operations, attempt, execution) {
     let incompleteFetchCount = 0;
 
     for (const operation of operations) {
-        if (
-            operation.operation_type !== "TALLY_FETCH" &&
-            operation.operation_type !== "VOUCHER_FETCH"
-        ) {
+        if (operation.operation_type !== "TALLY_FETCH") {
             continue;
         }
 
@@ -324,9 +322,10 @@ function verifyIdentity(
                 execution.owner_token
             ) ||
             checkpoint.final_recheck_completed !== true ||
-            !Array.isArray(
-                checkpoint.remaining_mismatch_ledger_guids
-            )
+            !Array.isArray(checkpoint.remaining_mismatch_ledger_guids) ||
+            !Array.isArray(checkpoint.voucher_investigation_guids) ||
+            checkpoint.voucher_investigation_required !==
+                (checkpoint.voucher_investigation_guids.length > 0)
         ) {
             fail("CHECKPOINT_IDENTITY_MISMATCH");
         }
@@ -378,6 +377,22 @@ function verifyIdentity(
         !sameJson(
             finalization.remaining_mismatch_ledger_guids,
             checkpoint.remaining_mismatch_ledger_guids
+        ) ||
+        !Array.isArray(finalization.remaining_mismatch_ledger_guids) ||
+        !Array.isArray(finalization.voucher_investigation_guids) ||
+        finalization.voucher_investigation_required !==
+            (finalization.voucher_investigation_guids.length > 0) ||
+        !sameJson(
+            finalization.voucher_investigation_guids,
+            checkpoint.voucher_investigation_guids
+        ) ||
+        finalization.voucher_investigation_required !==
+            checkpoint.voucher_investigation_required ||
+        finalization.voucher_aware_outcome !== (
+            finalization.remaining_mismatch_ledger_guids.length > 0 ||
+            finalization.voucher_investigation_guids.length > 0
+                ? "TRANSACTION_INVESTIGATION_REQUIRED"
+                : "RECONCILED"
         )
     ) {
         fail("FINALIZATION_EVIDENCE_INVALID");
@@ -388,7 +403,7 @@ async function inspectManualReconcileRecovery({
     supabase,
     attemptId
 }) {
-       if (
+    if (
         !supabase ||
         typeof supabase.rpc !== "function" ||
         typeof attemptId !== "string" ||
@@ -397,7 +412,7 @@ async function inspectManualReconcileRecovery({
         fail("INPUT_INVALID");
     }
 
-       const snapshot = await readManualReconcileRecoverySnapshot(
+    const snapshot = await readManualReconcileRecoverySnapshot(
         supabase,
         attemptId
     );
