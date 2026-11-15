@@ -25,12 +25,12 @@ ALTER TABLE public.manual_reconcile_operations
 ADD CONSTRAINT manual_reconcile_apply_source_check
 CHECK (
     (
-        operation_type = 'LEDGER_APPLY'
+        operation_type IN ('LEDGER_APPLY', 'VOUCHER_APPLY')
         AND source_fetch_operation_id IS NOT NULL
     )
     OR
     (
-        operation_type <> 'LEDGER_APPLY'
+        operation_type NOT IN ('LEDGER_APPLY', 'VOUCHER_APPLY')
         AND source_fetch_operation_id IS NULL
     )
 );

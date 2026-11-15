@@ -16,8 +16,15 @@ CREATE TABLE public.manual_reconcile_operations (
     operation_token uuid NOT NULL,
     operation_ordinal integer NOT NULL CHECK (operation_ordinal > 0),
     operation_type text NOT NULL CHECK (
-        operation_type IN ('TALLY_FETCH', 'LEDGER_APPLY', 'FINAL_RECHECK', 'FINAL_CLOSE')
-    ),
+    operation_type IN (
+        'TALLY_FETCH',
+        'VOUCHER_FETCH',
+        'LEDGER_APPLY',
+        'VOUCHER_APPLY',
+        'FINAL_RECHECK',
+        'FINAL_CLOSE'
+    )
+),
     ledger_guid text,
     request_id uuid,
     connector_id text,
@@ -39,14 +46,33 @@ CREATE TABLE public.manual_reconcile_operations (
         REFERENCES public.manual_reconcile_attempts
             (attempt_id, reservation_id, operation_token)
         ON UPDATE RESTRICT ON DELETE RESTRICT,
+    
     CHECK (
-        (operation_type = 'TALLY_FETCH'
-         AND request_id IS NOT NULL
-         AND ledger_guid IS NOT NULL AND length(btrim(ledger_guid)) > 0
-         AND connector_id IS NOT NULL AND length(btrim(connector_id)) > 0
-         AND tally_company_guid IS NOT NULL AND length(btrim(tally_company_guid)) > 0)
-        OR (operation_type <> 'TALLY_FETCH' AND request_id IS NULL)
+        (
+            operation_type IN ('TALLY_FETCH', 'VOUCHER_FETCH')
+            AND request_id IS NOT NULL
+            AND connector_id IS NOT NULL
+            AND length(btrim(connector_id)) > 0
+            AND tally_company_guid IS NOT NULL
+            AND length(btrim(tally_company_guid)) > 0
+            AND (
+                (
+                    operation_type = 'TALLY_FETCH'
+                    AND ledger_guid IS NOT NULL
+                    AND length(btrim(ledger_guid)) > 0
+                )
+                OR (
+                    operation_type = 'VOUCHER_FETCH'
+                    AND ledger_guid IS NULL
+                )
+            )
+        )
+        OR (
+            operation_type NOT IN ('TALLY_FETCH', 'VOUCHER_FETCH')
+            AND request_id IS NULL
+        )
     )
+
 );
 
 CREATE UNIQUE INDEX manual_reconcile_operations_request_id_uidx

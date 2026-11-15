@@ -1,45 +1,60 @@
+
 "use strict";
 
-function validateSqlAmount(value) {
-    if (
-        value === null ||
-        value === undefined ||
-        (typeof value !== "string" &&
-            typeof value !== "number")
-    ) {
+const MAX_PAISE = BigInt(Number.MAX_SAFE_INTEGER);
+const MAX_SQL_ID = 9223372036854775807n;
+
+function validateSqlAmount(value, signed = false) {
+    if (typeof value !== "string") {
         throw new Error("RECONCILE_SQL_ENTRY_AMOUNT_INVALID");
     }
 
-    if (
-        typeof value === "number" &&
-        (!Number.isFinite(value) ||
-            value >= 2 ** 46 ||
-            Object.is(value, -0))
-    ) {
+    if (value !== value.trim()) {
         throw new Error("RECONCILE_SQL_ENTRY_AMOUNT_INVALID");
     }
 
-    const text = String(value).trim();
+    const pattern = signed
+        ? /^-?(?:0|[1-9]\d*)\.\d{2}$/
+        : /^(?:0|[1-9]\d*)\.\d{2}$/;
 
-    const match =
-        /^\+?(?:(\d+)(?:\.(\d{1,2}))?|\.(\d{1,2}))$/.exec(text);
-
-    if (!match) {
+    if (!pattern.test(value)) {
         throw new Error("RECONCILE_SQL_ENTRY_AMOUNT_INVALID");
     }
 
-    const whole = match[1] || "0";
-    const fraction = (match[2] || match[3] || "").padEnd(2, "0");
+    const negative = value.startsWith("-");
+    const unsigned = negative ? value.slice(1) : value;
+    const [whole, fraction] = unsigned.split(".");
 
     const paise =
         BigInt(whole) * 100n + BigInt(fraction);
 
-    if (paise > BigInt(Number.MAX_SAFE_INTEGER)) {
+    if (paise > MAX_PAISE) {
         throw new Error("RECONCILE_SQL_ENTRY_AMOUNT_OUT_OF_RANGE");
     }
 
-    return text;
+    // Preserve signed zero and original signed amount.
+    return value;
 }
+
+function validateSqlId(value) {
+    if (typeof value !== "string") {
+        throw new Error("RECONCILE_SQL_ENTRY_ID_INVALID");
+    }
+
+    if (!/^[1-9]\d*$/.test(value)) {
+        throw new Error("RECONCILE_SQL_ENTRY_ID_INVALID");
+    }
+
+    const id = BigInt(value);
+
+    if (id > MAX_SQL_ID) {
+        throw new Error("RECONCILE_SQL_ENTRY_ID_INVALID");
+    }
+
+    // Never convert PostgreSQL bigint IDs to JS Number.
+    return value;
+}
+
 function normalizeSqlVoucherEntries(
     rows,
     { companyCode, tallyOwner } = {}
@@ -59,23 +74,22 @@ function normalizeSqlVoucherEntries(
     }
 
     return rows.map(row => {
+        if (
+            !row ||
+            typeof row !== "object" ||
+            Array.isArray(row)
+        ) {
+            throw new Error("RECONCILE_SQL_ROW_INVALID");
+        }
 
-        const id = row?.id;
+        const id = validateSqlId(row.id);
 
-if (
-    !Number.isSafeInteger(id) ||
-    id <= 0
-) {
-    throw new Error(
-        "RECONCILE_SQL_ENTRY_ID_INVALID"
-    );
-}
         const voucherGuid = String(
-            row?.voucher_guid || ""
+            row.voucher_guid || ""
         ).trim();
 
         const ledgerGuid = String(
-            row?.ledger_guid || ""
+            row.ledger_guid || ""
         ).trim();
 
         if (!voucherGuid || !ledgerGuid) {
@@ -85,6 +99,8 @@ if (
         }
 
         if (
+            row.amount === null ||
+            row.amount === undefined ||
             row.debit === null ||
             row.debit === undefined ||
             row.credit === null ||
@@ -95,18 +111,38 @@ if (
             );
         }
 
+        const amount = validateSqlAmount(row.amount, true);
         const debit = validateSqlAmount(row.debit);
-const credit = validateSqlAmount(row.credit);
+        const credit = validateSqlAmount(row.credit);
+
+        const amountPaise = BigInt(
+            amount.replace(/^-/, "").replace(".", "")
+        );
+        const debitPaise = BigInt(debit.replace(".", ""));
+        const creditPaise = BigInt(credit.replace(".", ""));
+
+        if (
+            (debitPaise > 0n && creditPaise > 0n) ||
+            (
+                amountPaise !== debitPaise &&
+                amountPaise !== creditPaise
+            )
+        ) {
+            throw new Error(
+                "RECONCILE_SQL_ENTRY_AMOUNT_INCONSISTENT"
+            );
+        }
 
         return {
-    id,
-    companyCode,
-    tallyOwner,
-    voucherGuid,
-    ledgerGuid,
-    debit,
-    credit
-};
+            id,
+            companyCode,
+            tallyOwner,
+            voucherGuid,
+            ledgerGuid,
+            amount,
+            debit,
+            credit
+        };
     });
 }
 

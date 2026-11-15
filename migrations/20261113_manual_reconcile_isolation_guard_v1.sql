@@ -114,7 +114,10 @@ BEGIN
               OR o.operation_token IS DISTINCT FROM p_operation_token
               OR o.execution_id IS DISTINCT FROM p_execution_id
               OR o.state IS DISTINCT FROM 'RESULT_VERIFIED'
-              OR o.operation_type NOT IN ('TALLY_FETCH', 'LEDGER_APPLY')
+              OR o.operation_type NOT IN (
+                   'TALLY_FETCH', 'LEDGER_APPLY',
+                   'VOUCHER_FETCH', 'VOUCHER_APPLY'
+               )
           )
     ) THEN
         RAISE EXCEPTION 'RECONCILE_CHECKPOINT_JOURNAL_NOT_VERIFIED';
@@ -168,6 +171,86 @@ BEGIN
           )
     ) THEN
         RAISE EXCEPTION 'RECONCILE_CHECKPOINT_APPLY_EVIDENCE_INVALID';
+    END IF;
+
+    -- Every voucher fetch must have exactly one verified apply.
+    IF EXISTS (
+        SELECT 1
+        FROM public.manual_reconcile_operations AS f
+        WHERE f.attempt_id = p_attempt_id
+          AND f.operation_type = 'VOUCHER_FETCH'
+          AND (
+              SELECT pg_catalog.count(*)
+              FROM public.manual_reconcile_operations AS a
+              WHERE a.source_fetch_operation_id = f.operation_id
+                AND a.operation_type = 'VOUCHER_APPLY'
+                AND a.attempt_id = f.attempt_id
+                AND a.reservation_id = f.reservation_id
+                AND a.operation_token = f.operation_token
+                AND a.execution_id = f.execution_id
+                AND a.operation_ordinal = f.operation_ordinal + 1
+                AND a.state = 'RESULT_VERIFIED'
+                AND a.input_payload->>'sourceFetchOperationId'
+                    = f.operation_id::text
+                AND a.result_payload->>'sourceFetchOperationId'
+                    = f.operation_id::text
+                AND pg_catalog.jsonb_typeof(
+                    a.input_payload->'expectedRows'
+                ) = 'array'
+                AND pg_catalog.jsonb_typeof(
+                    f.result_payload->'entries'
+                ) = 'array'
+                AND pg_catalog.jsonb_array_length(
+                    a.input_payload->'expectedRows'
+                ) = pg_catalog.jsonb_array_length(
+                    f.result_payload->'entries'
+                )
+                AND pg_catalog.jsonb_typeof(
+                    a.result_payload->'matchedRows'
+                ) = 'number'
+                AND (a.result_payload->>'matchedRows')::integer
+                    = pg_catalog.jsonb_array_length(
+                        f.result_payload->'entries'
+                    )
+                AND pg_catalog.jsonb_typeof(
+                    a.result_payload->'updatedRows'
+                ) = 'number'
+                AND (a.result_payload->>'updatedRows')::integer
+                    BETWEEN 0 AND pg_catalog.jsonb_array_length(
+                        f.result_payload->'entries'
+                    )
+          ) <> 1
+    ) THEN
+        RAISE EXCEPTION
+            'RECONCILE_CHECKPOINT_VOUCHER_FETCH_APPLY_MISMATCH';
+    END IF;
+
+    -- Reject orphan voucher applies and cross-execution links.
+    IF EXISTS (
+        SELECT 1
+        FROM public.manual_reconcile_operations AS a
+        WHERE a.attempt_id = p_attempt_id
+          AND a.operation_type = 'VOUCHER_APPLY'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM public.manual_reconcile_operations AS f
+              WHERE f.operation_id = a.source_fetch_operation_id
+                AND f.operation_type = 'VOUCHER_FETCH'
+                AND f.attempt_id = a.attempt_id
+                AND f.reservation_id = a.reservation_id
+                AND f.operation_token = a.operation_token
+                AND f.execution_id = a.execution_id
+                AND f.operation_ordinal + 1 = a.operation_ordinal
+                AND f.state = 'RESULT_VERIFIED'
+                AND a.state = 'RESULT_VERIFIED'
+                AND a.input_payload->>'sourceFetchOperationId'
+                    = f.operation_id::text
+                AND a.result_payload->>'sourceFetchOperationId'
+                    = f.operation_id::text
+          )
+    ) THEN
+        RAISE EXCEPTION
+            'RECONCILE_CHECKPOINT_VOUCHER_APPLY_EVIDENCE_INVALID';
     END IF;
 
     INSERT INTO public.manual_reconcile_pre_release_checkpoints (

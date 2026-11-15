@@ -1,4 +1,4 @@
-﻿const registry = require("./connectorRegistry");
+const registry = require("./connectorRegistry");
 
 
 const {
@@ -1287,18 +1287,6 @@ socket.connectorId = connectorId;
             });
         });
 
-        socket.on("testExport", () => {
-
-            console.log("================================");
-            console.log("ðŸ“¦ Test Export Request");
-            console.log("Sending XML to Connector...");
-            console.log("================================");
-
-            socket.emit("export", {
-                xml: "<TEST>HELLO TALLY</TEST>"
-            });
-
-        });
 
 socket.on("getMastersProgress", async (data) => {
 

@@ -153,6 +153,10 @@ const {
 } = require("./services/PairConnectorService");
 
 const {
+    runManualReconciliationSession
+} = require("./services/manualReconciliation/ManualReconciliationSession");
+
+const {
     executeDurableConnectorOperation
 } = require("./utils/executeDurableConnectorOperation");
 const {
@@ -39287,6 +39291,7 @@ const result = await getTrialBalance({
 // RECONCILE NOW — REQUEST VALIDATION ONLY
 // ==============================================
 
+
 app.post("/reconcileNow", async (req, res) => {
     const body = req.body || {};
 
@@ -39305,17 +39310,13 @@ app.post("/reconcileNow", async (req, res) => {
             ? body.sync_batch_id.trim()
             : "";
 
-    const executionClaimToken =
-        String(req.get("X-Execution-Claim-Token") || "").trim();
-
     const uuidPattern =
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
     if (
         !companyCode ||
         !["USER", "CA"].includes(tallyOwner) ||
-        !uuidPattern.test(batchId) ||
-        !uuidPattern.test(executionClaimToken)
+        !uuidPattern.test(batchId)
     ) {
         return res.status(400).json({
             success: false,
@@ -39323,8 +39324,28 @@ app.post("/reconcileNow", async (req, res) => {
         });
     }
 
-        // ==============================================
-    // RECONCILE NOW — DATABASE COMPANY IDENTITY
+    // Explicit activation gate.
+    // Do not enable until caller authorization,
+    // required SQL migrations and mutation fencing
+    // have been verified.
+    const RECONCILE_EXECUTION_ENABLED =
+        process.env.MANUAL_RECONCILE_EXECUTION_ENABLED === "true";
+
+    if (!RECONCILE_EXECUTION_ENABLED) {
+        return res.status(503).json({
+            success: false,
+            error_code: "RECONCILE_EXECUTION_NOT_ACTIVATED"
+        });
+    }
+
+    let connectorId;
+    let tallyCompany;
+    let tallyCompanyGuid;
+    let booksBeginningFrom;
+    let executionClaimToken = "";
+
+    // ==============================================
+    // DATABASE COMPANY IDENTITY
     // ==============================================
 
     try {
@@ -39337,7 +39358,9 @@ app.post("/reconcileNow", async (req, res) => {
                     "company_code, " +
                     "client_connector_id, ca_connector_id, " +
                     "client_tally_company, ca_tally_company, " +
-                    "client_tally_company_guid, ca_tally_company_guid"
+                    "client_tally_company_guid, ca_tally_company_guid, " +
+                    "client_tally_books_begining_from, " +
+                    "ca_tally_books_begining_from"
                 )
                 .eq("company_code", companyCode)
                 .single();
@@ -39349,21 +39372,28 @@ app.post("/reconcileNow", async (req, res) => {
             });
         }
 
-      const connectorId = String(
-    (isCA ? companyRow.ca_connector_id
-          : companyRow.client_connector_id) || ""
-).trim();
+        connectorId = String(
+            (isCA
+                ? companyRow.ca_connector_id
+                : companyRow.client_connector_id) || ""
+        ).trim();
 
-        const tallyCompany = String(
+        tallyCompany = String(
             (isCA
                 ? companyRow.ca_tally_company
                 : companyRow.client_tally_company) || ""
         ).trim();
 
-        const tallyCompanyGuid = String(
+        tallyCompanyGuid = String(
             (isCA
                 ? companyRow.ca_tally_company_guid
                 : companyRow.client_tally_company_guid) || ""
+        ).trim();
+
+        booksBeginningFrom = String(
+            (isCA
+                ? companyRow.ca_tally_books_begining_from
+                : companyRow.client_tally_books_begining_from) || ""
         ).trim();
 
         if (!connectorId || !tallyCompany || !tallyCompanyGuid) {
@@ -39373,12 +39403,18 @@ app.post("/reconcileNow", async (req, res) => {
             });
         }
 
+        if (!/^\d{8}$/.test(booksBeginningFrom)) {
+            return res.status(409).json({
+                success: false,
+                error_code: "RECONCILE_BOOKS_DATE_INVALID"
+            });
+        }
+
     } catch (error) {
         console.error(
             "[RECONCILE NOW] COMPANY LOOKUP FAILED",
-            error
+            { error_code: "RECONCILE_COMPANY_LOOKUP_FAILED" }
         );
-
 
         return res.status(500).json({
             success: false,
@@ -39386,8 +39422,8 @@ app.post("/reconcileNow", async (req, res) => {
         });
     }
 
-        // ==============================================
-    // RECONCILE NOW — BATCH ELIGIBILITY (READ ONLY)
+    // ==============================================
+    // EXISTING COMPLETED BATCH ELIGIBILITY
     // ==============================================
 
     try {
@@ -39417,8 +39453,7 @@ app.post("/reconcileNow", async (req, res) => {
             batch.worker_status !== "COMPLETED" ||
             batch.batch_closed !== false ||
             batch.ledger_reconciliation_completed !== false ||
-            batch.execution_claim_token?.toLowerCase() !==
-    executionClaimToken.toLowerCase() ||
+            !uuidPattern.test(batch.execution_claim_token || "") ||
             /^(CONNECTOR_OUTCOME_UNKNOWN:|HTTP_OUTCOME_UNKNOWN:)/.test(
                 batch.error_message || ""
             )
@@ -39429,16 +39464,18 @@ app.post("/reconcileNow", async (req, res) => {
             });
         }
 
-                // Verify the original execution claim using the DB RPC.
-        const { error: claimError } = await supabase.rpc(
-            "assert_sync_batch_reconciliation_claim",
-            {
-                p_batch_id: batchId,
-                p_execution_claim_token: executionClaimToken
-            }
-        );
+        executionClaimToken = batch.execution_claim_token;
 
-        if (claimError) {
+        const { data: claimData, error: claimError } =
+            await supabase.rpc(
+                "assert_sync_batch_reconciliation_claim",
+                {
+                    p_batch_id: batchId,
+                    p_execution_claim_token: executionClaimToken
+                }
+            );
+
+        if (claimError || claimData !== true) {
             return res.status(409).json({
                 success: false,
                 error_code: "RECONCILE_EXECUTION_CLAIM_INVALID"
@@ -39450,11 +39487,21 @@ app.post("/reconcileNow", async (req, res) => {
             batch.cleanup_claim_token ||
             (
                 batch.retry_lease_until &&
-                new Date(batch.retry_lease_until).getTime() > Date.now()
+                (
+                    !Number.isFinite(
+                        Date.parse(batch.retry_lease_until)
+                    ) ||
+                    Date.parse(batch.retry_lease_until) > Date.now()
+                )
             ) ||
             (
                 batch.cleanup_lease_until &&
-                new Date(batch.cleanup_lease_until).getTime() > Date.now()
+                (
+                    !Number.isFinite(
+                        Date.parse(batch.cleanup_lease_until)
+                    ) ||
+                    Date.parse(batch.cleanup_lease_until) > Date.now()
+                )
             )
         ) {
             return res.status(409).json({
@@ -39466,7 +39513,7 @@ app.post("/reconcileNow", async (req, res) => {
     } catch (error) {
         console.error(
             "[RECONCILE NOW] BATCH LOOKUP FAILED",
-            error
+            { error_code: "RECONCILE_BATCH_LOOKUP_FAILED" }
         );
 
         return res.status(500).json({
@@ -39474,14 +39521,100 @@ app.post("/reconcileNow", async (req, res) => {
             error_code: "RECONCILE_BATCH_LOOKUP_FAILED"
         });
     }
-    // No batch claim, connector request, or database write yet.
-    return res.status(501).json({
-        success: false,
-        error_code: "RECONCILE_NOT_IMPLEMENTED",
-        message:
-            "Request format valid; batch eligibility and ownership verification pending"
-    });
+
+    // ==============================================
+    // MANUAL RECONCILIATION EXECUTION
+    // ==============================================
+
+    const manualReconcileInput = {
+        supabase,
+        companyCode,
+        tallyOwner,
+        connectorId,
+        tallyCompanyName: tallyCompany,
+        tallyCompanyGuid,
+        booksBeginningFrom,
+        batchId,
+        executionClaimToken
+    };
+
+    try {
+        const result = await runManualReconciliationSession(
+            manualReconcileInput
+        );
+
+        if (!result || result.success !== true) {
+            const recoveryRequired =
+                result?.recoveryRequired === true;
+
+            return res.status(
+                recoveryRequired ? 503 : 409
+            ).json({
+                success: false,
+                error_code:
+                    result?.reason ||
+                    "RECONCILE_EXECUTION_NOT_COMPLETED",
+                recovery_required: recoveryRequired,
+                ...(result?.attemptId
+                    ? { attempt_id: result.attemptId }
+                    : {})
+            });
+        }
+
+        const requiresInvestigation =
+            result.requiresTransactionInvestigation === true;
+
+        return res.status(200).json({
+            success: true,
+            batch_id: batchId,
+            company_code: companyCode,
+            tally_owner: tallyOwner,
+            reconciliation_completed: !requiresInvestigation,
+            requires_transaction_investigation:
+                requiresInvestigation,
+            remaining_mismatch_ledger_guids:
+                result.remainingMismatchLedgerGuids || [],
+            ledgers: result.ledgers || [],
+            vouchers: result.vouchers || [],
+            ...(result.message
+                ? { message: result.message }
+                : {})
+        });
+
+    } catch (error) {
+        // Never serialize or log the original error.
+        // It can contain recovery credentials.
+
+        const recoveryRequired =
+            error?.reconcileRecoveryRequired === true ||
+            error?.reconcileCloseUncertain === true ||
+            error?.reconcileAdmissionUncertain === true;
+
+        console.error(
+            "[RECONCILE NOW] EXECUTION FAILED",
+            {
+                error_code: recoveryRequired
+                    ? "RECONCILE_RECOVERY_REQUIRED"
+                    : "RECONCILE_EXECUTION_FAILED",
+                recovery_required: recoveryRequired
+            }
+        );
+
+        return res.status(
+            recoveryRequired ? 503 : 500
+        ).json({
+            success: false,
+            error_code: recoveryRequired
+                ? "RECONCILE_RECOVERY_REQUIRED"
+                : "RECONCILE_EXECUTION_FAILED",
+            recovery_required: recoveryRequired,
+            ...(error?.reconcileAttemptId
+                ? { attempt_id: error.reconcileAttemptId }
+                : {})
+        });
+    }
 });
+
 
 // =========================
 // GET MASTERS

@@ -170,11 +170,14 @@ company = requireText(company, "COMPANY");
     operationOrdinal
 };
 
-    const payload = {
-        company,
-        ledgerGuid,
-        booksBeginningFrom
-    };
+    
+const payload = {
+    company,
+    expectedCompanyGuid: tallyCompanyGuid,
+    ledgerGuid,
+    booksBeginningFrom
+};
+
 
     const inputFingerprint = crypto
         .createHash("sha256")

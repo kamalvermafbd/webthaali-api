@@ -1,2 +1,7 @@
 node_modules
 .env
+# Local secrets and generated files
+.env
+.env.*
+supabase/.temp/
+desktop.ini

@@ -11,16 +11,44 @@ const {
 } = require("./fetchLedgerOpeningDurable");
 
 const {
-    startManualReconcileV2
-} = require("./manualReconcileAdmissionV2");
+    fetchVouchersDurable
+} = require("./fetchVouchersDurable");
+
+const {
+    startManualReconcileClaimed
+} = require("./manualReconcileClaimedAdmission");
+
+const {
+    fetchSqlVoucherEntries
+} = require("../../utils/reconciliations/fetchSqlVoucherEntries");
+
+const {
+    compareVoucherLedgerEntries
+} = require("./serverCompareVoucherLedgerEntries");
 
 const {
     applyLedgerOpeningDurable
 } = require("./applyLedgerOpeningDurable");
 
 const {
+    applyVoucherAmountsDurable
+} = require("./applyVoucherAmountsDurable");
+
+// DRAFT ONLY: keep false until SQL deployment, normal-sync exclusion,
+// and disposable-DB concurrency tests are verified.
+const VOUCHER_SETTLEMENT_ENABLED = false;
+
+const {
     getMismatchLedgerGuids
 } = require("./getMismatchLedgerGuids");
+
+const {
+    getReconciliationVoucherGuids
+} = require("./getReconciliationVoucherGuids");
+
+const {
+    getReconciliationVoucherDateRange
+} = require("./getReconciliationVoucherDateRange");
 
 const {
     bindManualReconcileExecution
@@ -39,6 +67,7 @@ function requireText(value, name) {
     return value.trim();
 }
 
+
 async function runManualReconciliationSession({
     supabase,
     companyCode,
@@ -47,8 +76,21 @@ async function runManualReconciliationSession({
     tallyCompanyName,
     tallyCompanyGuid,
     booksBeginningFrom,
+    batchId,
+    executionClaimToken,
     ledgerGuids
 }) {
+    if (
+        typeof batchId !== "string" ||
+        !UUID.test(batchId) ||
+        typeof executionClaimToken !== "string" ||
+        !UUID.test(executionClaimToken)
+    ) {
+        throw new Error(
+            "RECONCILE_BATCH_CLAIM_INPUT_INVALID"
+        );
+    }
+
     companyCode = requireText(companyCode, "COMPANY_CODE");
     connectorId = requireText(connectorId, "CONNECTOR_ID");
     tallyCompanyName = requireText(
@@ -91,6 +133,7 @@ async function runManualReconciliationSession({
     const workerId = `manual-reconcile:${crypto.randomUUID()}`;
     const attemptId = crypto.randomUUID();
 
+    
     const admissionInput = {
         supabase,
         attemptId,
@@ -98,15 +141,17 @@ async function runManualReconciliationSession({
         tallyOwner,
         reconcileType: "LEDGER",
         workerId,
-        batchId: null
+        batchId,
+        executionClaimToken
     };
 
     let admission;
 
     try {
-        admission = await startManualReconcileV2(
+        admission = await startManualReconcileClaimed(
             admissionInput
         );
+
     } catch (error) {
         // Admission may have committed even if the
         // RPC response was lost.
@@ -230,6 +275,77 @@ async function runManualReconciliationSession({
                     );
                 }
 
+                // ==============================================
+                // RECONCILE — SELECT EXISTING VOUCHER GUIDS
+                // ==============================================
+                // Scope: company_code + tally_owner + ledger_guid
+                // READ ONLY. No INSERT / UPDATE / DELETE.
+
+                const reconciliationVoucherGuids =
+                    await getReconciliationVoucherGuids({
+                        supabase,
+                        companyCode,
+                        tallyOwner,
+                        ledgerGuids: mismatchLedgerGuids
+                    });
+
+                if (
+                    !Array.isArray(reconciliationVoucherGuids) ||
+                    reconciliationVoucherGuids.some(
+                        guid =>
+                            typeof guid !== "string" ||
+                            !guid.trim()
+                    )
+                ) {
+                    throw new Error(
+                        "RECONCILE_VOUCHER_GUIDS_INVALID"
+                    );
+                }
+
+                            // ==============================================
+                // RECONCILE — RESOLVE EXISTING VOUCHER DATES
+                // ==============================================
+                // Dates come from tally_vouchers.
+                // Transaction details remain in tally_voucher_ledgers.
+
+                let reconciliationVoucherDateRange = null;
+
+                if (reconciliationVoucherGuids.length > 0) {
+                    reconciliationVoucherDateRange =
+                        await getReconciliationVoucherDateRange({
+                            supabase,
+                            companyCode,
+                            tallyOwner,
+                            voucherGuids: reconciliationVoucherGuids
+                        });
+
+                    if (
+                        reconciliationVoucherDateRange.fromDate <
+                        booksBeginningFrom
+                    ) {
+                        throw new Error(
+                            "RECONCILE_VOUCHER_BEFORE_BOOKS_BEGINNING"
+                        );
+                    }
+                }
+
+                if (signal.aborted) {
+                    throw new Error(
+                        "RECONCILE_SESSION_ABORTED"
+                    );
+                }
+
+                // Reject unsupported voucher settlement BEFORE
+                // applying any ledger opening changes.
+                if (
+                    reconciliationVoucherGuids.length > 0 &&
+                    !VOUCHER_SETTLEMENT_ENABLED
+                ) {
+                    throw new Error(
+                        "RECONCILE_VOUCHER_SETTLEMENT_NOT_AUTHORIZED"
+                    );
+                }
+
                 const results = [];
                 let operationOrdinal = 0;
 
@@ -287,8 +403,139 @@ async function runManualReconciliationSession({
                         reconciliation: applied
                     });
                 }
+                              // ==============================================
+                // VOUCHER RECONCILIATION (DRAFT, FAIL CLOSED)
+                // ==============================================
+                // Normal-sync exclusion and database tests are prerequisites.
+                // Do not dispatch any voucher fetch while disabled.
+                const voucherResults = [];
 
+                if (reconciliationVoucherGuids.length > 0) {
+                    if (!VOUCHER_SETTLEMENT_ENABLED) {
+                        throw new Error(
+                            "RECONCILE_VOUCHER_SETTLEMENT_NOT_AUTHORIZED"
+                        );
+                    }
 
+                    if (
+                        !reconciliationVoucherDateRange ||
+                        !reconciliationVoucherDateRange.fromDate ||
+                        !reconciliationVoucherDateRange.toDate
+                    ) {
+                        throw new Error("RECONCILE_VOUCHER_DATE_RANGE_INVALID");
+                    }
+
+                    const uniqueVoucherGuids = new Set(reconciliationVoucherGuids);
+                    if (uniqueVoucherGuids.size !== reconciliationVoucherGuids.length) {
+                        throw new Error("RECONCILE_VOUCHER_GUIDS_DUPLICATED");
+                    }
+
+                    // SQL reader accepts at most 1000 voucher GUIDs per call.
+                    // Each fetch/apply pair uses consecutive journal ordinals.
+                    for (let offset = 0; offset < reconciliationVoucherGuids.length; offset += 1000) {
+                        if (signal.aborted) {
+                            throw new Error("RECONCILE_SESSION_ABORTED");
+                        }
+                        await lockIdentity.assertOwnership();
+
+                        const voucherGuids = reconciliationVoucherGuids.slice(offset, offset + 1000);
+                        const sqlEntries = await fetchSqlVoucherEntries({
+                            supabase,
+                            companyCode,
+                            tallyOwner,
+                            voucherGuids
+                        });
+
+                        if (
+                            !Array.isArray(sqlEntries) ||
+                            sqlEntries.length === 0 ||
+                            sqlEntries.length > 10000
+                        ) {
+                            throw new Error("RECONCILE_VOUCHER_SQL_ROWS_INVALID");
+                        }
+
+                        // Do not perform a durable Tally fetch when the SQL
+                        // snapshot is already structurally unsafe.
+                        if (sqlEntries.some(row =>
+                            row.is_deleted !== false ||
+                            row.requiresStructuralReview !== false ||
+                            !Array.isArray(row.bill_allocations) ||
+                            !Array.isArray(row.costcentre_allocations) ||
+                            row.bill_allocations.length !== 0 ||
+                            row.costcentre_allocations.length !== 0
+                        )) {
+                            throw new Error("RECONCILE_VOUCHER_STRUCTURAL_REVIEW_REQUIRED");
+                        }
+
+                        const fetchOrdinal = ++operationOrdinal;
+                        const fetched = await fetchVouchersDurable({
+                            supabase,
+                            socket,
+                            signal,
+                            attemptId,
+                            operationToken: reservationToken,
+                            executionId,
+                            operationOrdinal: fetchOrdinal,
+                            connectorId,
+                            tallyCompanyGuid,
+                            company: tallyCompanyName,
+                            companyCode,
+                            tallyOwner,
+                            voucherGuids,
+                            booksBeginningFrom,
+                            fromDate: reconciliationVoucherDateRange.fromDate,
+                            toDate: reconciliationVoucherDateRange.toDate
+                        });
+
+                        if (signal.aborted) {
+                            throw new Error("RECONCILE_SESSION_ABORTED");
+                        }
+
+                        const comparison = compareVoucherLedgerEntries({
+                            tallyEntries: fetched.entries,
+                            sqlEntries,
+                            companyCode,
+                            tallyOwner
+                        });
+
+                        if (
+                            comparison.ambiguous.length !== 0 ||
+                            comparison.missingInSql.length !== 0 ||
+                            comparison.missingInTally.length !== 0 ||
+                            comparison.structuralReview.length !== 0 ||
+                            comparison.unchanged.length + comparison.updateCandidates.length !== sqlEntries.length ||
+                            fetched.entries.length !== sqlEntries.length
+                        ) {
+                            throw new Error("RECONCILE_VOUCHER_COMPARISON_UNSAFE");
+                        }
+
+                        await lockIdentity.assertOwnership();
+                        if (signal.aborted) {
+                            throw new Error("RECONCILE_SESSION_ABORTED");
+                        }
+
+                        const applyOrdinal = ++operationOrdinal;
+                        const applied = await applyVoucherAmountsDurable({
+                            supabase,
+                            signal,
+                            attemptId,
+                            executionId,
+                            operationToken: reservationToken,
+                            operationOrdinal: applyOrdinal,
+                            fetchOperationId: fetched.fetchOperationId,
+                            sqlEntries
+                        });
+
+                        voucherResults.push({
+                            fetchOperationId: fetched.fetchOperationId,
+                            applyOperationId: applied.operationId,
+                            voucherCount: voucherGuids.length,
+                            matchedRows: applied.matchedRows,
+                            updatedRows: applied.updatedRows,
+                            comparisonSummary: comparison.summary
+                        });
+                    }
+                }
                                   // Final mismatch recheck while connector is locked.
                 if (signal.aborted) {
                     throw new Error("RECONCILE_SESSION_ABORTED");
@@ -377,6 +624,7 @@ async function runManualReconciliationSession({
                     readings: {
                         success: true,
                         ledgers: results,
+                        vouchers: voucherResults,
                         remainingMismatchLedgerGuids:
                             remainingLedgerGuids,
                         requiresTransactionInvestigation:
