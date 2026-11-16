@@ -39503,11 +39503,17 @@ app.post("/reconcileNow", async (req, res) => {
                 : companyRow.client_tally_company_guid) || ""
         ).trim();
 
-        booksBeginningFrom = String(
-            (isCA
-                ? companyRow.ca_tally_books_begining_from
-                : companyRow.client_tally_books_begining_from) || ""
-        ).trim();
+        const rawBooksBeginningFrom = String(
+          (isCA
+              ? companyRow.ca_tally_books_begining_from
+              : companyRow.client_tally_books_begining_from) || ""
+      ).trim();
+
+      booksBeginningFrom = /^\d{4}-\d{2}-\d{2}$/.test(
+          rawBooksBeginningFrom
+      )
+          ? rawBooksBeginningFrom.replace(/-/g, "")
+          : rawBooksBeginningFrom;
 
         if (!connectorId || !tallyCompany || !tallyCompanyGuid) {
             return res.status(409).json({
