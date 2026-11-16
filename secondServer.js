@@ -39295,19 +39295,11 @@ const result = await getTrialBalance({
 // RECONCILE NOW — REQUEST VALIDATION ONLY
 // ==============================================
 
-
 app.post("/reconcileNow", async (req, res) => {
     const body = req.body || {};
 
-    const companyCode =
-        typeof body.company_code === "string"
-            ? body.company_code.trim()
-            : "";
-
-    const tallyOwner =
-        typeof body.tally_owner === "string"
-            ? body.tally_owner.trim()
-            : "";
+    let companyCode = "";
+    let tallyOwner = "";
 
     const batchId =
         typeof body.sync_batch_id === "string"
@@ -39315,13 +39307,9 @@ app.post("/reconcileNow", async (req, res) => {
             : "";
 
     const uuidPattern =
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
-    if (
-        !companyCode ||
-        !["USER", "CA"].includes(tallyOwner) ||
-        !uuidPattern.test(batchId)
-    ) {
+    if (!uuidPattern.test(batchId)) {
         return res.status(400).json({
             success: false,
             error_code: "RECONCILE_REQUEST_INVALID"
@@ -39347,6 +39335,112 @@ app.post("/reconcileNow", async (req, res) => {
     let tallyCompanyGuid;
     let booksBeginningFrom;
     let executionClaimToken = "";
+
+    // ==============================================
+    // EXISTING COMPLETED BATCH ELIGIBILITY
+    // ==============================================
+
+    try {
+        const { data: batch, error: batchError } =
+            await supabase
+                .from("sync_batches")
+                .select(
+                    "batch_id, company_code, tally_owner, " +
+                    "batch_status, worker_status, batch_closed, " +
+                    "ledger_reconciliation_completed, " +
+                    "execution_claim_token, error_message, " +
+                    "retry_claim_token, retry_lease_until, " +
+                    "cleanup_claim_token, cleanup_lease_until"
+                )
+                .eq("batch_id", batchId)
+                .maybeSingle();
+
+        if (batchError) {
+            throw batchError;
+        }
+
+        if (
+            !batch ||
+            typeof batch.company_code !== "string" ||
+            !batch.company_code.trim() ||
+            !["USER", "CA"].includes(batch.tally_owner) ||
+            batch.batch_status !== "COMPLETED" ||
+            batch.worker_status !== "COMPLETED" ||
+            batch.batch_closed !== false ||
+            batch.ledger_reconciliation_completed !== false ||
+            !uuidPattern.test(batch.execution_claim_token || "") ||
+            /^(CONNECTOR_OUTCOME_UNKNOWN:|HTTP_OUTCOME_UNKNOWN:)/.test(
+                batch.error_message || ""
+            )
+        ) {
+            return res.status(409).json({
+                success: false,
+                error_code: "RECONCILE_BATCH_NOT_ELIGIBLE"
+            });
+        }
+
+        // Authoritative company and owner scope comes
+        // from the existing sync batch, not HTTP input.
+        companyCode = batch.company_code.trim();
+        tallyOwner = batch.tally_owner;
+
+        executionClaimToken = batch.execution_claim_token;
+
+        const { data: claimData, error: claimError } =
+            await supabase.rpc(
+                "assert_sync_batch_reconciliation_claim",
+                {
+                    p_batch_id: batchId,
+                    p_execution_claim_token: executionClaimToken
+                }
+            );
+
+        if (claimError || claimData !== true) {
+            return res.status(409).json({
+                success: false,
+                error_code: "RECONCILE_EXECUTION_CLAIM_INVALID"
+            });
+        }
+
+        if (
+            batch.retry_claim_token ||
+            batch.cleanup_claim_token ||
+            (
+                batch.retry_lease_until &&
+                (
+                    !Number.isFinite(
+                        Date.parse(batch.retry_lease_until)
+                    ) ||
+                    Date.parse(batch.retry_lease_until) > Date.now()
+                )
+            ) ||
+            (
+                batch.cleanup_lease_until &&
+                (
+                    !Number.isFinite(
+                        Date.parse(batch.cleanup_lease_until)
+                    ) ||
+                    Date.parse(batch.cleanup_lease_until) > Date.now()
+                )
+            )
+        ) {
+            return res.status(409).json({
+                success: false,
+                error_code: "RECONCILE_BATCH_OPERATION_ACTIVE"
+            });
+        }
+
+    } catch (error) {
+        console.error(
+            "[RECONCILE NOW] BATCH LOOKUP FAILED",
+            { error_code: "RECONCILE_BATCH_LOOKUP_FAILED" }
+        );
+
+        return res.status(500).json({
+            success: false,
+            error_code: "RECONCILE_BATCH_LOOKUP_FAILED"
+        });
+    }
 
     // ==============================================
     // DATABASE COMPANY IDENTITY
@@ -39423,106 +39517,6 @@ app.post("/reconcileNow", async (req, res) => {
         return res.status(500).json({
             success: false,
             error_code: "RECONCILE_COMPANY_LOOKUP_FAILED"
-        });
-    }
-
-    // ==============================================
-    // EXISTING COMPLETED BATCH ELIGIBILITY
-    // ==============================================
-
-    try {
-        const { data: batch, error: batchError } =
-            await supabase
-                .from("sync_batches")
-                .select(
-                    "batch_id, company_code, tally_owner, " +
-                    "batch_status, worker_status, batch_closed, " +
-                    "ledger_reconciliation_completed, " +
-                    "execution_claim_token, error_message, " +
-                    "retry_claim_token, retry_lease_until, " +
-                    "cleanup_claim_token, cleanup_lease_until"
-                )
-                .eq("batch_id", batchId)
-                .maybeSingle();
-
-        if (batchError) {
-            throw batchError;
-        }
-
-        if (
-            !batch ||
-            batch.company_code !== companyCode ||
-            batch.tally_owner !== tallyOwner ||
-            batch.batch_status !== "COMPLETED" ||
-            batch.worker_status !== "COMPLETED" ||
-            batch.batch_closed !== false ||
-            batch.ledger_reconciliation_completed !== false ||
-            !uuidPattern.test(batch.execution_claim_token || "") ||
-            /^(CONNECTOR_OUTCOME_UNKNOWN:|HTTP_OUTCOME_UNKNOWN:)/.test(
-                batch.error_message || ""
-            )
-        ) {
-            return res.status(409).json({
-                success: false,
-                error_code: "RECONCILE_BATCH_NOT_ELIGIBLE"
-            });
-        }
-
-        executionClaimToken = batch.execution_claim_token;
-
-        const { data: claimData, error: claimError } =
-            await supabase.rpc(
-                "assert_sync_batch_reconciliation_claim",
-                {
-                    p_batch_id: batchId,
-                    p_execution_claim_token: executionClaimToken
-                }
-            );
-
-        if (claimError || claimData !== true) {
-            return res.status(409).json({
-                success: false,
-                error_code: "RECONCILE_EXECUTION_CLAIM_INVALID"
-            });
-        }
-
-        if (
-            batch.retry_claim_token ||
-            batch.cleanup_claim_token ||
-            (
-                batch.retry_lease_until &&
-                (
-                    !Number.isFinite(
-                        Date.parse(batch.retry_lease_until)
-                    ) ||
-                    Date.parse(batch.retry_lease_until) > Date.now()
-                )
-            ) ||
-            (
-                batch.cleanup_lease_until &&
-                (
-                    !Number.isFinite(
-                        Date.parse(batch.cleanup_lease_until)
-                    ) ||
-                    Date.parse(batch.cleanup_lease_until) > Date.now()
-                )
-            )
-        ) {
-            return res.status(409).json({
-                success: false,
-                error_code: "RECONCILE_BATCH_OPERATION_ACTIVE"
-            });
-        }
-
-    } catch (error) {
-        console.error(
-            "[RECONCILE NOW] BATCH LOOKUP FAILED",
-            { error_code: "RECONCILE_BATCH_LOOKUP_FAILED" }
-        );
-
-        return res.status(500).json({
-            success: false,
-            error_code: "RECONCILE_BATCH_LOOKUP_FAILED"
         });
     }
 

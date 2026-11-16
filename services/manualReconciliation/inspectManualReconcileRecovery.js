@@ -6,7 +6,7 @@ const {
 } = require("../../socketio/connectorHealthStore");
 
 const UUID =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 const VERIFIED = "RESULT_VERIFIED";
 
@@ -411,6 +411,8 @@ async function inspectManualReconcileRecovery({
     ) {
         fail("INPUT_INVALID");
     }
+
+    attemptId = attemptId.toLowerCase();
 
     const snapshot = await readManualReconcileRecoverySnapshot(
         supabase,

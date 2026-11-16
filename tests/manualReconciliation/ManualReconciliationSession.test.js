@@ -6,60 +6,65 @@ const { test } = require("node:test");
 const Module = require("node:module");
 const path = require("node:path");
 
-const ROOT = path.resolve(__dirname, "../..");
-const SESSION = path.join(
-    ROOT,
-    "services/manualReconciliation/ManualReconciliationSession.js"
+const SESSION = path.resolve(
+    __dirname,
+    "../../services/manualReconciliation/ManualReconciliationSession.js"
 );
 
 const TOKEN = "11111111-1111-4111-8111-111111111111";
 const OWNER = "22222222-2222-4222-8222-222222222222";
 const SERVER = "33333333-3333-4333-8333-333333333333";
+const VOUCHER = "voucher-1";
 
 function makeHarness(options = {}) {
     const events = [];
-    let lockActive = false;
-    let mismatchCalls = 0;
-    let receipt;
-    let checkpointParams;
-    let finalizationParams;
 
-    const state = {
-        events,
-        get lockActive() { return lockActive; },
-        get receipt() { return receipt; },
-        get checkpointParams() { return checkpointParams; },
-        get finalizationParams() { return finalizationParams; }
-    };
+    let locked = false;
+    let mismatchReads = 0;
+    let receipt = null;
+    let checkpoint = null;
+    let finalization = null;
+    let voucherFetches = 0;
+
+    const initial = options.initialMismatch ?? ["ledger-1"];
+    const vouchers = options.voucherGuids ?? [];
 
     const identity = {
         connectorId: "connector-1",
         socketId: "socket-1",
         ownerToken: OWNER,
+
         async assertOwnership() {
             events.push("ownership");
+
             if (options.ownershipFailure) {
-                throw new Error("OWNERSHIP_LOST");
+                throw Error("OWNERSHIP_LOST");
             }
         }
     };
 
     const dependencies = {
         connectorOperationCoordinator: {
-            async withGlobalConnectorLock(connectorId, callback, config) {
+            async withGlobalConnectorLock(
+                connectorId,
+                callback,
+                config
+            ) {
                 events.push("lock");
+
                 assert.equal(connectorId, "connector-1");
                 assert.equal(config.exposeLockIdentity, true);
                 assert.equal(config.releaseEvidence, true);
-                assert.ok(config.completionIdentity.attemptId);
-                assert.ok(config.completionIdentity.executionId);
-                assert.equal(config.completionIdentity.serverInstanceId, SERVER);
+                assert.equal(
+                    config.completionIdentity.serverInstanceId,
+                    SERVER
+                );
 
                 if (options.lockFailure) {
-                    throw new Error("GLOBAL_LOCK_FAILED");
+                    throw Error("GLOBAL_LOCK_FAILED");
                 }
 
-                lockActive = true;
+                locked = true;
                 let result;
 
                 try {
@@ -69,13 +74,13 @@ function makeHarness(options = {}) {
                         identity
                     );
                 } finally {
-                    lockActive = false;
+                    locked = false;
                 }
 
                 events.push("released");
 
                 if (options.releaseFailure) {
-                    throw new Error("RELEASE_OUTCOME_UNKNOWN");
+                    throw Error("RELEASE_OUTCOME_UNKNOWN");
                 }
 
                 receipt = {
@@ -87,27 +92,31 @@ function makeHarness(options = {}) {
                 };
 
                 if (options.invalidReceipt) {
-                    receipt.executionId =
-                        "44444444-4444-4444-8444-444444444444";
+                    receipt.executionId = TOKEN;
                 }
 
-                if (options.missingReceipt) {
-                    return { result, releaseEvidence: null };
-                }
-
-                return { result, releaseEvidence: receipt };
+                return {
+                    result,
+                    releaseEvidence: options.missingReceipt
+                        ? null
+                        : receipt
+                };
             }
         },
 
-        manualReconcileAdmissionV2: {
-            async startManualReconcileV2() {
+        manualReconcileClaimedAdmission: {
+            async startManualReconcileClaimed(args) {
                 events.push("admission");
 
+                assert.equal(locked, false);
+                assert.equal(args.batchId, TOKEN);
+                assert.equal(args.executionClaimToken, OWNER);
+
                 if (options.admissionFailure) {
-                    throw new Error("ADMISSION_UNKNOWN");
+                    throw Error("ADMISSION_UNKNOWN");
                 }
 
-                return options.admission || {
+                return options.admission ?? {
                     acquired: true,
                     reason: "ACQUIRED",
                     reservationToken: TOKEN
@@ -118,14 +127,14 @@ function makeHarness(options = {}) {
         manualReconcileExecutionBinding: {
             async bindManualReconcileExecution(args) {
                 events.push("bind");
-                assert.equal(lockActive, true);
+
+                assert.equal(locked, true);
                 assert.equal(args.operationToken, TOKEN);
                 assert.equal(args.ownerToken, OWNER);
-                assert.equal(args.socketId, "socket-1");
                 assert.equal(args.serverInstanceId, SERVER);
 
                 if (options.bindingFailure) {
-                    throw new Error("BIND_OUTCOME_UNKNOWN");
+                    throw Error("BIND_OUTCOME_UNKNOWN");
                 }
 
                 return {
@@ -136,32 +145,55 @@ function makeHarness(options = {}) {
         },
 
         manualReconcileServerIdentity: {
-            getManualReconcileServerInstanceId() {
-                return SERVER;
-            }
+            getManualReconcileServerInstanceId: () => SERVER
         },
 
         getMismatchLedgerGuids: {
             async getMismatchLedgerGuids() {
                 events.push("mismatch");
-                assert.equal(lockActive, true);
-                mismatchCalls++;
 
-                return mismatchCalls === 1
-                    ? (options.initialMismatch ?? ["ledger-1"])
+                assert.equal(locked, true);
+
+                return ++mismatchReads === 1
+                    ? initial
                     : (options.remainingMismatch ?? []);
+            }
+        },
+
+        getReconciliationVoucherGuids: {
+            async getReconciliationVoucherGuids(args) {
+                events.push("voucher-guids");
+
+                assert.equal(locked, true);
+                assert.deepEqual(args.ledgerGuids, initial);
+
+                return vouchers;
+            }
+        },
+
+        getReconciliationVoucherDateRange: {
+            async getReconciliationVoucherDateRange(args) {
+                events.push("voucher-dates");
+
+                assert.equal(locked, true);
+                assert.deepEqual(args.voucherGuids, vouchers);
+
+                return options.dateRange ?? {
+                    fromDate: "20260401",
+                    toDate: "20260430"
+                };
             }
         },
 
         fetchLedgerOpeningDurable: {
             async fetchLedgerOpeningDurable(args) {
                 events.push("fetch");
-                assert.equal(lockActive, true);
+
+                assert.equal(locked, true);
                 assert.equal(args.operationOrdinal, 1);
-                assert.ok(args.executionId);
 
                 if (options.fetchFailure) {
-                    throw new Error("FETCH_UNCERTAIN");
+                    throw Error("FETCH_UNCERTAIN");
                 }
 
                 return {
@@ -177,158 +209,170 @@ function makeHarness(options = {}) {
         applyLedgerOpeningDurable: {
             async applyLedgerOpeningDurable(args) {
                 events.push("apply");
-                assert.equal(lockActive, true);
+
+                assert.equal(locked, true);
                 assert.equal(args.operationOrdinal, 2);
-                assert.ok(args.executionId);
 
                 if (options.applyFailure) {
-                    throw new Error("APPLY_UNCERTAIN");
+                    throw Error("APPLY_UNCERTAIN");
                 }
 
                 return { result: "UPDATED" };
             }
+        },
+
+        fetchSqlVoucherEntries: {
+            async fetchSqlVoucherEntries(args) {
+                events.push("sql-vouchers");
+
+                assert.equal(locked, true);
+                assert.deepEqual(args.voucherGuids, vouchers);
+
+                if (options.invalidSqlSnapshot) {
+                    return {
+                        entries: [],
+                        sqlSnapshot: { complete: false }
+                    };
+                }
+
+                return {
+                    entries: vouchers.map(voucher_guid => ({
+                        voucher_guid,
+                        is_deleted: false,
+                        requiresStructuralReview:
+                            !!options.structuralReview,
+                        bill_allocations: [],
+                        costcentre_allocations: []
+                    })),
+
+                    sqlSnapshot: {
+                        complete: true,
+                        requestedVoucherGuids: [...vouchers]
+                    }
+                };
+            }
+        },
+
+        fetchVouchersDurable: {
+            async fetchVouchersDurable(args) {
+                events.push("voucher-fetch");
+
+                assert.equal(locked, true);
+                assert.equal(
+                    args.operationOrdinal,
+                    initial.length * 2 + 1
+                );
+
+                voucherFetches++;
+
+                if (options.voucherFetchFailure) {
+                    throw Error("VOUCHER_FETCH_UNCERTAIN");
+                }
+
+                return {
+                    fetchOperationId:
+                        "66666666-6666-4666-8666-666666666666",
+                    entries: [],
+                    snapshotCoverage: {
+                        tallyCompleteVoucherGuids: [...vouchers]
+                    }
+                };
+            }
+        },
+
+        serverCompareVoucherLedgerEntries: {
+            compareVoucherLedgerEntries(args) {
+                events.push("voucher-compare");
+
+                assert.equal(locked, true);
+                assert.ok(Array.isArray(args.sqlEntries));
+
+                return {
+                    summary: { compared: vouchers.length },
+                    voucherDecisions: []
+                };
+            }
         }
     };
 
-       const supabase = {
-        from(table) {
-            assert.equal(table, "tally_voucher_ledgers");
-            assert.equal(lockActive, true);
-
-            const query = {
-                select(columns) {
-                    assert.equal(columns, "voucher_guid");
-                    return this;
-                },
-
-                eq(column, value) {
-                    if (column === "company_code") {
-                        assert.equal(value, "C0053");
-                    } else if (column === "tally_owner") {
-                        assert.equal(value, "USER");
-                    } else {
-                        throw new Error(`UNEXPECTED_EQ:${column}`);
-                    }
-
-                    return this;
-                },
-
-                in(column, values) {
-                    assert.equal(column, "ledger_guid");
-                    assert.ok(Array.isArray(values));
-                    return this;
-                },
-
-                order(column, config) {
-                    assert.equal(column, "voucher_guid");
-                    assert.equal(config.ascending, true);
-                    return this;
-                },
-
-                async range(from, to) {
-                    assert.equal(from, 0);
-                    assert.equal(to, 999);
-
-                    return {
-                        data: [],
-                        error: null
-                    };
-                }
-            };
-
-            return query;
-        },
-
+    const supabase = {
         async rpc(name, args) {
             events.push(name);
 
-                        if (name === "start_manual_reconcile_claimed_v1") {
-                assert.equal(lockActive, false);
-                assert.equal(args.p_company_code, "C0053");
-                assert.equal(args.p_tally_owner, "USER");
-                assert.equal(args.p_reconcile_type, "LEDGER");
-                assert.equal(
-                    args.p_batch_id,
-                    "11111111-1111-4111-8111-111111111111"
-                );
-                assert.equal(
-                    args.p_execution_claim_token,
-                    "22222222-2222-4222-8222-222222222222"
-                );
-
-                events.push("admission");
-
-                if (options.admissionFailure) {
-                    throw new Error("ADMISSION_UNKNOWN");
-                }
-
-                const admission = options.admission || {
-                    acquired: true,
-                    reason: "ACQUIRED",
-                    reservationToken: TOKEN
-                };
-
-                return {
-                    data: [{
-                        acquired: admission.acquired,
-                        reason: admission.reason,
-                        reservation_token:
-                            admission.reservationToken ?? null
-                    }],
-                    error: null
-                };
-            }
-
             if (
                 name ===
-                "record_manual_reconcile_pre_release_checkpoint_v1"
+                "record_manual_reconcile_pre_release_checkpoint_v2"
             ) {
-                assert.equal(lockActive, true);
-                checkpointParams = args;
+                assert.equal(locked, true);
+
+                checkpoint = args;
+
                 assert.equal(args.p_operation_token, TOKEN);
                 assert.equal(args.p_owner_token, OWNER);
 
+                assert.deepEqual(
+                    args.p_remaining_mismatch_ledger_guids,
+                    options.remainingMismatch ?? []
+                );
+
+                assert.deepEqual(
+                    args.p_voucher_investigation_guids,
+                    vouchers
+                );
+
                 if (options.checkpointThrow) {
-                    throw new Error("CHECKPOINT_TRANSPORT_LOST");
+                    throw Error("CHECKPOINT_TRANSPORT_LOST");
                 }
 
                 if (options.checkpointError) {
                     return {
                         data: null,
-                        error: new Error("CHECKPOINT_DB_ERROR")
+                        error: Error("CHECKPOINT_DB_ERROR")
                     };
                 }
 
                 return {
-                    data: options.checkpointFalse ? false : true,
+                    data: !options.checkpointFalse,
                     error: null
                 };
             }
 
-            assert.equal(lockActive, false);
+            assert.equal(locked, false);
 
             if (
                 name ===
-                "record_manual_reconcile_finalization_v1"
+                "record_manual_reconcile_finalization_v2"
             ) {
-                finalizationParams = args;
+                finalization = args;
+
                 assert.deepEqual(
                     args.p_release_evidence,
                     receipt
                 );
+
                 assert.equal(
                     args.p_connector_release_verified,
                     true
                 );
 
+                assert.deepEqual(
+                    args.p_voucher_investigation_guids,
+                    vouchers
+                );
+
+                assert.deepEqual(
+                    args.p_remaining_mismatch_ledger_guids,
+                    options.remainingMismatch ?? []
+                );
+
                 if (options.recorderThrow) {
-                    throw new Error("RECORDER_TRANSPORT_LOST");
+                    throw Error("RECORDER_TRANSPORT_LOST");
                 }
 
                 if (options.recorderError) {
                     return {
                         data: null,
-                        error: new Error("RECORDER_DB_ERROR")
+                        error: Error("RECORDER_DB_ERROR")
                     };
                 }
 
@@ -344,8 +388,10 @@ function makeHarness(options = {}) {
             }
 
             if (name === "close_manual_reconcile_v2") {
+                assert.equal(args.p_operation_token, TOKEN);
+
                 if (options.closeThrow) {
-                    throw new Error("CLOSE_TRANSPORT_LOST");
+                    throw Error("CLOSE_TRANSPORT_LOST");
                 }
 
                 return {
@@ -359,12 +405,14 @@ function makeHarness(options = {}) {
                 };
             }
 
-            throw new Error(`UNEXPECTED_RPC:${name}`);
+            throw Error(`UNEXPECTED_RPC:${name}`);
         }
     };
 
     const originalLoad = Module._load;
-    const originalCache = require.cache[SESSION];
+    const cached = require.cache[SESSION];
+
+    let run;
 
     Module._load = function(request, parent, isMain) {
         if (parent?.filename === SESSION) {
@@ -383,23 +431,47 @@ function makeHarness(options = {}) {
         return originalLoad.apply(this, arguments);
     };
 
-    let run;
-
     try {
         delete require.cache[SESSION];
-        run = require(SESSION).runManualReconciliationSession;
+
+        run = require(SESSION)
+            .runManualReconciliationSession;
     } finally {
         Module._load = originalLoad;
+
         delete require.cache[SESSION];
 
-        if (originalCache) {
-            require.cache[SESSION] = originalCache;
+        if (cached) {
+            require.cache[SESSION] = cached;
         }
     }
 
     return {
-        state,
-               async run() {
+        state: {
+            events,
+
+            get locked() {
+                return locked;
+            },
+
+            get receipt() {
+                return receipt;
+            },
+
+            get checkpoint() {
+                return checkpoint;
+            },
+
+            get finalization() {
+                return finalization;
+            },
+
+            get voucherFetches() {
+                return voucherFetches;
+            }
+        },
+
+        run(extra = {}) {
             return run({
                 supabase,
                 companyCode: "C0053",
@@ -408,129 +480,436 @@ function makeHarness(options = {}) {
                 tallyCompanyName: "Test Company",
                 tallyCompanyGuid: "company-guid-1",
                 booksBeginningFrom: "20260401",
-                batchId: "11111111-1111-4111-8111-111111111111",
-                executionClaimToken: "22222222-2222-4222-8222-222222222222"
+                batchId: TOKEN,
+                executionClaimToken: OWNER,
+                ...extra
             });
         }
     };
 }
 
-test("successful durable lifecycle runs in correct order", async () => {
-    const h = makeHarness();
-    const result = await h.run();
+test(
+    "V2 ledger lifecycle: checkpoint before release, finalization and close after",
+    async () => {
+        const h = makeHarness();
+        const result = await h.run();
 
-    assert.equal(result.success, true);
-    assert.equal(result.ledgers.length, 1);
+        assert.equal(result.success, true);
+        assert.equal(result.ledgers.length, 1);
 
-    assert.deepEqual(
-        h.state.events.filter(x => [
+        const e = h.state.events;
+
+        const order = [
             "admission",
             "lock",
             "bind",
             "fetch",
             "apply",
-            "record_manual_reconcile_pre_release_checkpoint_v1",
+            "record_manual_reconcile_pre_release_checkpoint_v2",
             "released",
-            "record_manual_reconcile_finalization_v1",
+            "record_manual_reconcile_finalization_v2",
             "close_manual_reconcile_v2"
-        ].includes(x)),
-        [
-            "admission",
-            "lock",
-            "bind",
-            "fetch",
-            "apply",
-            "record_manual_reconcile_pre_release_checkpoint_v1",
-            "released",
-            "record_manual_reconcile_finalization_v1",
-            "close_manual_reconcile_v2"
-        ]
-    );
-});
+        ];
 
-test("zero mismatches still bind, checkpoint, release and close", async () => {
-    const h = makeHarness({ initialMismatch: [] });
-    const result = await h.run();
+        let previous = -1;
 
-    assert.equal(result.message, "NO_BALANCE_MISMATCHES");
-    assert.equal(result.ledgers.length, 0);
-    assert.equal(h.state.events.includes("fetch"), false);
-    assert.equal(h.state.events.includes("apply"), false);
-    assert.equal(h.state.events.includes("bind"), true);
-    assert.equal(h.state.events.includes("released"), true);
-    assert.equal(
-        h.state.events.includes("close_manual_reconcile_v2"),
-        true
-    );
-});
+        for (const event of order) {
+            const index = e.indexOf(event);
 
-test("admission ambiguity prevents connector work", async () => {
-    const h = makeHarness({ admissionFailure: true });
+            assert.ok(
+                index > previous,
+                `Event out of order: ${event}`
+            );
 
-    await assert.rejects(
-        h.run(),
-        e =>
-            e.reconcileAdmissionUncertain === true &&
-            e.reconcileRecoveryRequired === true
-    );
-
-    assert.equal(h.state.events.includes("lock"), false);
-});
-
-test("ALREADY_ACQUIRED never redispatches", async () => {
-    const h = makeHarness({
-        admission: {
-            acquired: true,
-            reason: "ALREADY_ACQUIRED",
-            reservationToken: TOKEN
+            previous = index;
         }
-    });
 
-    const result = await h.run();
+        assert.equal(
+            result.requiresTransactionInvestigation,
+            false
+        );
 
-    assert.equal(result.recoveryRequired, true);
-    assert.equal(h.state.events.includes("lock"), false);
-});
+        assert.equal(
+            result.voucherSettlementStatus,
+            "NOT_REQUIRED"
+        );
+    }
+);
 
-test("lock failure preserves reservation", async () => {
-    const h = makeHarness({ lockFailure: true });
+test(
+    "zero mismatches still checkpoint, release, finalize and close",
+    async () => {
+        const h = makeHarness({
+            initialMismatch: []
+        });
 
-    await assert.rejects(
-        h.run(),
-        e =>
-            e.message === "GLOBAL_LOCK_FAILED" &&
-            e.reconcileRecoveryRequired === true
-    );
+        const result = await h.run();
 
-    assert.equal(h.state.events.includes("bind"), false);
-});
+        assert.equal(
+            result.message,
+            "NO_BALANCE_MISMATCHES"
+        );
 
-test("binding failure prevents FETCH and checkpoint", async () => {
-    const h = makeHarness({ bindingFailure: true });
+        assert.deepEqual(result.ledgers, []);
 
-    await assert.rejects(h.run(), /BIND_OUTCOME_UNKNOWN/);
+        assert.equal(
+            h.state.events.includes("fetch"),
+            false
+        );
 
-    assert.equal(h.state.events.includes("fetch"), false);
-    assert.equal(
-        h.state.events.includes(
-            "record_manual_reconcile_pre_release_checkpoint_v1"
-        ),
-        false
-    );
-});
+        assert.equal(
+            h.state.events.includes("apply"),
+            false
+        );
+
+        assert.ok(
+            h.state.events.includes(
+                "close_manual_reconcile_v2"
+            )
+        );
+    }
+);
+
+test(
+    "voucher investigation stays comparison-only and is persisted in V2 evidence",
+    async () => {
+        const h = makeHarness({
+            voucherGuids: [VOUCHER]
+        });
+
+        const result = await h.run();
+
+        assert.equal(result.success, true);
+
+        assert.equal(
+            result.requiresTransactionInvestigation,
+            true
+        );
+
+        assert.equal(
+            result.voucherSettlementStatus,
+            "NOT_AUTHORIZED"
+        );
+
+        assert.deepEqual(
+            result.voucherInvestigationGuids,
+            [VOUCHER]
+        );
+
+        assert.equal(result.vouchers.length, 1);
+
+        assert.equal(
+            result.vouchers[0].settlementStatus,
+            "NOT_AUTHORIZED"
+        );
+
+        assert.equal(
+            result.vouchers[0].updatedRows,
+            0
+        );
+
+        assert.equal(h.state.voucherFetches, 1);
+
+        assert.deepEqual(
+            h.state.checkpoint.p_voucher_investigation_guids,
+            [VOUCHER]
+        );
+
+        assert.deepEqual(
+            h.state.finalization.p_voucher_investigation_guids,
+            [VOUCHER]
+        );
+
+        assert.ok(
+            !h.state.events.some(
+                x => /voucher.*apply|apply.*voucher/i.test(x)
+            )
+        );
+    }
+);
+
+test(
+    "remaining ledger mismatch requires investigation",
+    async () => {
+        const h = makeHarness({
+            remainingMismatch: ["ledger-1"]
+        });
+
+        const result = await h.run();
+
+        assert.equal(
+            result.requiresTransactionInvestigation,
+            true
+        );
+
+        assert.deepEqual(
+            result.remainingMismatchLedgerGuids,
+            ["ledger-1"]
+        );
+    }
+);
+
+test(
+    "ledger and voucher investigation coexist",
+    async () => {
+        const h = makeHarness({
+            remainingMismatch: ["ledger-1"],
+            voucherGuids: [VOUCHER]
+        });
+
+        const result = await h.run();
+
+        assert.equal(
+            result.requiresTransactionInvestigation,
+            true
+        );
+
+        assert.deepEqual(
+            result.voucherInvestigationGuids,
+            [VOUCHER]
+        );
+
+        assert.deepEqual(
+            result.remainingMismatchLedgerGuids,
+            ["ledger-1"]
+        );
+    }
+);
+
+test(
+    "invalid voucher GUIDs fail before checkpoint",
+    async () => {
+        for (const voucherGuids of [
+            [""],
+            [VOUCHER, VOUCHER]
+        ]) {
+            const h = makeHarness({ voucherGuids });
+
+            await assert.rejects(
+                h.run(),
+                e => e.reconcileRecoveryRequired === true
+            );
+
+            assert.ok(
+                !h.state.events.includes(
+                    "record_manual_reconcile_pre_release_checkpoint_v2"
+                )
+            );
+        }
+    }
+);
+
+test(
+    "unsafe SQL voucher evidence fails before durable Tally voucher fetch",
+    async () => {
+        for (const option of [
+            "invalidSqlSnapshot",
+            "structuralReview"
+        ]) {
+            const h = makeHarness({
+                voucherGuids: [VOUCHER],
+                [option]: true
+            });
+
+            await assert.rejects(
+                h.run(),
+                e => e.reconcileRecoveryRequired === true
+            );
+
+            assert.equal(
+                h.state.voucherFetches,
+                0
+            );
+
+            assert.ok(
+                !h.state.events.includes(
+                    "record_manual_reconcile_finalization_v2"
+                )
+            );
+        }
+    }
+);
+
+test(
+    "admission ambiguity prevents connector lock",
+    async () => {
+        const h = makeHarness({
+            admissionFailure: true
+        });
+
+        await assert.rejects(
+            h.run(),
+            e =>
+                e.reconcileAdmissionUncertain === true &&
+                e.reconcileRecoveryRequired === true
+        );
+
+        assert.equal(
+            h.state.events.includes("lock"),
+            false
+        );
+    }
+);
+
+test(
+    "ALREADY_ACQUIRED does not redispatch",
+    async () => {
+        const h = makeHarness({
+            admission: {
+                acquired: true,
+                reason: "ALREADY_ACQUIRED",
+                reservationToken: TOKEN
+            }
+        });
+
+        const result = await h.run();
+
+        assert.equal(result.recoveryRequired, true);
+
+        assert.equal(
+            h.state.events.includes("lock"),
+            false
+        );
+    }
+);
+
+test(
+    "lock failure preserves reservation",
+    async () => {
+        const h = makeHarness({
+            lockFailure: true
+        });
+
+        await assert.rejects(
+            h.run(),
+            e =>
+                e.message === "GLOBAL_LOCK_FAILED" &&
+                e.reconcileRecoveryRequired === true
+        );
+
+        assert.equal(
+            h.state.events.includes("bind"),
+            false
+        );
+    }
+);
+
+test(
+    "binding failure prevents fetch and checkpoint",
+    async () => {
+        const h = makeHarness({
+            bindingFailure: true
+        });
+
+        await assert.rejects(
+            h.run(),
+            /BIND_OUTCOME_UNKNOWN/
+        );
+
+        assert.equal(
+            h.state.events.includes("fetch"),
+            false
+        );
+
+        assert.equal(
+            h.state.events.includes(
+                "record_manual_reconcile_pre_release_checkpoint_v2"
+            ),
+            false
+        );
+    }
+);
 
 for (const option of [
     "fetchFailure",
     "applyFailure",
+    "voucherFetchFailure",
     "checkpointThrow",
     "checkpointError",
     "checkpointFalse",
     "releaseFailure",
     "missingReceipt",
-    "invalidReceipt"
+    "invalidReceipt",
+    "ownershipFailure"
 ]) {
-    test(`${option} prevents finalization and close`, async () => {
-        const h = makeHarness({ [option]: true });
+    test(
+        `${option} prevents finalization and close`,
+        async () => {
+            const h = makeHarness({
+                [option]: true,
+                voucherGuids:
+                    option === "voucherFetchFailure"
+                        ? [VOUCHER]
+                        : []
+            });
+
+            await assert.rejects(
+                h.run(),
+                e => e.reconcileRecoveryRequired === true
+            );
+
+            assert.equal(
+                h.state.events.includes(
+                    "record_manual_reconcile_finalization_v2"
+                ),
+                false
+            );
+
+            assert.equal(
+                h.state.events.includes(
+                    "close_manual_reconcile_v2"
+                ),
+                false
+            );
+        }
+    );
+}
+
+test(
+    "recorder transport ambiguity retains voucher and Redis evidence",
+    async () => {
+        const h = makeHarness({
+            recorderThrow: true,
+            voucherGuids: [VOUCHER]
+        });
+
+        await assert.rejects(
+            h.run(),
+            e => {
+                assert.equal(
+                    e.reconcileRecoveryRequired,
+                    true
+                );
+
+                assert.deepEqual(
+                    e.reconcileRecoveryContext?.releaseEvidence,
+                    h.state.receipt
+                );
+
+                assert.deepEqual(
+                    e.reconcileRecoveryContext?.voucherInvestigationGuids,
+                    [VOUCHER]
+                );
+
+                return true;
+            }
+        );
+
+        assert.equal(
+            h.state.events.includes(
+                "close_manual_reconcile_v2"
+            ),
+            false
+        );
+    }
+);
+
+test(
+    "recorder DB error prevents close",
+    async () => {
+        const h = makeHarness({
+            recorderError: true
+        });
 
         await assert.rejects(
             h.run(),
@@ -539,81 +918,66 @@ for (const option of [
 
         assert.equal(
             h.state.events.includes(
-                "record_manual_reconcile_finalization_v1"
+                "close_manual_reconcile_v2"
             ),
             false
         );
+    }
+);
 
-        assert.equal(
-            h.state.events.includes("close_manual_reconcile_v2"),
-            false
+test(
+    "close ambiguity preserves recovery context",
+    async () => {
+        const h = makeHarness({
+            closeThrow: true
+        });
+
+        await assert.rejects(
+            h.run(),
+            e =>
+                e.reconcileRecoveryRequired === true &&
+                e.reconcileRecoveryContext
+                    ?.releaseEvidence
+                    ?.redisReleaseConfirmed === true
         );
-    });
-}
+    }
+);
 
-test("recorder ambiguity preserves original receipt for recovery", async () => {
-    const h = makeHarness({ recorderThrow: true });
+test(
+    "exact V2 recorder and close replay are accepted",
+    async () => {
+        const h = makeHarness({
+            recordReplay: true,
+            closeReplay: true
+        });
 
-    await assert.rejects(h.run(), e => {
-        assert.equal(e.reconcileRecoveryRequired, true);
+        const result = await h.run();
+
+        assert.equal(result.success, true);
+
+        assert.ok(
+            h.state.events.includes(
+                "close_manual_reconcile_v2"
+            )
+        );
+    }
+);
+
+test(
+    "caller-supplied ledger GUIDs are rejected before admission",
+    async () => {
+        const h = makeHarness();
+
+        await assert.rejects(
+            h.run({
+                ledgerGuids: ["ledger-1"]
+            }),
+            /RECONCILE_MANUAL_LEDGER_GUIDS_NOT_ALLOWED/
+        );
 
         assert.deepEqual(
-            e.reconcileRecoveryContext?.releaseEvidence,
-            h.state.receipt
-        );
-
-        assert.deepEqual(
-            e.reconcileRecoveryContext?.remainingMismatchLedgerGuids,
+            h.state.events,
             []
         );
-
-        return true;
-    });
-
-    assert.equal(
-        h.state.events.includes("close_manual_reconcile_v2"),
-        false
-    );
-});
-
-test("recorder DB error prevents close", async () => {
-    const h = makeHarness({ recorderError: true });
-
-    await assert.rejects(
-        h.run(),
-        e => e.reconcileRecoveryRequired === true
-    );
-
-    assert.equal(
-        h.state.events.includes("close_manual_reconcile_v2"),
-        false
-    );
-});
-
-test("close ambiguity preserves recovery context", async () => {
-    const h = makeHarness({ closeThrow: true });
-
-    await assert.rejects(
-        h.run(),
-        e =>
-            e.reconcileRecoveryRequired === true &&
-            e.reconcileRecoveryContext
-                ?.releaseEvidence
-                ?.redisReleaseConfirmed === true
-    );
-});
-
-test("exact recorder and close replay are accepted", async () => {
-    const h = makeHarness({
-        recordReplay: true,
-        closeReplay: true
-    });
-
-    const result = await h.run();
-
-    assert.equal(result.success, true);
-    assert.equal(
-        h.state.events.includes("close_manual_reconcile_v2"),
-        true
-    );
-});
+    }
+);

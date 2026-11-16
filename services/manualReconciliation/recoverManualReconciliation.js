@@ -7,7 +7,7 @@ const {
 } = require("./inspectManualReconcileRecovery");
 
 const UUID =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 function fail(reason) {
     throw new Error(`RECONCILE_RECOVERY_${reason}`);
@@ -40,11 +40,13 @@ async function recoverManualReconciliation({
         fail("INPUT_INVALID");
     }
 
-    const inspection =
-        await inspectManualReconcileRecovery({
-            supabase,
-            attemptId
-        });
+   attemptId = attemptId.toLowerCase();
+
+const inspection =
+    await inspectManualReconcileRecovery({
+        supabase,
+        attemptId
+    });
 
     if (inspection.state === "ALREADY_CLOSED") {
         return {
