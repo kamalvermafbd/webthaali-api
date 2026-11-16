@@ -39395,12 +39395,21 @@ app.post("/reconcileNow", async (req, res) => {
                 }
             );
 
-        if (claimError || claimData !== true) {
-            return res.status(409).json({
-                success: false,
-                error_code: "RECONCILE_EXECUTION_CLAIM_INVALID"
-            });
+        if (claimError) {
+    console.error(
+        "[MANUAL RECONCILE] Execution claim assertion failed:",
+        {
+            batchId,
+            code: claimError.code,
+            message: claimError.message
         }
+    );
+
+    return res.status(409).json({
+        success: false,
+        error_code: "RECONCILE_EXECUTION_CLAIM_INVALID"
+    });
+}
 
         if (
             batch.retry_claim_token ||
