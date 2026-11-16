@@ -14,8 +14,12 @@ const connectorHealthStore =
 const { getSyncQueue } =
     require("./secondSyncQueue");
 
-const { dispatchUniversalFailedRetry } =
-    require("./secondQueueExistingBatch");
+const {
+    dispatchUniversalFailedRetry,
+    dispatchRecoveredWaitingBatch
+} = require("./secondQueueExistingBatch");
+
+const ENABLE_WAITING_CONNECTOR_RECOVERY = false;
 
 let watchdogTimer = null;
 let watchdogRunning = false;
@@ -2086,13 +2090,54 @@ if (!httpNotStarted) {
 
     continue;
 }
-console.warn(
-    "[CONNECTOR WATCHDOG] WAITING_CONNECTOR RESTART DEFERRED",
+if (!ENABLE_WAITING_CONNECTOR_RECOVERY) {
+    console.warn(
+        "[CONNECTOR WATCHDOG] WAITING_CONNECTOR RESTART DEFERRED",
+        {
+            batch_id: batch.batch_id,
+            reason: "Recovery feature not activated"
+        }
+    );
+    continue;
+}
+
+const { data: recovered, error: recoveryError } =
+    await supabase.rpc("recover_waiting_normal_sync_batch", {
+        p_batch_id: batch.batch_id,
+        p_expected_execution_claim_token:
+            batch.execution_claim_token
+    });
+
+if (recoveryError) {
+    console.error(
+        "[CONNECTOR WATCHDOG] WAITING RECOVERY RPC FAILED",
+        {
+            batch_id: batch.batch_id,
+            error: recoveryError.message
+        }
+    );
+    continue;
+}
+
+if (recovered !== true) {
+    console.warn(
+        "[CONNECTOR WATCHDOG] WAITING RECOVERY REJECTED",
+        { batch_id: batch.batch_id }
+    );
+    continue;
+}
+
+const dispatchResult =
+    await dispatchRecoveredWaitingBatch(batch);
+
+console.log(
+    "[CONNECTOR WATCHDOG] WAITING RECOVERY DISPATCH RESULT",
     {
         batch_id: batch.batch_id,
-        reason: "Previous Tally execution settlement not independently verified"
+        result: dispatchResult
     }
 );
+
 continue;
   
 }

@@ -527,6 +527,12 @@ setInterval(() => {
     void runStaleCleanupRecovery();
 }, 60 * 1000).unref();
 
+const {
+    startWaitingRecoveryScanner
+} = require("./workers/secondWaitingRecoveryScanner");
+
+startWaitingRecoveryScanner();
+
 const localCacheSyncService =
     new LocalCacheSyncService(supabase);
   // ==========================================

@@ -11,10 +11,17 @@ async function removeFailedJobIfSafe(
     workerConfig
 ) {
     const retryToken = batch.retry_claim_token ?? null;
+const generation = Number(batch.dispatch_generation);
+
+if (!Number.isSafeInteger(generation) || generation < 1) {
+    throw new Error(
+        `INVALID_DISPATCH_GENERATION: ${batch.batch_id}`
+    );
+}
 
 const bullJobId = retryToken
-    ? `${batch.batch_id}-retry-${retryToken}`
-    : batch.batch_id;
+    ? `${batch.batch_id}-retry-${retryToken}-gen-${generation}`
+    : `${batch.batch_id}-gen-${generation}`;
 
 const existingJob = await syncQueue.getJob(
     bullJobId
@@ -52,10 +59,11 @@ const existingJob = await syncQueue.getJob(
     String(jobData.worker_id) === String(workerConfig.id) &&
     jobData.server_id === workerConfig.server_id &&
     (jobData.retry_claim_token ?? null) ===
-        (batch.retry_claim_token ?? null);
-
+       (batch.retry_claim_token ?? null) &&
+Number(jobData.dispatch_generation) === generation;
         if (state === "failed") {
     if (!sameAssignment) {
+        
         throw new Error(
             `Failed BullMQ job ownership mismatch: ${batch.batch_id}; worker=${jobData.worker_name || "UNKNOWN"}`
         );
@@ -249,11 +257,18 @@ async function addBatchToQueue(
         throw new Error("server_id missing");
     }
 
-        const retryToken = batch.retry_claim_token ?? null;
+      const retryToken = batch.retry_claim_token ?? null;
+const generation = Number(batch.dispatch_generation);
 
-    const bullJobId = retryToken
-        ? `${batch.batch_id}-retry-${retryToken}`
-        : batch.batch_id;
+if (!Number.isSafeInteger(generation) || generation < 1) {
+    throw new Error(
+        `INVALID_DISPATCH_GENERATION: ${batch.batch_id}`
+    );
+}
+
+const bullJobId = retryToken
+    ? `${batch.batch_id}-retry-${retryToken}-gen-${generation}`
+    : `${batch.batch_id}-gen-${generation}`;
 
     const syncQueue = getSyncQueue(
         workerConfig.queue_name
@@ -272,18 +287,21 @@ async function addBatchToQueue(
             );
         }
 
-        console.log(
-            "ABOUT TO ADD BULLMQ JOB:",
-            batch.batch_id,
-            workerConfig.queue_name,
-            workerConfig.worker_name
-        );
+       console.log(
+    "ABOUT TO ADD BULLMQ JOB:",
+    batch.batch_id,
+    "generation:",
+    generation,
+    workerConfig.queue_name,
+    workerConfig.worker_name
+);
 
         const job = await syncQueue.add(
             "TALLY_SYNC",
             {
-                batch_id: batch.batch_id,
+               batch_id: batch.batch_id,
                 batch_db_id: batch.id,
+                dispatch_generation: generation,
                 retry_claim_token: batch.retry_claim_token ?? null,
                 company_code: batch.company_code,
                 tally_owner: batch.tally_owner,

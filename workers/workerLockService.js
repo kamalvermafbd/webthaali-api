@@ -25,14 +25,27 @@ async function lockJob(job, workerConfig) {
         throw new Error("Invalid batch ID or worker configuration");
     }
 
-      const retryClaimToken = job?.data?.retry_claim_token ?? null;
+    const retryClaimToken =
+    job?.data?.retry_claim_token ?? null;
 
-    const { data: claimResult, error: claimError } =
-        await supabase.rpc("claim_sync_batch_fifo_v2", {
-            p_batch_db_id: batchDbId,
-            p_worker_name: workerConfig.worker_name,
-            p_retry_claim_token: retryClaimToken
-        });
+const expectedGeneration =
+    job?.data?.dispatch_generation;
+
+if (
+    !Number.isSafeInteger(expectedGeneration) ||
+    expectedGeneration < 1
+) {
+    job.claimRejectionReason = "INVALID_DISPATCH_GENERATION";
+    return null;
+}
+
+const { data: claimResult, error: claimError } =
+    await supabase.rpc("claim_sync_batch_fifo_v3", {
+        p_batch_db_id: batchDbId,
+        p_worker_name: workerConfig.worker_name,
+        p_retry_claim_token: retryClaimToken,
+        p_expected_dispatch_generation: expectedGeneration
+    });
 
     if (claimError) {
         throw new Error(
@@ -80,6 +93,7 @@ async function lockJob(job, workerConfig) {
             .eq("worker_status", "RUNNING")
             .eq("worker_id", workerConfig.worker_name)
             .eq("execution_claim_token", executionClaimToken)
+            .eq("dispatch_generation", expectedGeneration)
             .single();
 
     if (readError || !lockedBatch) {

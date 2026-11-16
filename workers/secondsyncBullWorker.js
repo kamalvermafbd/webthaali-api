@@ -188,11 +188,12 @@ if (
     );
 }
 
-    const lockInput = {
+   const lockInput = {
     ...job,
     data: {
         ...job.data,
-        batch_db_id: job.data.batch_db_id
+        batch_db_id: job.data.batch_db_id,
+        dispatch_generation: job.data.dispatch_generation
     }
 };
 

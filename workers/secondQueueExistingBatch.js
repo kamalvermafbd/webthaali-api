@@ -92,10 +92,17 @@ async function inspectConnectorRetryJob(
 
   try {
     const retryToken = batch.retry_claim_token ?? null;
+const generation = Number(batch.dispatch_generation);
 
-    const bullJobId = retryToken
-        ? `${batch.batch_id}-retry-${retryToken}`
-        : batch.batch_id;
+if (!Number.isSafeInteger(generation) || generation < 1) {
+    throw new Error(
+        `INVALID_DISPATCH_GENERATION: ${batch.batch_id}`
+    );
+}
+
+const bullJobId = retryToken
+    ? `${batch.batch_id}-retry-${retryToken}-gen-${generation}`
+    : `${batch.batch_id}-gen-${generation}`;
 
     const job = await syncQueue.getJob(bullJobId);
 
@@ -109,14 +116,14 @@ async function inspectConnectorRetryJob(
         const state = await job.getState();
         const data = job.data || {};
 
-        const matches =
+       const matches =
     data.batch_id === batch.batch_id &&
     String(data.batch_db_id) === String(batch.id) &&
     data.worker_name === workerConfig.worker_name &&
     String(data.worker_id) === String(workerConfig.id) &&
     data.server_id === workerConfig.server_id &&
-    (data.retry_claim_token ?? null) ===
-        (batch.retry_claim_token ?? null);
+    (data.retry_claim_token ?? null) === retryToken &&
+    Number(data.dispatch_generation) === generation;
 
         return {
             state,
@@ -663,11 +670,18 @@ async function inspectNormalBatchJob(
 
     const syncQueue = getSyncQueue(workerConfig.queue_name);
 
-    const retryToken = batch.retry_claim_token ?? null;
+   const retryToken = batch.retry_claim_token ?? null;
+const generation = Number(batch.dispatch_generation);
 
-    const bullJobId = retryToken
-        ? `${batch.batch_id}-retry-${retryToken}`
-        : batch.batch_id;
+if (!Number.isSafeInteger(generation) || generation < 1) {
+    throw new Error(
+        `INVALID_DISPATCH_GENERATION: ${batch.batch_id}`
+    );
+}
+
+const bullJobId = retryToken
+    ? `${batch.batch_id}-retry-${retryToken}-gen-${generation}`
+    : `${batch.batch_id}-gen-${generation}`;
 
     try {
         const job = await syncQueue.getJob(bullJobId);
@@ -682,13 +696,14 @@ async function inspectNormalBatchJob(
         const state = await job.getState();
         const data = job.data || {};
 
-        const matches =
-            data.batch_id === batch.batch_id &&
-            String(data.batch_db_id) === String(batch.id) &&
-            data.worker_name === workerConfig.worker_name &&
-            String(data.worker_id) === String(workerConfig.id) &&
-            data.server_id === workerConfig.server_id &&
-            (data.retry_claim_token ?? null) === retryToken;
+       const matches =
+    data.batch_id === batch.batch_id &&
+    String(data.batch_db_id) === String(batch.id) &&
+    data.worker_name === workerConfig.worker_name &&
+    String(data.worker_id) === String(workerConfig.id) &&
+    data.server_id === workerConfig.server_id &&
+    (data.retry_claim_token ?? null) === retryToken &&
+    Number(data.dispatch_generation) === generation;
 
         return {
             state,
@@ -702,9 +717,42 @@ async function inspectNormalBatchJob(
 
 async function dispatchBatch(batch) {
 
-    if (!batch) {
-        throw new Error("Batch is required");
+    if (!batch?.id || !batch?.batch_id) {
+        throw new Error("Valid batch is required");
     }
+
+    // Never trust a previously fetched batch state.
+    // Reservation RPC remains the final authority.
+    const { data: currentBatch, error: currentError } =
+        await supabase
+            .from("sync_batches")
+            .select("*")
+            .eq("id", batch.id)
+            .eq("batch_id", batch.batch_id)
+            .maybeSingle();
+
+    if (currentError) {
+        throw new Error(
+            "BATCH_CURRENT_STATE_LOOKUP_FAILED: " +
+            currentError.message
+        );
+    }
+
+    if (
+        !currentBatch ||
+        currentBatch.batch_status !== "PENDING" ||
+        currentBatch.worker_status !== "PENDING" ||
+        currentBatch.current_stage !== "PENDING" ||
+        currentBatch.worker_id != null
+    ) {
+        return {
+            success: false,
+            queued: false,
+            reason: "BATCH_NOT_DISPATCH_ELIGIBLE"
+        };
+    }
+
+    batch = currentBatch;
 
     // Never dispatch a batch with uncertain Tally or HTTP outcome.
 const batchError = String(batch.error_message || "");
@@ -931,22 +979,44 @@ if (queueCheck.state !== "NOT_FOUND") {
     throw uncertainError;
 }
 
-   
+   if (reserved.waiting_recovery_pending === true) {
+    const uncertainError = new Error(
+        `RECOVERY_QUEUE_HANDOFF_UNCERTAIN: ${reserved.batch_id}`
+    );
+
+    uncertainError.code =
+        "RECOVERY_QUEUE_HANDOFF_UNCERTAIN";
+
+    uncertainError.cause = queueError;
+
+    console.error(
+        "[WAITING RECOVERY] Reservation retained for reconciliation:",
+        {
+            batch_id: reserved.batch_id,
+            dispatch_generation: reserved.dispatch_generation,
+            worker_id: reserved.worker_id,
+            queue_state: queueCheck.state
+        }
+    );
+
+    throw uncertainError;
+}
 let rollbackQuery = supabase
     .from("sync_batches")
     .update({
         worker_id: null,
         locked_at: null
     })
-    .eq("id", reserved.id)
-    .eq("batch_status", "PENDING")
-    .eq("worker_status", "PENDING")
-    .eq("current_stage", "PENDING")
-    .eq("worker_id", workerConfig.worker_name)
-    .eq("locked_at", reserved.locked_at)
-    .or(
-        "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
-    );
+ .eq("id", reserved.id)
+.eq("batch_status", "PENDING")
+.eq("worker_status", "PENDING")
+.eq("current_stage", "PENDING")
+.eq("worker_id", workerConfig.worker_name)
+.eq("locked_at", reserved.locked_at)
+.eq("dispatch_generation", reserved.dispatch_generation)
+.or(
+    "error_message.is.null,and(error_message.not.match.^CONNECTOR_OUTCOME_UNKNOWN:,error_message.not.match.^HTTP_OUTCOME_UNKNOWN:)"
+);
 
 if (reserved.retry_claim_token == null) {
     rollbackQuery = rollbackQuery.is(
@@ -959,7 +1029,17 @@ if (reserved.retry_claim_token == null) {
         reserved.retry_claim_token
     );
 }
-
+if (reserved.execution_claim_token == null) {
+    rollbackQuery = rollbackQuery.is(
+        "execution_claim_token",
+        null
+    );
+} else {
+    rollbackQuery = rollbackQuery.eq(
+        "execution_claim_token",
+        reserved.execution_claim_token
+    );
+}
 const {
     data: rolledBack,
     error: rollbackError
@@ -996,6 +1076,43 @@ confirmedError.cause = queueError;
 
 throw confirmedError;
 }
+}
+
+async function dispatchRecoveredWaitingBatch(batch) {
+    if (!batch?.id || !batch?.batch_id) {
+        throw new Error("Valid recovery batch is required");
+    }
+
+    const { data: current, error } = await supabase
+        .from("sync_batches")
+        .select("*")
+        .eq("id", batch.id)
+        .eq("batch_id", batch.batch_id)
+        .maybeSingle();
+
+    if (error) {
+        throw new Error(
+            "RECOVERY_BATCH_LOOKUP_FAILED: " + error.message
+        );
+    }
+
+    if (
+        !current ||
+        current.batch_status !== "PENDING" ||
+        current.worker_status !== "PENDING" ||
+        current.current_stage !== "PENDING" ||
+        current.worker_id != null ||
+        current.batch_closed === true ||
+        current.cleanup_claim_token != null
+    ) {
+        return {
+            success: false,
+            queued: false,
+            reason: "RECOVERY_BATCH_NOT_ELIGIBLE"
+        };
+    }
+
+    return dispatchBatch(current);
 }
 /* 261026
 async function dispatchPendingBatches() {
@@ -1204,8 +1321,8 @@ function startBatchQueueDispatcher() {
 
 
 module.exports = {
-    //startBatchQueueDispatcher
     dispatchBatch,
+    dispatchRecoveredWaitingBatch,
     dispatchConnectorLossRetry,
     dispatchUniversalFailedRetry
 };

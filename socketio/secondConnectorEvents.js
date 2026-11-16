@@ -36,7 +36,11 @@ const masterFinalAckReceipts =
 const {
     updateSyncProgress
 } = require("../utils/syncProgress");
+const {
+    dispatchRecoveredWaitingBatch
+} = require("../workers/secondQueueExistingBatch");
 
+const ENABLE_WAITING_CONNECTOR_RECOVERY = false;
 // ============================================================
 // RECOVER WAITING BATCHES WHEN TALLY COMPANY COMES BACK
 // ============================================================
@@ -306,11 +310,53 @@ async function recoverWaitingBatchesForCompanies({
                         }
                     );
 
-                    console.warn(
-    "[WAITING BATCH RECOVERY] RESET AND REDISPATCH DEFERRED",
+                if (!ENABLE_WAITING_CONNECTOR_RECOVERY) {
+    console.warn(
+        "[WAITING BATCH RECOVERY] REDISPATCH DEFERRED",
+        {
+            batch_id: batch.batch_id,
+            reason: "Recovery feature not activated"
+        }
+    );
+    continue;
+}
+
+const { data: recovered, error: recoveryError } =
+    await supabase.rpc("recover_waiting_normal_sync_batch", {
+        p_batch_id: batch.batch_id,
+        p_expected_execution_claim_token:
+            batch.execution_claim_token
+    });
+
+if (recoveryError) {
+    console.error(
+        "[WAITING BATCH RECOVERY] RPC FAILED",
+        {
+            batch_id: batch.batch_id,
+            error: recoveryError.message
+        }
+    );
+    continue;
+}
+
+if (recovered !== true) {
+    console.warn(
+        "[WAITING BATCH RECOVERY] RPC REJECTED",
+        {
+            batch_id: batch.batch_id
+        }
+    );
+    continue;
+}
+
+const dispatchResult =
+    await dispatchRecoveredWaitingBatch(batch);
+
+console.log(
+    "[WAITING BATCH RECOVERY] DISPATCH RESULT",
     {
         batch_id: batch.batch_id,
-        reason: "Previous Tally execution settlement not independently verified"
+        result: dispatchResult
     }
 );
 
