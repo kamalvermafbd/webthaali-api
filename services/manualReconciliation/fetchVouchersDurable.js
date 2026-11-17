@@ -349,7 +349,12 @@ async function fetchVouchersDurable({
             {
                 requestId,
                 signal,
-
+                executionIdentity: {
+                    attemptId,
+                    executionId,
+                    operationId,
+                    operationOrdinal
+                },
                 dispatch: async () => {
                     const marked = await supabase.rpc(
                         "mark_manual_reconcile_voucher_dispatch_v1",

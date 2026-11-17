@@ -212,6 +212,12 @@ const payload = {
             {
                 requestId,
                 signal,
+                executionIdentity: {
+    attemptId,
+    executionId,
+    operationId,
+    operationOrdinal
+},
                dispatch: () =>
     markDurableReconcileFetchDispatch({
         supabase,

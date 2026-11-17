@@ -440,13 +440,18 @@ async function inspectManualReconcileRecovery({
     const redisReceipt =
         await readManualReconcileReleaseReceipt(attemptId);
 
-    if (
-        !status ||
-        status.company_code !== attempt.company_code ||
-        status.tally_owner !== attempt.tally_owner
-    ) {
-        fail("RESERVATION_SCOPE_INVALID");
-    }
+   if (
+    !status ||
+    status.id !== attempt.reservation_id ||
+    status.company_code !== attempt.company_code ||
+    status.tally_owner !== attempt.tally_owner ||
+    (
+        status.status === "RUNNING" &&
+        status.operation_token !== attempt.operation_token
+    )
+) {
+    fail("RESERVATION_SCOPE_INVALID");
+}
 
     verifyIdentity(
         attempt,
@@ -499,11 +504,13 @@ async function inspectManualReconcileRecovery({
     ) {
         state = "FINALIZATION_RECORDED";
     } else if (
+        !finalization &&
         checkpoint &&
         journal.allVerified
     ) {
-        state =
-            "CHECKPOINT_PRESENT_RELEASE_UNVERIFIED";
+        state = redisReleaseReceiptVerified
+            ? "CHECKPOINT_PRESENT_RELEASE_VERIFIED"
+            : "CHECKPOINT_PRESENT_RELEASE_UNVERIFIED";
     } else if (execution) {
         state = "EXECUTION_UNCERTAIN";
     } else if (operations.length === 0) {

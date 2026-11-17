@@ -39659,7 +39659,13 @@ app.post("/reconcileRecovery", async (req, res) => {
     const uuidPattern =
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-    if (!uuidPattern.test(attemptId)) {
+    if (
+    !uuidPattern.test(attemptId) ||
+    (
+        req.body?.cancel_admission_only !== undefined &&
+        typeof req.body.cancel_admission_only !== "boolean"
+    )
+) {
         return res.status(400).json({
             success: false,
             error_code: "RECONCILE_RECOVERY_REQUEST_INVALID"
@@ -39668,9 +39674,11 @@ app.post("/reconcileRecovery", async (req, res) => {
 
     try {
         const result = await recoverManualReconciliation({
-            supabase,
-            attemptId
-        });
+        supabase,
+        attemptId,
+        cancelAdmissionOnly:
+            req.body?.cancel_admission_only === true
+    });
 
         if (result.recovered !== true) {
             return res.status(409).json({

@@ -22,8 +22,35 @@ const OPERATION_SETTLE_TIMEOUT_MS = 15 * 1000;
 // WAIT AND ACQUIRE GLOBAL CONNECTOR LOCK
 // ==========================================
 
-async function waitForConnectorLock(connectorId) {
+async function waitForConnectorLock(
+    connectorId,
+    maxWaitMs = undefined
+) {
     const id = String(connectorId || "").trim();
+
+    if (
+        maxWaitMs !== undefined &&
+        (
+            !Number.isSafeInteger(maxWaitMs) ||
+            maxWaitMs <= 0
+        )
+    ) {
+        throw new Error("GLOBAL_CONNECTOR_WAIT_BUDGET_INVALID");
+    }
+
+    const deadline = maxWaitMs === undefined
+        ? null
+        : Date.now() + maxWaitMs;
+
+    function assertWaitBudget() {
+        if (deadline !== null && Date.now() >= deadline) {
+            const error = new Error(
+                `CONNECTOR_BUSY: ${id}`
+            );
+            error.code = "CONNECTOR_BUSY";
+            throw error;
+        }
+    }
 
     if (!id) {
         throw new Error("connectorId is required");
@@ -32,6 +59,7 @@ async function waitForConnectorLock(connectorId) {
   const ownerToken = crypto.randomUUID();
 
    while (true) {
+     assertWaitBudget();
         const socket = registry.get(id);
 
         if (!socket?.connected) {
@@ -203,8 +231,14 @@ if (watchdog.operation_status === "QUARANTINED") {
     );
 }
 
+               assertWaitBudget();
+
+        const waitMs = deadline === null
+            ? LOCK_WAIT_MS
+            : Math.min(LOCK_WAIT_MS, deadline - Date.now());
+
         await new Promise(resolve =>
-            setTimeout(resolve, LOCK_WAIT_MS)
+            setTimeout(resolve, waitMs)
         );
     }
 }
@@ -255,8 +289,10 @@ async function withGlobalConnectorLock(
     const completion = receiptRequested
         ? { result: null, releaseEvidence: null }
         : null;
-
-    const lock = await waitForConnectorLock(connectorId);
+    const lock = await waitForConnectorLock(
+        connectorId,
+        options?.lockWaitMs
+    );
 
   let renewalTimer = null;
 let renewing = false;

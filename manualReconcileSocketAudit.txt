@@ -1,0 +1,446 @@
+========== LINES 390 - 460 ==========
+  390:         console.error(
+  391:             "âŒ COMPANY BATCH RECOVERY ERROR:",
+  392:             error
+  393:         );
+  394: 
+  395:     } finally {
+  396:         socket.waitingBatchRecoveryRunning = false;
+  397:     }
+  398: }
+  399: 
+  400: 
+  401: function registerEvents(io) {
+  402: 
+  403:     io.on("connection", (socket) => {
+  404: 
+  405:         console.log("================================");
+  406:         console.log("âœ… Connector Connected");
+  407:         console.log("Socket ID :", socket.id);
+  408:         console.log("================================");
+  409: 
+  410:        // registry.registerPending(socket);
+  411: 
+  412:        // 060926 start
+  413: const pendingConnectorId =
+  414:     `TMP-${crypto.randomUUID()}`;
+  415: 
+  416: socket.pendingConnectorId =
+  417:     pendingConnectorId;
+  418: 
+  419: registry.registerPending(
+  420:     socket,
+  421:     pendingConnectorId
+  422: );
+  423: 
+  424: console.log(
+  425:     "ðŸ†• TEMP CONNECTOR CREATED:",
+  426:     {
+  427:         socket_id: socket.id,
+  428:         pending_connector_id:
+  429:             pendingConnectorId
+  430:     }
+  431: );
+  432: // 060926 end
+  433: 
+  434:         socket.protocolReceiver =
+  435:             new ServerProtocolReceiver(
+  436:                 socket
+  437:             );
+  438: 
+  439:                 socket.protocolReceiver.start();
+  440: 
+  441:         masterFinalAckReceipts.install(socket);
+  442: 
+  443: socket.on("identifyConnector", async (data) => {
+  444: 
+  445:     if (socket.identificationInProgress === true) {
+  446:         console.warn(
+  447:             "[CONNECTOR IDENTIFY SKIPPED] Identification already in progress",
+  448:             { socket_id: socket.id }
+  449:         );
+  450:         return;
+  451:     }
+  452: 
+  453:     socket.identificationInProgress = true;
+  454: 
+  455:     console.log("[CONNECTOR IDENTIFY RECEIVED]", {
+  456:         socket_id: socket.id,
+  457:         connected: socket.connected,
+  458:         guid_count: Array.isArray(data?.company_guids)
+  459:             ? data.company_guids.length
+  460:             : 0,
+========== LINES 630 - 750 ==========
+  630:     company_guids;
+  631: 
+  632: console.log(
+  633:     "ðŸ“‹ TALLY GUIDS AVAILABLE ON SOCKET:",
+  634:     {
+  635:         socket_id: socket.id,
+  636:         company_guids: socket.companyGuids
+  637:     }
+  638: );
+  639: 
+  640: // ==========================================
+  641: // REGISTER EXISTING CONNECTORS FROM DB
+  642: // ==========================================
+  643: 
+  644: const connectorIds = [
+  645:     ...new Set(
+  646:         matches
+  647:             .map(row => row.connector_id)
+  648:             .filter(Boolean)
+  649:     )
+  650: ];
+  651: 
+  652: if (connectorIds.length === 0) {
+  653:     console.warn(
+  654:         "âš ï¸ CONNECTOR IDENTIFICATION: NO DATABASE MAPPING",
+  655:         {
+  656:             socket_id: socket.id,
+  657:             company_guid_count: company_guids.length
+  658:         }
+  659:     );
+  660: 
+  661:     socket.emit("connector:registration:status", {
+  662:         connector_id: null,
+  663:         registered: false,
+  664:         reason: "NO_CONNECTOR_MAPPING"
+  665:     });
+  666: 
+  667:     return;
+  668: }
+  669: 
+  670: for (const connectorId of connectorIds) {
+  671: 
+  672:     if (!socket.connected) {
+  673:         console.warn(
+  674:             "[CONNECTOR IDENTIFY STOPPED] Socket disconnected before ownership claim",
+  675:             {
+  676:                 socket_id: socket.id,
+  677:                 connector_id: connectorId
+  678:             }
+  679:         );
+  680:         break;
+  681:     }
+  682: 
+  683:     const claimed = await claimConnectorSocketOwnership(
+  684:         connectorId,
+  685:         socket.id
+  686:     ).catch((error) => {
+  687:         console.error(
+  688:             "âŒ AUTO-REGISTER OWNERSHIP CLAIM FAILED",
+  689:             {
+  690:                 socket_id: socket.id,
+  691:                 connector_id: connectorId,
+  692:                 error: error.message
+  693:             }
+  694:         );
+  695: 
+  696:              return { claimed: false, health: null };
+  697:     });
+  698: 
+  699:     if (!socket.connected && claimed.claimed) {
+  700:         console.warn(
+  701:             "[CONNECTOR IDENTIFY] Socket disconnected after ownership claim",
+  702:             {
+  703:                 socket_id: socket.id,
+  704:                 connector_id: connectorId
+  705:             }
+  706:         );
+  707: 
+  708:         await updateConnectorHealthIfSocketOwner(
+  709:             connectorId,
+  710:             socket.id,
+  711:             {
+  712:                 connection_status: "DISCONNECTED",
+  713:                 operation_status: "UNKNOWN"
+  714:             }
+  715:         ).catch(error => {
+  716:             console.error(
+  717:                 "[CONNECTOR IDENTIFY] Disconnect rollback failed",
+  718:                 {
+  719:                     connector_id: connectorId,
+  720:                     error: error.message
+  721:                 }
+  722:             );
+  723:         });
+  724: 
+  725:                 break;
+  726:     }
+  727: 
+  728:     if (!socket.connected) {
+  729:         console.warn(
+  730:             "[CONNECTOR IDENTIFY STOPPED] Socket disconnected after failed ownership claim",
+  731:             {
+  732:                 socket_id: socket.id,
+  733:                 connector_id: connectorId
+  734:             }
+  735:         );
+  736:         break;
+  737:     }
+  738: 
+  739:     if (!claimed.claimed) {
+  740:         console.warn(
+  741:             "âš ï¸ EXISTING CONNECTOR AUTO-REGISTER SKIPPED: ownership unavailable",
+  742:             {
+  743:                socket_id: socket.id,
+  744: connector_id: connectorId,
+  745: current_owner: claimed.health?.socket_id || null,
+  746: reason: claimed.reason || "UNSPECIFIED",
+  747: health_status: claimed.health?.connection_status || null,
+  748: health_operation_status: claimed.health?.operation_status || null
+  749:             }
+  750:         );
+========== LINES 900 - 1070 ==========
+  900:                 socket_id: socket.id,
+  901:                 rollback_updated: rollbackUpdated
+  902:             }
+  903:         );
+  904: 
+  905:         socket.emit("connector:registration:status", {
+  906:     connector_id: connectorId,
+  907:     registered: false,
+  908:     reason: "HEALTH_UPDATE_FAILED"
+  909: });
+  910: 
+  911:         continue;
+  912:     }
+  913: 
+  914:         if (!socket.connected) {
+  915:         console.warn(
+  916:             "[CONNECTOR IDENTIFY] Socket disconnected before registration success",
+  917:             {
+  918:                 socket_id: socket.id,
+  919:                 connector_id: connectorId
+  920:             }
+  921:         );
+  922: 
+  923:         await updateConnectorHealthIfSocketOwner(
+  924:             connectorId,
+  925:             socket.id,
+  926:             {
+  927:                 connection_status: "DISCONNECTED",
+  928:                 operation_status: "UNKNOWN"
+  929:             }
+  930:         ).catch(error => {
+  931:             console.error(
+  932:                 "[CONNECTOR IDENTIFY] Final disconnect rollback failed",
+  933:                 {
+  934:                     connector_id: connectorId,
+  935:                     error: error.message
+  936:                 }
+  937:             );
+  938:         });
+  939: 
+  940:         registry.remove(connectorId, socket);
+  941:         break;
+  942:     }
+  943: 
+  944:    console.log(
+  945:     "âœ… EXISTING CONNECTOR AUTO REGISTERED WITH OWNERSHIP",
+  946:     {
+  947:         socket_id: socket.id,
+  948:         connector_id: connectorId
+  949:     }
+  950: );
+  951: 
+  952: if (isNewerQueueStatus && socket.connected) {
+  953:     try {
+  954:         const result = await updateConnectorTallyQueueStatus(
+  955:             connectorId,
+  956:             socket.id,
+  957:             tallyQueueStatus
+  958:         );
+  959: 
+  960:         if (!result.updated && !result.unchanged) {
+  961:             console.warn(
+  962:                 "[CONNECTOR IDENTIFY] Initial queue status rejected",
+  963:                 {
+  964:                     socket_id: socket.id,
+  965:                     connector_id: connectorId,
+  966:                     reason: result.reason
+  967:                 }
+  968:             );
+  969:         }
+  970:     } catch (error) {
+  971:         console.error(
+  972:             "[CONNECTOR IDENTIFY] Initial queue status persistence failed",
+  973:             {
+  974:                 socket_id: socket.id,
+  975:                 connector_id: connectorId,
+  976:                 error: error.message
+  977:             }
+  978:         );
+  979:     }
+  980: }
+  981: 
+  982: if (!socket.connected) {
+  983:     await updateConnectorHealthIfSocketOwner(
+  984:         connectorId,
+  985:         socket.id,
+  986:         {
+  987:             connection_status: "DISCONNECTED",
+  988:             operation_status: "UNKNOWN"
+  989:         }
+  990:     ).catch(error => {
+  991:         console.error(
+  992:             "[CONNECTOR IDENTIFY] Disconnect rollback failed",
+  993:             {
+  994:                 connector_id: connectorId,
+  995:                 error: error.message
+  996:             }
+  997:         );
+  998:     });
+  999: 
+ 1000:     registry.remove(connectorId, socket);
+ 1001:     break;
+ 1002: }
+ 1003: 
+ 1004: socket.emit("connector:registration:status", {
+ 1005:     connector_id: connectorId,
+ 1006:     registered: true,
+ 1007:     socket_id: socket.id
+ 1008: });
+ 1009: }
+ 1010: 
+ 1011: // ==========================================
+ 1012: // RECOVER WAITING BATCHES
+ 1013: // ==========================================
+ 1014: 
+ 1015: 
+ 1016:         const hasOwnedConnector =
+ 1017:             connectorIds.some(connectorId =>
+ 1018:                 socket.connectorIds?.has(connectorId) &&
+ 1019:                 registry.get(connectorId) === socket
+ 1020:             );
+ 1021: 
+ 1022:         if (hasOwnedConnector) {
+ 1023:     if (socket.tallyStatus === "ONLINE") {
+ 1024:         await recoverWaitingBatchesForCompanies({
+ 1025:             companyGuids: company_guids,
+ 1026:             socket
+ 1027:         });
+ 1028:     } else {
+ 1029:         console.log(
+ 1030:             "â³ WAITING BATCH RECOVERY DEFERRED: TALLY NOT CONFIRMED ONLINE",
+ 1031:             { socket_id: socket.id, tally_status: socket.tallyStatus || "UNKNOWN" }
+ 1032:         );
+ 1033:     }
+ 1034:         } else {
+ 1035:             console.warn(
+ 1036:                 "âš ï¸ BATCH RECOVERY SKIPPED: SOCKET OWNS NO REGISTERED CONNECTOR",
+ 1037:                 {
+ 1038:                     socket_id: socket.id,
+ 1039:                     connector_ids: connectorIds
+ 1040:                 }
+ 1041:             );
+ 1042:         }
+ 1043: 
+ 1044:    } catch (err) {
+ 1045: 
+ 1046:     console.error(
+ 1047:         "âŒ CONNECTOR IDENTITY ERROR:",
+ 1048:         err
+ 1049:     );
+ 1050: 
+ 1051:        socket.emit("connector:registration:status", {
+ 1052:         connector_id: null,
+ 1053:         registered: false,
+ 1054:         reason: "IDENTIFICATION_ERROR"
+ 1055:     });
+ 1056: 
+ 1057: } finally {
+ 1058:     socket.identificationInProgress = false;
+ 1059: }
+ 1060: 
+ 1061: });
+ 1062: 
+ 1063: 
+ 1064: // Connector Register
+ 1065: 
+ 1066: 
+ 1067:         // Connector Register
+ 1068:         socket.on("register", async (data) => {
+ 1069:             console.log("Register Request :", data);
+ 1070: 
+========== LINES 1710 - 1800 ==========
+ 1710:                     socket.lastHeartbeat
+ 1711:                         ? new Date(socket.lastHeartbeat).toISOString()
+ 1712:                         : null
+ 1713:             });
+ 1714: 
+ 1715: 
+ 1716: 
+ 1717:             console.log("âŒ TALLY REQUEST ERROR:", data?.batchId);
+ 1718:         });
+ 1719: 
+ 1720:         // ============================================================
+ 1721:         // DISCONNECT â€” ONLY THE CURRENT OWNER CAN MARK DISCONNECTED
+ 1722:         // ============================================================
+ 1723: 
+ 1724:         socket.on("disconnect", async (reason) => {
+ 1725:     console.log("================================");
+ 1726:     console.log("âŒ Connector Disconnected");
+ 1727:     console.log("Socket ID :", socket.id);
+ 1728:     console.log("Reason :", reason);
+ 1729: 
+ 1730:     if (socket.protocolReceiver) {
+ 1731:         socket.protocolReceiver.cancelCollection(
+ 1732:             `Connector disconnected: ${reason}`
+ 1733:         );
+ 1734:     }
+ 1735: 
+ 1736:             const connectorIds = new Set([
+ 1737:                 ...(socket.connectorIds || []),
+ 1738:                 socket.connectorId
+ 1739:             ].filter(Boolean));
+ 1740: // Remove pending selection state before awaiting Redis.
+ 1741: registry.remove(null, socket);
+ 1742:             for (const connectorId of connectorIds) {
+ 1743:                 try {
+ 1744:                     const result =
+ 1745:                         await updateConnectorHealthIfSocketOwner(
+ 1746:                             connectorId,
+ 1747:                             socket.id,
+ 1748:                             {
+ 1749:                                 connection_status: "DISCONNECTED",
+ 1750:                                 operation_status: "UNKNOWN"
+ 1751:                             }
+ 1752:                         );
+ 1753: 
+ 1754:                     if (!result.updated) {
+ 1755:                         console.log(
+ 1756:                             "â„¹ï¸ DISCONNECT HEALTH UPDATE SKIPPED: SOCKET NO LONGER OWNS CONNECTOR",
+ 1757:                             {
+ 1758:                                 socket_id: socket.id,
+ 1759:                                 connector_id: connectorId
+ 1760:                             }
+ 1761:                         );
+ 1762:                     }
+ 1763:                 } catch (error) {
+ 1764:                     console.error(
+ 1765:                         "âŒ DISCONNECT HEALTH UPDATE FAILED",
+ 1766:                         {
+ 1767:                             socket_id: socket.id,
+ 1768:                             connector_id: connectorId,
+ 1769:                             error: error.message
+ 1770:                         }
+ 1771:                     );
+ 1772:                 }
+ 1773: 
+ 1774:                 registry.remove(connectorId, socket);
+ 1775:             }
+ 1776: 
+ 1777:             console.log("================================");
+ 1778:         });
+ 1779: 
+ 1780: 
+ 1781: 
+ 1782:     });
+ 1783: 
+ 1784: }
+ 1785: 
+ 1786: module.exports = {
+ 1787:     registerEvents
+ 1788: };

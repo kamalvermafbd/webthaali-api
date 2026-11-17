@@ -31,11 +31,12 @@ async function sendDurableReconcileRequest(
     socket,
     event,
     payload,
-    {
-        requestId,
-        signal,
-        dispatch
-    } = {}
+   {
+    requestId,
+    signal,
+    dispatch,
+    executionIdentity
+} = {}
 ) {
     if (
         typeof requestId !== "string" ||
@@ -60,7 +61,46 @@ async function sendDurableReconcileRequest(
             "DURABLE_RECONCILE_REQUEST_ID_OVERRIDE"
         );
     }
+    // Optional execution identity travels only over the socket.
+    // It must not modify the journaled accounting input payload.
+    if (executionIdentity !== undefined) {
+        const validUUID = value =>
+            typeof value === "string" && UUID.test(value);
 
+        if (
+            !executionIdentity ||
+            typeof executionIdentity !== "object" ||
+            Array.isArray(executionIdentity) ||
+            !validUUID(executionIdentity.attemptId) ||
+            !validUUID(executionIdentity.executionId) ||
+            !validUUID(executionIdentity.operationId) ||
+            !Number.isSafeInteger(
+                executionIdentity.operationOrdinal
+            ) ||
+            executionIdentity.operationOrdinal <= 0 ||
+            Object.keys(executionIdentity).some(
+                key => ![
+                    "attemptId",
+                    "executionId",
+                    "operationId",
+                    "operationOrdinal"
+                ].includes(key)
+            ) ||
+            Object.keys(executionIdentity).length !== 4
+        ) {
+            throw new Error(
+                "DURABLE_RECONCILE_EXECUTION_IDENTITY_INVALID"
+            );
+        }
+
+        for (const key of Object.keys(executionIdentity)) {
+            if (Object.prototype.hasOwnProperty.call(payload, key)) {
+                throw new Error(
+                    "DURABLE_RECONCILE_EXECUTION_IDENTITY_OVERRIDE"
+                );
+            }
+        }
+    }
     if (signal?.aborted) {
         throw new Error("DURABLE_RECONCILE_ABORTED_BEFORE_DISPATCH");
     }
@@ -144,9 +184,30 @@ async function sendDurableReconcileRequest(
             }
         }
 
-        function onResponse(data) {
+                function onResponse(data) {
             if (data?.requestId !== requestId) {
                 return;
+            }
+
+            // Verify the connector response belongs to
+            // the exact execution dispatched by this request.
+            if (executionIdentity !== undefined) {
+                const identityMatches =
+                    data.attemptId === executionIdentity.attemptId &&
+                    data.executionId === executionIdentity.executionId &&
+                    data.operationId === executionIdentity.operationId &&
+                    data.operationOrdinal ===
+                        executionIdentity.operationOrdinal;
+
+                if (!identityMatches) {
+                    finish(
+                        uncertainError(
+                            "DURABLE_RECONCILE_RESPONSE_IDENTITY_MISMATCH",
+                            requestId
+                        )
+                    );
+                    return;
+                }
             }
 
             if (data.success !== true) {
@@ -234,10 +295,19 @@ async function sendDurableReconcileRequest(
             // prove the connector never received the request.
             requestDispatched = true;
 
-            socket.emit(event, {
-                ...payload,
-                requestId
-            });
+           socket.emit(event, {
+    ...payload,
+    ...(executionIdentity
+        ? {
+            attemptId: executionIdentity.attemptId,
+            executionId: executionIdentity.executionId,
+            operationId: executionIdentity.operationId,
+            operationOrdinal:
+                executionIdentity.operationOrdinal
+        }
+        : {}),
+    requestId
+});
         } catch (cause) {
             finish(
                 uncertainError(
