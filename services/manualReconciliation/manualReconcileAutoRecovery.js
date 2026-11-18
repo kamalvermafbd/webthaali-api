@@ -10,7 +10,7 @@ const {
 } = require("./inspectManualReconcileRecovery");
 
 const UUID =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ELIGIBLE = new Set([
     "CHECKPOINT_PRESENT_RELEASE_VERIFIED",
