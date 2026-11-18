@@ -99,6 +99,8 @@ function createManualReconcileAutoRecovery({
         let leaseLost = false;
         let renewing = false;
         let heartbeat = null;
+        let recoveryStarted = false;
+        let recoveryConfirmed = false;
 
         try {
             acquired = await rpcBoolean(
@@ -183,7 +185,7 @@ function createManualReconcileAutoRecovery({
                     reason: "LEASE_LOST"
                 };
             }
-
+recoveryStarted = true;
             const outcome =
                 await recoverManualReconciliation({
                     supabase,
@@ -198,7 +200,12 @@ function createManualReconcileAutoRecovery({
                         "LEASE_LOST_OUTCOME_REQUIRES_INSPECTION"
                 };
             }
-
+recoveryConfirmed =
+    outcome?.recovered === true &&
+    (
+        outcome?.reason === "CLOSED" ||
+        outcome?.reason === "ALREADY_CLOSED"
+    );
             return {
                 attemptId,
                 ...outcome
@@ -213,28 +220,44 @@ function createManualReconcileAutoRecovery({
                     error?.message || "UNKNOWN"
             };
 
-        } finally {
-            if (heartbeat) {
-                clearInterval(heartbeat);
-            }
+   } finally {
+    if (heartbeat) {
+        clearInterval(heartbeat);
+    }
 
-            if (acquired) {
-                try {
-                    await rpcBoolean(
-                        "release_manual_reconcile_auto_recovery_v1",
-                        args
-                    );
-                } catch (_) {
-                    // Do not assume release succeeded.
-                    // SQL lease expiry is fallback.
-                    report({
-                        attemptId,
-                        recovered: false,
-                        reason: "LEASE_RELEASE_UNCERTAIN"
-                    });
-                }
-            }
+    // Once recovery execution begins, preserve the claim
+    // unless terminal success is explicitly confirmed.
+    // An uncertain mutation must never free the attempt
+    // for another automatic recovery execution.
+    const safeToRelease =
+        acquired &&
+        !leaseLost &&
+        (
+            !recoveryStarted ||
+            recoveryConfirmed
+        );
+
+    if (safeToRelease) {
+        try {
+            await rpcBoolean(
+                "release_manual_reconcile_auto_recovery_v1",
+                args
+            );
+        } catch (_) {
+            report({
+                attemptId,
+                recovered: false,
+                reason: "LEASE_RELEASE_UNCERTAIN"
+            });
         }
+    } else if (acquired) {
+        report({
+            attemptId,
+            recovered: false,
+            reason: "LEASE_RETAINED_FOR_VERIFICATION"
+        });
+    }
+}
     }
 
     async function scan() {

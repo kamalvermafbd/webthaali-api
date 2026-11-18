@@ -10,7 +10,7 @@ const {
 } = require("../services/manualReconciliation/manualReconcileAutoRecovery");
 
 const supabaseUrl = process.env.SUPABASE_URL;
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_KEY;
 
 if (!supabaseUrl || !serviceRoleKey) {
     throw new Error(
