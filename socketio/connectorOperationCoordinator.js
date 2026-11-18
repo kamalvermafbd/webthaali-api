@@ -18,6 +18,61 @@ const LOCK_RENEW_MS = 30000;
 const LOCK_WAIT_MS = 2000;
 
 const OPERATION_SETTLE_TIMEOUT_MS = 15 * 1000;
+
+// Process-local Manual Reconciliation lifecycle observation only.
+// NOT a durable settlement receipt or recovery authorization.
+
+const manualLifecycleObservations = new Map();
+
+
+function getManualReconcileCoordinatorLifecycle(attemptId) {
+    const item = manualLifecycleObservations.get(
+        String(attemptId || "")
+    );
+
+    if (!item) return null;
+
+    const pendingWork = item.pending.size;
+
+    const locallySettled =
+        item.coordinatorExited === true &&
+        pendingWork === 0 &&
+        (
+            item.callbackSettled === true ||
+            item.callbackStarted !== true
+        ) &&
+        item.outcome !== "ACQUISITION_UNVERIFIED" &&
+        item.outcome !== "SUCCESS_RELEASED";
+
+    const outcome =
+        item.outcome === "SUCCESS_RELEASED"
+            ? "SUCCESS_RELEASED"
+            : item.outcome === "ACQUISITION_UNVERIFIED"
+                ? "ACQUISITION_UNVERIFIED"
+                : item.coordinatorExited !== true
+                    ? item.outcome
+                    : locallySettled
+                        ? "LOCALLY_SETTLED_UNVERIFIED"
+                        : "PENDING_WORK_UNVERIFIED";
+
+    return Object.freeze({
+        attemptId: item.attemptId,
+        executionId: item.executionId,
+        serverInstanceId: item.serverInstanceId,
+        connectorId: item.connectorId,
+        socketId: item.socketId,
+        ownerToken: item.ownerToken,
+        coordinatorExited: item.coordinatorExited,
+        pendingWork,
+        callbackSettled: item.callbackSettled,
+        locallySettled,
+        outcome,
+
+        // Process-local evidence is not durable SQL authorization.
+        recoveryAuthorized: false
+    });
+}
+
 // ==========================================
 // WAIT AND ACQUIRE GLOBAL CONNECTOR LOCK
 // ==========================================
@@ -289,10 +344,85 @@ async function withGlobalConnectorLock(
     const completion = receiptRequested
         ? { result: null, releaseEvidence: null }
         : null;
-    const lock = await waitForConnectorLock(
-        connectorId,
-        options?.lockWaitMs
-    );
+       
+    // Reserve Manual Reconciliation attempt synchronously,
+    // before any asynchronous Redis lock acquisition.
+    // This prevents two requests with the same attemptId
+    // from both entering the lock acquisition path.
+    let manualLifecycle = null;
+
+    if (receiptRequested) {
+        if (
+            manualLifecycleObservations.has(
+                completionIdentity.attemptId
+            )
+        ) {
+            throw new Error(
+                "MANUAL_RECONCILE_LIFECYCLE_DUPLICATE"
+            );
+        }
+
+        manualLifecycle = {
+            ...completionIdentity,
+            connectorId: String(connectorId || "").trim(),
+            socketId: null,
+            ownerToken: null,
+            pending: new Set(),
+            coordinatorExited: false,
+            callbackSettled: false,
+            callbackStarted: false,
+            outcome: "ACQUIRING_LOCK"
+        };
+
+        manualLifecycleObservations.set(
+            manualLifecycle.attemptId,
+            manualLifecycle
+        );
+    }
+
+    let lock;
+
+    try {
+        lock = await waitForConnectorLock(
+            connectorId,
+            options?.lockWaitMs
+        );
+    } catch (error) {
+        if (manualLifecycle) {
+            manualLifecycle.coordinatorExited = true;
+            manualLifecycle.outcome = "ACQUISITION_UNVERIFIED";
+
+            // Retain the attempt reservation fail-closed.
+            // Acquisition may have completed remotely despite
+            // a timeout or transport failure.
+        }
+
+        throw error;
+    }
+
+    if (manualLifecycle) {
+        manualLifecycle.connectorId = lock.connectorId;
+        manualLifecycle.socketId = lock.socketId;
+        manualLifecycle.ownerToken = lock.ownerToken;
+        manualLifecycle.outcome = "RUNNING";
+    }
+
+
+    function trackManualWork(promise) {
+        if (!manualLifecycle) return promise;
+
+        const tracked = Promise.resolve(promise);
+        manualLifecycle.pending.add(tracked);
+
+        tracked.then(
+            () => manualLifecycle.pending.delete(tracked),
+            () => manualLifecycle.pending.delete(tracked)
+        );
+
+        return tracked;
+    }
+
+    try {
 
   let renewalTimer = null;
 let renewing = false;
@@ -324,6 +454,10 @@ operationAbortController.signal.addEventListener(
                 const cancelResult = receiver.cancelCollection(
                     "Global connector operation aborted"
                 );
+
+                if (cancelResult?.then) {
+    trackManualWork(cancelResult);
+}
 
                 if (cancelResult?.catch) {
                     cancelResult.catch(error => {
@@ -430,6 +564,8 @@ function runOptInRedisCommand(command, message) {
 
     ownershipRedisPromise = pending;
 
+    trackManualWork(pending);
+
     const clearPending = () => {
         if (ownershipRedisPromise === pending) {
             ownershipRedisPromise = null;
@@ -479,7 +615,7 @@ function quarantineForCleanup(...args) {
 
         return quarantineConnectorAndSocket(...args);
     });
-
+trackManualWork(work);
     return bounded(
         work,
         `Global quarantine timeout: ${lock.connectorId}`
@@ -641,7 +777,7 @@ function assertOwnership() {
             ownershipCheckPromise = null;
         }
     };
-
+trackManualWork(work);
     work.then(
         () => {
             clearCheck();
@@ -670,6 +806,14 @@ function assertOwnership() {
 ) return;
 
             renewing = true;
+
+            let resolveRenewalWork;
+
+if (manualLifecycle) {
+    trackManualWork(new Promise(resolve => {
+        resolveRenewalWork = resolve;
+    }));
+}
 
             try {
                 const renewed = identityEnabled
@@ -752,6 +896,10 @@ function assertOwnership() {
     }
 } finally {
     renewing = false;
+
+    if (resolveRenewalWork) {
+        resolveRenewalWork();
+    }
 }
         }, LOCK_RENEW_MS);
 
@@ -853,6 +1001,9 @@ const result = await new Promise((resolve, reject) => {
 
    if (identityEnabled) {
     callbackActive = true;
+    if (manualLifecycle) {
+    manualLifecycle.callbackStarted = true;
+}
 
     return Promise.resolve()
         .then(() => operation(
@@ -894,6 +1045,13 @@ return operation(
     operationAbortController.signal
 );
 });
+trackManualWork(operationPromise);
+
+operationPromise.finally(() => {
+    if (manualLifecycle) {
+        manualLifecycle.callbackSettled = true;
+    }
+}).catch(() => {});
         return operationPromise;
         })
         .then(
@@ -1358,11 +1516,40 @@ if (receiptRequested) {
         lock.socket.disconnect(true);
     }
 
-    throw error;
+       throw error;
 }
 }
     }
+    
+    } finally {
+        if (manualLifecycle) {
+            // Coordinator control flow has exited.
+            // This does not mean all asynchronous work has settled.
+            manualLifecycle.coordinatorExited = true;
+
+            const successReleased =
+                operationCompletedSafely === true &&
+                completion?.releaseEvidence?.redisReleaseConfirmed === true;
+
+            if (successReleased) {
+                manualLifecycle.outcome = "SUCCESS_RELEASED";
+            } else if (
+                manualLifecycle.pending.size === 0 &&
+                (
+                    operationPromise === null ||
+                    manualLifecycle.callbackSettled === true
+                )
+            ) {
+                manualLifecycle.outcome = "LOCALLY_SETTLED_UNVERIFIED";
+            } else {
+                manualLifecycle.outcome = "PENDING_WORK_UNVERIFIED";
+            }
+        }
+    }
+
 }
+
 module.exports = {
-    withGlobalConnectorLock
+    withGlobalConnectorLock,
+    getManualReconcileCoordinatorLifecycle
 };

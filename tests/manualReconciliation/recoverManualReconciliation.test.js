@@ -164,12 +164,13 @@ function fixture(options = {}) {
         execution,
         checkpoint,
         finalization,
-        status: {
-            company_code: attempt.company_code,
-            tally_owner: attempt.tally_owner,
-            status: "RUNNING",
-            operation_token: TOKEN
-        },
+      status: {
+        id: RESERVATION,
+        company_code: attempt.company_code,
+        tally_owner: attempt.tally_owner,
+        status: "RUNNING",
+        operation_token: TOKEN
+    },
         receipt
     };
 }
@@ -231,10 +232,36 @@ async function withHarness(options, run) {
                     };
                 }
 
-                return {
-                    data: snapshot,
-                    error: null
-                };
+              return {
+    data:
+        calls.close > 0 &&
+        !options.closeThrows &&
+        !options.closeError &&
+        (
+            options.closeResult === undefined ||
+            (
+                Array.isArray(options.closeResult) &&
+                options.closeResult[0]?.closed === true
+            )
+        )
+            ? {
+                ...snapshot,
+                finalization: snapshot.finalization
+                    ? {
+                        ...snapshot.finalization,
+                        state: "CLOSED"
+                    }
+                    : null,
+                status: snapshot.status
+                    ? {
+                        ...snapshot.status,
+                        status: "IDLE"
+                    }
+                    : null
+            }
+            : snapshot,
+    error: null
+};
             }
 
             if (name === "close_manual_reconcile_v2") {
@@ -403,8 +430,8 @@ test(
             attemptId: ATTEMPT
         });
 
-        assert.equal(calls.snapshot, 2);
-        assert.equal(calls.receipt, 1);
+        assert.equal(calls.snapshot, 3);
+        assert.equal(calls.receipt, 2);
         assert.equal(calls.close, 1);
     }
 );
@@ -775,7 +802,7 @@ test(
                         supabase,
                         attemptId: ATTEMPT
                     }),
-                    /SYNTHETIC_CLOSE_FAILURE/
+                    /CLOSE_RPC_UNCERTAIN/
                 );
 
                 assert.equal(calls.close, 1);
@@ -815,7 +842,8 @@ test(
     async () => {
         const snapshot = fixture();
 
-        snapshot.status.operation_token = OWNER;
+        snapshot.status.status = "IDLE";
+snapshot.status.operation_token = OWNER;
 
         const { result, calls } =
             await recover({ snapshot });
@@ -866,7 +894,7 @@ test(
 
         assert.equal(result.recovered, true);
         assert.equal(result.reason, "CLOSED");
-        assert.equal(calls.receipt, 1);
+        assert.equal(calls.receipt, 2);
         assert.equal(calls.close, 1);
     }
 );

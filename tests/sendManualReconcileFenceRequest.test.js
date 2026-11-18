@@ -70,11 +70,16 @@ function ack(request, a, overrides = {}) {
         fenceId: a.fenceId,
         success: true,
         settlementEligible: false,
-        snapshot: {
+       snapshot: {
             processEpoch: randomUUID(),
             generation: 1,
             fenced: true,
             fenceId: a.fenceId,
+
+            executionKnown: true,
+            identityConflict: false,
+            settlementEligible: false,
+
             pending: 0,
             running: 0,
             drained: true

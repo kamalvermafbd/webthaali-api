@@ -316,18 +316,25 @@ async function withHarness(mode, body) {
 
             if (mode !== "timeout") {
                 queueMicrotask(() => {
-                    emitLocal(
-                        "reconcileLedgerOpeningResult",
-                        {
-                            requestId: payload.requestId,
-                            success: true,
-                            data: {
-                                guid: LEDGER,
-                                openingBalance: "100.00",
-                                openingBalanceType: "CR"
-                            }
+                   emitLocal(
+                    "reconcileLedgerOpeningResult",
+                    {
+                        requestId: payload.requestId,
+
+                        attemptId: payload.attemptId,
+                        executionId: payload.executionId,
+                        operationId: payload.operationId,
+                        operationOrdinal: payload.operationOrdinal,
+
+                        success: true,
+
+                        data: {
+                            guid: LEDGER,
+                            openingBalance: "100.00",
+                            openingBalanceType: "CR"
                         }
-                    );
+                    }
+                );
                 });
             }
 

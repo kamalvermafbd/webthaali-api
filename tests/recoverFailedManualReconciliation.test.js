@@ -72,7 +72,8 @@ function harness(options = {}) {
     data: [
         {
             fence_requested: true,
-            reason: "FENCE_REQUESTED"
+            reason: "FENCE_REQUESTED",
+            fence_id: randomUUID()
         }
     ],
     error: null
@@ -141,14 +142,17 @@ function harness(options = {}) {
                 socketId: args.expectedSocketId,
                 settlementEligible: false,
                 snapshot: {
-                    processEpoch,
-                    generation: 1,
-                    fenced: true,
-                    fenceId: args.fenceId,
-                    pending: 0,
-                    running: 0,
-                    drained: true
-                }
+                processEpoch,
+                generation: 1,
+                fenced: true,
+                fenceId: args.fenceId,
+                settlementEligible: false,
+                executionKnown: true,
+                identityConflict: false,
+                pending: 0,
+                running: 0,
+                drained: true
+            }
             };
         }
     };
@@ -370,7 +374,7 @@ test("valid fence ACK and observation remain non-settling", async () => {
 
     assert.equal(
         h.calls.rpc[0].name,
-        "request_manual_reconcile_failure_fence_v1"
+        "request_manual_reconcile_failure_fence_v2"
     );
 
     assert.deepEqual(h.calls.rpc[0].params, {
