@@ -422,13 +422,15 @@ async function withGlobalConnectorLock(
         return tracked;
     }
 
+        // Shared with the outer finally for manual lifecycle classification.
+    let operationPromise = null;
+    let operationCompletedSafely = false;
+
     try {
 
   let renewalTimer = null;
 let renewing = false;
 let lockLost = false;
-let operationPromise = null;
-let operationCompletedSafely = false;
 
 // Tracks explicit ownership verification separately from timer renewal.
 let ownershipCheckPromise = null;

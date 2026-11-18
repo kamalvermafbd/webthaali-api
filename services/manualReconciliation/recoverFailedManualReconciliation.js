@@ -86,6 +86,7 @@ function sameExecution(before, after) {
  * Do not invoke from an inspection endpoint or an automatic retry loop.
  */
 
+
 function validFailureIdentity(attemptId, snapshot) {
     const a = snapshot?.attempt;
     const e = snapshot?.execution;
@@ -98,9 +99,12 @@ function validFailureIdentity(attemptId, snapshot) {
         e.reservation_id === a.reservation_id &&
         e.operation_token === a.operation_token &&
         s.id === a.reservation_id &&
-        s.operation_token === a.operation_token &&
         s.company_code === a.company_code &&
         s.tally_owner === a.tally_owner &&
+        s.status === "FAILED" &&
+        s.operation_token === null &&
+        s.last_terminal_attempt_id === attemptId &&
+        s.closed_at != null &&
         UUID.test(a.operation_token || "") &&
         UUID.test(e.execution_id || "") &&
         UUID.test(e.server_instance_id || "") &&
@@ -112,6 +116,7 @@ function validFailureIdentity(attemptId, snapshot) {
         snapshot.finalization === null
     );
 }
+
 
 function failureRedisIdentity(attemptId, execution) {
     return {

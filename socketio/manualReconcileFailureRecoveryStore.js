@@ -386,16 +386,25 @@ async function unblockManualReconcileAfterSqlClosure(input) {
             return true
         end
 
-        -- Existing immutable receipt means no second deletion.
+     
+        -- Existing immutable receipt must not hide
+        -- conflicting or recreated ownership markers.
         local previous = redis.call("GET", KEYS[9])
 
         if previous then
-            if sameJson(previous, ARGV[5]) then
-                return {1, "ALREADY_UNBLOCKED"}
+            if not sameJson(previous, ARGV[5]) then
+                return {0, "UNBLOCK_RECEIPT_CONFLICT"}
             end
 
-            return {0, "UNBLOCK_RECEIPT_CONFLICT"}
+            for index = 1, 6 do
+                if redis.call("EXISTS", KEYS[index]) == 1 then
+                    return {0, "UNBLOCK_MARKERS_REAPPEARED"}
+                end
+            end
+
+            return {1, "ALREADY_UNBLOCKED"}
         end
+
 
         local stage = redis.call("GET", KEYS[7])
 

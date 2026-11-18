@@ -134,6 +134,12 @@ const { sendToConnector } =
 const sendToConnectorWithGlobalLock =
   require("./socketio/sendToConnectorWithGlobalLock");
 
+
+const {
+    recoverFailedManualReconciliation
+} = require("./services/manualReconciliation/recoverFailedManualReconciliation");
+
+
 const {
     sendReconcileRequestWithGlobalLock
 } = require("./socketio/sendReconcileRequestWithGlobalLock");
@@ -39301,6 +39307,7 @@ const result = await getTrialBalance({
 // RECONCILE NOW — REQUEST VALIDATION ONLY
 // ==============================================
 
+
 app.post("/reconcileNow", async (req, res) => {
     const body = req.body || {};
 
@@ -39313,7 +39320,7 @@ app.post("/reconcileNow", async (req, res) => {
             : "";
 
     const uuidPattern =
-    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+        /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
     if (!uuidPattern.test(batchId)) {
         return res.status(400).json({
@@ -39402,20 +39409,20 @@ app.post("/reconcileNow", async (req, res) => {
             );
 
         if (claimError) {
-    console.error(
-        "[MANUAL RECONCILE] Execution claim assertion failed:",
-        {
-            batchId,
-            code: claimError.code,
-            message: claimError.message
-        }
-    );
+            console.error(
+                "[MANUAL RECONCILE] Execution claim assertion failed:",
+                {
+                    batchId,
+                    code: claimError.code,
+                    message: claimError.message
+                }
+            );
 
-    return res.status(409).json({
-        success: false,
-        error_code: "RECONCILE_EXECUTION_CLAIM_INVALID"
-    });
-}
+            return res.status(409).json({
+                success: false,
+                error_code: "RECONCILE_EXECUTION_CLAIM_INVALID"
+            });
+        }
 
         if (
             batch.retry_claim_token ||
@@ -39504,16 +39511,16 @@ app.post("/reconcileNow", async (req, res) => {
         ).trim();
 
         const rawBooksBeginningFrom = String(
-          (isCA
-              ? companyRow.ca_tally_books_begining_from
-              : companyRow.client_tally_books_begining_from) || ""
-      ).trim();
+            (isCA
+                ? companyRow.ca_tally_books_begining_from
+                : companyRow.client_tally_books_begining_from) || ""
+        ).trim();
 
-      booksBeginningFrom = /^\d{4}-\d{2}-\d{2}$/.test(
-          rawBooksBeginningFrom
-      )
-          ? rawBooksBeginningFrom.replace(/-/g, "")
-          : rawBooksBeginningFrom;
+        booksBeginningFrom = /^\d{4}-\d{2}-\d{2}$/.test(
+            rawBooksBeginningFrom
+        )
+            ? rawBooksBeginningFrom.replace(/-/g, "")
+            : rawBooksBeginningFrom;
 
         if (!connectorId || !tallyCompany || !tallyCompanyGuid) {
             return res.status(409).json({
@@ -39635,9 +39642,9 @@ app.post("/reconcileNow", async (req, res) => {
 });
 
 
- // ==============================================
- // MANUAL RECONCILIATION — CONTROLLED RECOVERY
- // ==============================================
+// ==============================================
+// MANUAL RECONCILIATION — CONTROLLED RECOVERY
+// ==============================================
 
 app.post("/reconcileRecovery", async (req, res) => {
     // Remain disabled until caller authorization is
@@ -39657,28 +39664,54 @@ app.post("/reconcileRecovery", async (req, res) => {
             : "";
 
     const uuidPattern =
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    const failureRecovery =
+        req.body?.recovery_type === "FAILURE";
 
     if (
-    !uuidPattern.test(attemptId) ||
-    (
-        req.body?.cancel_admission_only !== undefined &&
-        typeof req.body.cancel_admission_only !== "boolean"
-    )
-) {
+        !uuidPattern.test(attemptId) ||
+        (
+            req.body?.recovery_type !== undefined &&
+            req.body.recovery_type !== "FAILURE"
+        ) ||
+        (
+            req.body?.cancel_admission_only !== undefined &&
+            typeof req.body.cancel_admission_only !== "boolean"
+        ) ||
+        (
+            failureRecovery &&
+            req.body?.cancel_admission_only !== undefined
+        )
+    ) {
         return res.status(400).json({
             success: false,
             error_code: "RECONCILE_RECOVERY_REQUEST_INVALID"
         });
     }
 
+    if (
+        failureRecovery &&
+        process.env.MANUAL_RECONCILE_FAILURE_RECOVERY_ENABLED !== "true"
+    ) {
+        return res.status(503).json({
+            success: false,
+            error_code: "RECONCILE_FAILURE_RECOVERY_NOT_ACTIVATED"
+        });
+    }
+
     try {
-        const result = await recoverManualReconciliation({
-        supabase,
-        attemptId,
-        cancelAdmissionOnly:
-            req.body?.cancel_admission_only === true
-    });
+        const result = failureRecovery
+            ? await recoverFailedManualReconciliation({
+                supabase,
+                attemptId
+            })
+            : await recoverManualReconciliation({
+                supabase,
+                attemptId,
+                cancelAdmissionOnly:
+                    req.body?.cancel_admission_only === true
+            });
 
         if (result.recovered !== true) {
             return res.status(409).json({
@@ -39715,6 +39748,7 @@ app.post("/reconcileRecovery", async (req, res) => {
         });
     }
 });
+
 
 // =========================
 // GET MASTERS
