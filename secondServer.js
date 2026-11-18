@@ -39663,8 +39663,8 @@ app.post("/reconcileRecovery", async (req, res) => {
             ? req.body.attempt_id.trim()
             : "";
 
-    const uuidPattern =
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const uuidPattern =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
     const failureRecovery =
         req.body?.recovery_type === "FAILURE";
