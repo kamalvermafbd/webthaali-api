@@ -1,6 +1,8 @@
 
 "use strict";
 
+const { randomUUID } = require("crypto");
+
 const {
     recoverManualReconciliation
 } = require("./recoverManualReconciliation");
@@ -10,7 +12,7 @@ const {
 } = require("./inspectManualReconcileRecovery");
 
 const UUID =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 const ELIGIBLE = new Set([
     "CHECKPOINT_PRESENT_RELEASE_VERIFIED",
@@ -23,7 +25,9 @@ function createManualReconcileAutoRecovery({
     staleAfterMs = 120000,
     batchSize = 25,
     excludedCompanyCodes = ["C0053"],
-    onResult = () => {}
+    onResult = () => {},
+    claimedBy = `manual-recovery-${randomUUID()}`,
+    leaseSeconds = 120
 }) {
     if (
         !supabase ||
@@ -37,19 +41,201 @@ function createManualReconcileAutoRecovery({
         batchSize < 1 ||
         batchSize > 100 ||
         !Array.isArray(excludedCompanyCodes) ||
-        excludedCompanyCodes.some(
-            value => typeof value !== "string"
-        ) ||
-        typeof onResult !== "function"
+        excludedCompanyCodes.some(v => typeof v !== "string") ||
+        typeof onResult !== "function" ||
+        typeof claimedBy !== "string" ||
+        !claimedBy.trim() ||
+        claimedBy.length > 200 ||
+        !Number.isSafeInteger(leaseSeconds) ||
+        leaseSeconds < 30 ||
+        leaseSeconds > 600
     ) {
         throw new TypeError(
             "MANUAL_RECOVERY_WATCHDOG_CONFIG_INVALID"
         );
     }
 
+    const excluded = new Set([
+        ...excludedCompanyCodes,
+        "C0053"
+    ]);
+
     let timer = null;
     let running = null;
     let stopped = true;
+
+    function report(item) {
+        try {
+            onResult(item);
+        } catch (_) {
+            // Logging must not change recovery.
+        }
+    }
+
+    async function rpcBoolean(name, args) {
+        const response = await supabase.rpc(name, args);
+
+        if (
+            response?.error ||
+            typeof response?.data !== "boolean"
+        ) {
+            throw new Error(
+                `MANUAL_RECOVERY_${name}_UNCERTAIN`
+            );
+        }
+
+        return response.data;
+    }
+
+    async function recoverWithLease(attemptId) {
+        const claimToken = randomUUID();
+
+        const args = {
+            p_attempt_id: attemptId,
+            p_claim_token: claimToken
+        };
+
+        let acquired = false;
+        let leaseLost = false;
+        let renewing = false;
+        let heartbeat = null;
+
+        try {
+            acquired = await rpcBoolean(
+                "claim_manual_reconcile_auto_recovery_v1",
+                {
+                    ...args,
+                    p_claimed_by: claimedBy,
+                    p_lease_seconds: leaseSeconds
+                }
+            );
+
+            if (!acquired) {
+                return {
+                    attemptId,
+                    recovered: false,
+                    reason: "LEASE_NOT_ACQUIRED"
+                };
+            }
+
+            // Lease is orchestration ownership,
+            // not a remote Tally execution fence.
+            heartbeat = setInterval(() => {
+                if (renewing || leaseLost) return;
+
+                renewing = true;
+
+                rpcBoolean(
+                    "renew_manual_reconcile_auto_recovery_v1",
+                    {
+                        ...args,
+                        p_lease_seconds: leaseSeconds
+                    }
+                )
+                    .then(ok => {
+                        if (!ok) leaseLost = true;
+                    })
+                    .catch(() => {
+                        leaseLost = true;
+                    })
+                    .finally(() => {
+                        renewing = false;
+                    });
+            }, Math.floor(leaseSeconds * 1000 / 3));
+
+            heartbeat.unref?.();
+
+            const inspection =
+                await inspectManualReconcileRecovery({
+                    supabase,
+                    attemptId
+                });
+
+            if (leaseLost) {
+                return {
+                    attemptId,
+                    recovered: false,
+                    reason: "LEASE_LOST"
+                };
+            }
+
+            if (!ELIGIBLE.has(inspection.state)) {
+                return {
+                    attemptId,
+                    recovered: false,
+                    reason: inspection.state
+                };
+            }
+
+            // Renew before entering recovery.
+            const stillOwned = await rpcBoolean(
+                "renew_manual_reconcile_auto_recovery_v1",
+                {
+                    ...args,
+                    p_lease_seconds: leaseSeconds
+                }
+            );
+
+            if (!stillOwned || leaseLost) {
+                return {
+                    attemptId,
+                    recovered: false,
+                    reason: "LEASE_LOST"
+                };
+            }
+
+            const outcome =
+                await recoverManualReconciliation({
+                    supabase,
+                    attemptId
+                });
+
+            if (leaseLost) {
+                return {
+                    attemptId,
+                    recovered: false,
+                    reason:
+                        "LEASE_LOST_OUTCOME_REQUIRES_INSPECTION"
+                };
+            }
+
+            return {
+                attemptId,
+                ...outcome
+            };
+
+        } catch (error) {
+            return {
+                attemptId,
+                recovered: false,
+                reason: "RECOVERY_ERROR",
+                errorCode:
+                    error?.message || "UNKNOWN"
+            };
+
+        } finally {
+            if (heartbeat) {
+                clearInterval(heartbeat);
+            }
+
+            if (acquired) {
+                try {
+                    await rpcBoolean(
+                        "release_manual_reconcile_auto_recovery_v1",
+                        args
+                    );
+                } catch (_) {
+                    // Do not assume release succeeded.
+                    // SQL lease expiry is fallback.
+                    report({
+                        attemptId,
+                        recovered: false,
+                        reason: "LEASE_RELEASE_UNCERTAIN"
+                    });
+                }
+            }
+        }
+    }
 
     async function scan() {
         const cutoff = new Date(
@@ -59,7 +245,8 @@ function createManualReconcileAutoRecovery({
         const { data, error } = await supabase
             .from("manual_reconcile_status")
             .select(
-                "id,company_code,tally_owner,updated_at"
+                "id,company_code,tally_owner," +
+                "operation_token,updated_at"
             )
             .eq("status", "RUNNING")
             .lt("updated_at", cutoff)
@@ -68,13 +255,9 @@ function createManualReconcileAutoRecovery({
             })
             .limit(batchSize);
 
-        if (error) {
-            throw error;
-        }
-
-        if (!Array.isArray(data)) {
+        if (error || !Array.isArray(data)) {
             throw new Error(
-                "MANUAL_RECOVERY_SCAN_INVALID"
+                "MANUAL_RECOVERY_SCAN_FAILED"
             );
         }
 
@@ -82,96 +265,71 @@ function createManualReconcileAutoRecovery({
 
         for (const row of data) {
             if (
-                excludedCompanyCodes.includes(
-                    row.company_code
-                )
+                stopped ||
+                excluded.has(row.company_code)
             ) {
                 continue;
             }
-
-            const {
-                data: attempts,
-                error: attemptError
-            } = await supabase
-                .from("manual_reconcile_attempts")
-                .select("attempt_id")
-                .eq("reservation_id", row.id)
-                .eq("company_code", row.company_code)
-                .eq("tally_owner", row.tally_owner)
-                .limit(2);
-
-            if (attemptError) {
-                throw attemptError;
-            }
-
-            if (
-                !Array.isArray(attempts) ||
-                attempts.length !== 1 ||
-                !UUID.test(
-                    attempts[0].attempt_id || ""
-                )
-            ) {
-                const item = {
-                    reservationId: row.id,
-                    recovered: false,
-                    reason: "ATTEMPT_IDENTITY_AMBIGUOUS"
-                };
-
-                results.push(item);
-                onResult(item);
-                continue;
-            }
-
-            const attemptId =
-                attempts[0].attempt_id;
 
             try {
-                const inspection =
-                    await inspectManualReconcileRecovery({
-                        supabase,
-                        attemptId
-                    });
+                const {
+                    data: attempts,
+                    error: attemptError
+                } = await supabase
+                    .from("manual_reconcile_attempts")
+                    .select(
+                        "attempt_id,operation_token"
+                    )
+                    .eq("reservation_id", row.id)
+                    .eq("company_code", row.company_code)
+                    .eq("tally_owner", row.tally_owner)
+                    .eq(
+                        "operation_token",
+                        row.operation_token
+                    )
+                    .limit(2);
+
+                if (attemptError) {
+                    throw attemptError;
+                }
 
                 if (
-                    !ELIGIBLE.has(
-                        inspection.state
+                    !Array.isArray(attempts) ||
+                    attempts.length !== 1 ||
+                    !UUID.test(
+                        attempts[0].attempt_id || ""
                     )
                 ) {
                     const item = {
-                        attemptId,
+                        reservationId: row.id,
                         recovered: false,
-                        reason: inspection.state
+                        reason:
+                            "ATTEMPT_IDENTITY_AMBIGUOUS"
                     };
 
                     results.push(item);
-                    onResult(item);
+                    report(item);
                     continue;
                 }
 
-                const outcome =
-                    await recoverManualReconciliation({
-                        supabase,
-                        attemptId
-                    });
-
-                const item = {
-                    attemptId,
-                    ...outcome
-                };
+                const item = await recoverWithLease(
+                    attempts[0].attempt_id
+                );
 
                 results.push(item);
-                onResult(item);
+                report(item);
 
             } catch (error) {
                 const item = {
-                    attemptId,
+                    reservationId: row.id,
                     recovered: false,
                     reason: "RECOVERY_ERROR",
-                    errorCode: error.message
+                    errorCode:
+                        error?.message || "UNKNOWN"
                 };
 
                 results.push(item);
-                onResult(item);
+                report(item);
             }
         }
 
@@ -189,18 +347,15 @@ function createManualReconcileAutoRecovery({
     }
 
     function start() {
-        if (!stopped) {
-            return;
-        }
+        if (!stopped) return;
 
         stopped = false;
 
         timer = setInterval(() => {
-            runOnce().catch(error => {
-                onResult({
+            runOnce().catch(() => {
+                report({
                     recovered: false,
-                    reason: "WATCHDOG_SCAN_ERROR",
-                    errorCode: error.message
+                    reason: "WATCHDOG_SCAN_ERROR"
                 });
             });
         }, intervalMs);
@@ -228,4 +383,3 @@ function createManualReconcileAutoRecovery({
 module.exports = {
     createManualReconcileAutoRecovery
 };
-
