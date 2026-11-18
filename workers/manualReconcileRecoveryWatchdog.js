@@ -58,7 +58,19 @@ console.log("[MANUAL RECOVERY WATCHDOG] Initialized");
 // Explicit activation gate.
 if (process.env.MANUAL_RECONCILE_AUTO_RECOVERY_ENABLED === "true") {
     watchdog.start();
+
     console.log("[MANUAL RECOVERY WATCHDOG] Started");
 } else {
     console.log("[MANUAL RECOVERY WATCHDOG] Disabled");
+
+    // Keep the disabled worker alive under PM2.
+    // No reconciliation scan or recovery will run.
+    const idleTimer = setInterval(() => {}, 60_000);
+
+    function clearIdleTimer() {
+        clearInterval(idleTimer);
+    }
+
+    process.once("SIGTERM", clearIdleTimer);
+    process.once("SIGINT", clearIdleTimer);
 }

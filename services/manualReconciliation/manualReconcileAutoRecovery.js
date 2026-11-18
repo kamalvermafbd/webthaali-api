@@ -383,7 +383,7 @@ recoveryConfirmed =
             });
         }, intervalMs);
 
-        timer.unref?.();
+        
     }
 
     function stop() {
