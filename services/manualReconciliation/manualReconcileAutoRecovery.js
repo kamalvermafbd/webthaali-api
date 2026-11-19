@@ -24,7 +24,7 @@ function createManualReconcileAutoRecovery({
     intervalMs = 60000,
     staleAfterMs = 120000,
     batchSize = 25,
-    excludedCompanyCodes = ["C0053"],
+    excludedCompanyCodes = [],
     onResult = () => {},
     claimedBy = `manual-recovery-${randomUUID()}`,
     leaseSeconds = 120
@@ -55,10 +55,7 @@ function createManualReconcileAutoRecovery({
         );
     }
 
-    const excluded = new Set([
-        ...excludedCompanyCodes,
-        "C0053"
-    ]);
+    const excluded = new Set(excludedCompanyCodes);
 
     let timer = null;
     let running = null;

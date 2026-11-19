@@ -34,7 +34,7 @@ const watchdog = createManualReconcileAutoRecovery({
     intervalMs: 10000,
     staleAfterMs: 120000,
     batchSize: 25,
-    excludedCompanyCodes: ["C0053"],
+    excludedCompanyCodes: [],
     leaseSeconds: 120,
     onResult: result => {
         console.log("[MANUAL RECOVERY WATCHDOG]", {
