@@ -846,7 +846,24 @@ async function recoverFailedManualReconciliation({
                 coordinatorDrainVerified: false
             };
         }
-
+// FAIL-CLOSED: Durable original-coordinator quiescence
+// receipt verification is not implemented yet.
+//
+// Process-local lifecycle observations cannot authorize
+// Redis cleanup or SQL failure settlement.
+//
+// Remove this guard only after the original coordinator
+// receipt writer and all SQL authorization checks are deployed.
+return {
+    ...blocked(
+        attemptId,
+        "ORIGINAL_COORDINATOR_DURABLE_RECEIPT_REQUIRED"
+    ),
+    fenceAcknowledged: true,
+    observationVerified: true,
+    coordinatorDrainVerified: false,
+    durableDrainRecorded: false
+};
         let drainResponse;
 
         try {

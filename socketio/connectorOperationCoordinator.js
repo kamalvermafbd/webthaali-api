@@ -34,21 +34,24 @@ function getManualReconcileCoordinatorLifecycle(attemptId) {
 
     const pendingWork = item.pending.size;
 
-    const locallySettled =
-        item.coordinatorExited === true &&
-        pendingWork === 0 &&
-        (
-            item.callbackSettled === true ||
-            item.callbackStarted !== true
-        ) &&
-        item.outcome !== "ACQUISITION_UNVERIFIED" &&
-        item.outcome !== "SUCCESS_RELEASED";
+   const locallySettled =
+    item.coordinatorExited === true &&
+    item.admissionSealed === true &&
+    item.lateWorkDetected !== true &&
+    pendingWork === 0 &&
+    (
+        item.callbackSettled === true ||
+        item.callbackStarted !== true
+    ) &&
+    item.outcome === "LOCALLY_SETTLED_UNVERIFIED";
 
-    const outcome =
-        item.outcome === "SUCCESS_RELEASED"
-            ? "SUCCESS_RELEASED"
-            : item.outcome === "ACQUISITION_UNVERIFIED"
-                ? "ACQUISITION_UNVERIFIED"
+const outcome =
+    item.outcome === "SUCCESS_RELEASED"
+        ? "SUCCESS_RELEASED"
+        : item.outcome === "ACQUISITION_UNVERIFIED"
+            ? "ACQUISITION_UNVERIFIED"
+            : item.lateWorkDetected === true
+                ? "LATE_WORK_UNVERIFIED"
                 : item.coordinatorExited !== true
                     ? item.outcome
                     : locallySettled
@@ -79,7 +82,8 @@ function getManualReconcileCoordinatorLifecycle(attemptId) {
 
 async function waitForConnectorLock(
     connectorId,
-    maxWaitMs = undefined
+    maxWaitMs = undefined,
+    observeManualWork = null
 ) {
     const id = String(connectorId || "").trim();
 
@@ -141,7 +145,11 @@ async function waitForConnectorLock(
     ownerToken,
     { ttlMs: LOCK_TTL_MS }
 );
-
+// Manual-only: track underlying Redis acquisition,
+// including completion after a timeout.
+if (observeManualWork) {
+    observeManualWork(acquisitionPromise);
+}
 let acquisitionTimer;
 
 const acquisitionTimeout = new Promise((_, reject) => {
@@ -210,7 +218,10 @@ const quarantinePromise = quarantineConnectorAndSocket(
     "CONNECTOR_CHANGED_DURING_LOCK_ACQUISITION",
     ownerToken
 );
-
+// Track acquisition-time quarantine until it settles.
+if (observeManualWork) {
+    observeManualWork(quarantinePromise);
+}
 let quarantineTimer;
 
 try {
@@ -250,7 +261,10 @@ try {
 const watchdogPromise = Promise.resolve().then(() =>
     getConnectorWatchdogStatus(id)
 );
-
+// Track underlying watchdog Redis work.
+if (observeManualWork) {
+    observeManualWork(watchdogPromise);
+}
 let watchdog;
 
 try {
@@ -367,8 +381,10 @@ async function withGlobalConnectorLock(
             connectorId: String(connectorId || "").trim(),
             socketId: null,
             ownerToken: null,
-            pending: new Set(),
+           pending: new Set(),
             coordinatorExited: false,
+            admissionSealed: false,
+            lateWorkDetected: false,
             callbackSettled: false,
             callbackStarted: false,
             outcome: "ACQUIRING_LOCK"
@@ -380,25 +396,52 @@ async function withGlobalConnectorLock(
         );
     }
 
-    let lock;
+  // Manual-only asynchronous work observer.
+function observeAcquisitionWork(work) {
+    if (!manualLifecycle) return work;
 
-    try {
-        lock = await waitForConnectorLock(
-            connectorId,
-            options?.lockWaitMs
-        );
-    } catch (error) {
-        if (manualLifecycle) {
-            manualLifecycle.coordinatorExited = true;
-            manualLifecycle.outcome = "ACQUISITION_UNVERIFIED";
+    const promise = Promise.resolve(work);
 
-            // Retain the attempt reservation fail-closed.
-            // Acquisition may have completed remotely despite
-            // a timeout or transport failure.
-        }
+    if (manualLifecycle.admissionSealed) {
+        manualLifecycle.lateWorkDetected = true;
+        manualLifecycle.outcome = "LATE_WORK_UNVERIFIED";
 
-        throw error;
+        // Observe rejection without suppressing the caller's result.
+        promise.catch(() => {});
+
+        return promise;
     }
+
+    manualLifecycle.pending.add(promise);
+
+    promise.then(
+        () => manualLifecycle.pending.delete(promise),
+        () => manualLifecycle.pending.delete(promise)
+    );
+
+    return promise;
+}
+
+let lock;
+
+try {
+    lock = await waitForConnectorLock(
+        connectorId,
+        options?.lockWaitMs,
+        manualLifecycle ? observeAcquisitionWork : null
+    );
+   } catch (error) {
+    if (manualLifecycle) {
+        manualLifecycle.admissionSealed = true;
+        manualLifecycle.coordinatorExited = true;
+        manualLifecycle.outcome = "ACQUISITION_UNVERIFIED";
+
+        // Acquisition may have completed remotely.
+        // Preserve persistent markers for verified recovery.
+    }
+
+    throw error;
+}
 
     if (manualLifecycle) {
         manualLifecycle.connectorId = lock.connectorId;
@@ -408,19 +451,11 @@ async function withGlobalConnectorLock(
     }
 
 
-    function trackManualWork(promise) {
-        if (!manualLifecycle) return promise;
+   function trackManualWork(promise) {
+    if (!manualLifecycle) return promise;
 
-        const tracked = Promise.resolve(promise);
-        manualLifecycle.pending.add(tracked);
-
-        tracked.then(
-            () => manualLifecycle.pending.delete(tracked),
-            () => manualLifecycle.pending.delete(tracked)
-        );
-
-        return tracked;
-    }
+    return observeAcquisitionWork(promise);
+}
 
         // Shared with the outer finally for manual lifecycle classification.
     let operationPromise = null;
@@ -548,7 +583,19 @@ function runOptInRedisCommand(command, message) {
         );
     }
 
-    const pending = Promise.resolve().then(() => {
+      const pending = Promise.resolve().then(() => {
+        if (
+            manualLifecycle &&
+            (
+                manualLifecycle.admissionSealed === true ||
+                manualLifecycle.lateWorkDetected === true
+            )
+        ) {
+            throw new Error(
+                "MANUAL_RECONCILE_REDIS_ADMISSION_CLOSED"
+            );
+        }
+
         if (
             lockLost ||
             ownershipFailure ||
@@ -1524,30 +1571,33 @@ if (receiptRequested) {
     }
     
     } finally {
-        if (manualLifecycle) {
-            // Coordinator control flow has exited.
-            // This does not mean all asynchronous work has settled.
-            manualLifecycle.coordinatorExited = true;
+    if (manualLifecycle) {
+        // No new coordinator-owned work may be admitted
+        // after coordinator control flow exits.
+        manualLifecycle.admissionSealed = true;
+        manualLifecycle.coordinatorExited = true;
 
-            const successReleased =
-                operationCompletedSafely === true &&
-                completion?.releaseEvidence?.redisReleaseConfirmed === true;
+        const successReleased =
+            operationCompletedSafely === true &&
+            completion?.releaseEvidence?.redisReleaseConfirmed === true;
 
-            if (successReleased) {
-                manualLifecycle.outcome = "SUCCESS_RELEASED";
-            } else if (
-                manualLifecycle.pending.size === 0 &&
-                (
-                    operationPromise === null ||
-                    manualLifecycle.callbackSettled === true
-                )
-            ) {
-                manualLifecycle.outcome = "LOCALLY_SETTLED_UNVERIFIED";
-            } else {
-                manualLifecycle.outcome = "PENDING_WORK_UNVERIFIED";
-            }
+        if (successReleased) {
+            manualLifecycle.outcome = "SUCCESS_RELEASED";
+        } else if (manualLifecycle.lateWorkDetected) {
+            manualLifecycle.outcome = "LATE_WORK_UNVERIFIED";
+        } else if (
+            manualLifecycle.pending.size === 0 &&
+            (
+                operationPromise === null ||
+                manualLifecycle.callbackSettled === true
+            )
+        ) {
+            manualLifecycle.outcome = "LOCALLY_SETTLED_UNVERIFIED";
+        } else {
+            manualLifecycle.outcome = "PENDING_WORK_UNVERIFIED";
         }
     }
+}
 
 }
 
