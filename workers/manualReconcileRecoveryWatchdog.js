@@ -37,12 +37,14 @@ const watchdog = createManualReconcileAutoRecovery({
     excludedCompanyCodes: [],
     leaseSeconds: 120,
     onResult: result => {
-        console.log("[MANUAL RECOVERY WATCHDOG]", {
-            attemptId: result.attemptId || null,
-            recovered: result.recovered === true,
-            reason: result.reason || null
-        });
-    }
+    console.log("[MANUAL RECOVERY WATCHDOG]", {
+        attemptId: result.attemptId || null,
+        reservationId: result.reservationId || null,
+        recovered: result.recovered === true,
+        reason: result.reason || null,
+        errorCode: result.errorCode || null
+    });
+}
 });
 
 function shutdown() {
