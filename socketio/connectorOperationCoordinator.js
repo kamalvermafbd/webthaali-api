@@ -34,16 +34,14 @@ function getManualReconcileCoordinatorLifecycle(attemptId) {
 
     const pendingWork = item.pending.size;
 
-   const locallySettled =
-    item.coordinatorExited === true &&
-    item.admissionSealed === true &&
-    item.lateWorkDetected !== true &&
-    pendingWork === 0 &&
-    (
-        item.callbackSettled === true ||
-        item.callbackStarted !== true
-    ) &&
-    item.outcome === "LOCALLY_SETTLED_UNVERIFIED";
+       const locallySettled =
+        item.coordinatorExited === true &&
+        item.admissionSealed === true &&
+        item.lateWorkDetected !== true &&
+        pendingWork === 0 &&
+        item.callbackStarted === true &&
+        item.callbackSettled === true &&
+        item.outcome === "LOCALLY_SETTLED_UNVERIFIED";
 
 const outcome =
     item.outcome === "SUCCESS_RELEASED"
@@ -331,6 +329,20 @@ async function withGlobalConnectorLock(
     const receiptRequested = options?.releaseEvidence === true;
     let completionIdentity = null;
 
+       // Durable receipt writer is mandatory for Manual Reconciliation.
+    // Normal Sync callers do not use releaseEvidence.
+    const manualCoordinatorReceiptWriter = receiptRequested
+        ? options?.manualCoordinatorReceiptWriter
+        : null;
+
+    if (
+        receiptRequested &&
+        typeof manualCoordinatorReceiptWriter !== "function"
+    ) {
+        throw new Error(
+            "MANUAL_RECONCILE_DURABLE_RECEIPT_WRITER_REQUIRED"
+        );
+    }
     if (receiptRequested) {
         const identity = options?.completionIdentity;
 
@@ -1570,34 +1582,82 @@ if (receiptRequested) {
 }
     }
     
-    } finally {
-    if (manualLifecycle) {
-        // No new coordinator-owned work may be admitted
-        // after coordinator control flow exits.
-        manualLifecycle.admissionSealed = true;
-        manualLifecycle.coordinatorExited = true;
+       } finally {
+        if (manualLifecycle) {
+            manualLifecycle.admissionSealed = true;
+            manualLifecycle.coordinatorExited = true;
 
-        const successReleased =
-            operationCompletedSafely === true &&
-            completion?.releaseEvidence?.redisReleaseConfirmed === true;
+            const successReleased =
+                operationCompletedSafely === true &&
+                completion?.releaseEvidence?.redisReleaseConfirmed === true;
 
-        if (successReleased) {
-            manualLifecycle.outcome = "SUCCESS_RELEASED";
-        } else if (manualLifecycle.lateWorkDetected) {
-            manualLifecycle.outcome = "LATE_WORK_UNVERIFIED";
-        } else if (
-            manualLifecycle.pending.size === 0 &&
-            (
-                operationPromise === null ||
-                manualLifecycle.callbackSettled === true
-            )
+            if (successReleased) {
+                manualLifecycle.outcome = "SUCCESS_RELEASED";
+            } else if (manualLifecycle.lateWorkDetected) {
+                manualLifecycle.outcome = "LATE_WORK_UNVERIFIED";
+                } else if (
+            operationPromise !== null &&
+            manualLifecycle.callbackStarted === true &&
+            manualLifecycle.callbackSettled === true &&
+            manualLifecycle.pending.size === 0
         ) {
-            manualLifecycle.outcome = "LOCALLY_SETTLED_UNVERIFIED";
-        } else {
-            manualLifecycle.outcome = "PENDING_WORK_UNVERIFIED";
+                manualLifecycle.outcome = "LOCALLY_SETTLED_UNVERIFIED";
+            } else {
+                manualLifecycle.outcome = "PENDING_WORK_UNVERIFIED";
+            }
+
+            // Durable receipt is permitted only after verified
+            // local quiescence. Never claim remote Tally settlement.
+            if (
+                manualCoordinatorReceiptWriter &&
+                manualLifecycle.outcome ===
+                    "LOCALLY_SETTLED_UNVERIFIED" &&
+                manualLifecycle.admissionSealed === true &&
+                manualLifecycle.coordinatorExited === true &&
+                manualLifecycle.lateWorkDetected !== true &&
+                manualLifecycle.pending.size === 0 &&
+                manualLifecycle.callbackStarted === true &&
+manualLifecycle.callbackSettled === true &&
+operationPromise !== null &&
+                manualLifecycle.socketId &&
+                manualLifecycle.ownerToken
+            ) {
+                try {
+                    await manualCoordinatorReceiptWriter(
+                        Object.freeze({
+                            attemptId: manualLifecycle.attemptId,
+                            executionId: manualLifecycle.executionId,
+                            serverInstanceId:
+                                manualLifecycle.serverInstanceId,
+                            connectorId: manualLifecycle.connectorId,
+                            socketId: manualLifecycle.socketId,
+                            ownerToken: manualLifecycle.ownerToken,
+                            coordinatorExited: true,
+                            admissionSealed: true,
+                            lateWorkDetected: false,
+                            pendingWork: 0,
+                            callbackStarted: manualLifecycle.callbackStarted,
+                            callbackSettled: manualLifecycle.callbackSettled,
+                            locallySettled: true,
+                            outcome: "LOCALLY_SETTLED_UNVERIFIED"
+                        })
+                    );
+                } catch (receiptError) {
+                    console.error(
+                        "[MANUAL RECONCILE] Durable coordinator receipt failed",
+                        {
+                            attemptId: manualLifecycle.attemptId,
+                            executionId: manualLifecycle.executionId,
+                            error: receiptError
+                        }
+                    );
+
+                    // Never convert a failed receipt write
+                    // into successful recovery authorization.
+                }
+            }
         }
     }
-}
 
 }
 

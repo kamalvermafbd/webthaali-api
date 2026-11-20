@@ -658,13 +658,78 @@ if (
                     }
                 };
             },
-            {
+                        {
                 exposeLockIdentity: true,
                 releaseEvidence: true,
+
                 completionIdentity: {
                     attemptId,
                     executionId,
                     serverInstanceId
+                },
+
+                manualCoordinatorReceiptWriter: async (receipt) => {
+                                     if (
+                        !receipt ||
+                        receipt.attemptId !== attemptId ||
+                        receipt.executionId !== executionId ||
+                        receipt.serverInstanceId !== serverInstanceId ||
+                        receipt.connectorId !== connectorId ||
+                        receipt.coordinatorExited !== true ||
+                        receipt.admissionSealed !== true ||
+                        receipt.lateWorkDetected !== false ||
+                        receipt.pendingWork !== 0 ||
+                        receipt.locallySettled !== true ||
+                        receipt.outcome !== "LOCALLY_SETTLED_UNVERIFIED" ||
+                        receipt.callbackStarted !== true ||
+                        receipt.callbackSettled !== true ||
+                        typeof receipt.socketId !== "string" ||
+                        !receipt.socketId ||
+                        !UUID.test(receipt.ownerToken || "")
+                    ) {
+                        throw new Error(
+                            "RECONCILE_COORDINATOR_RECEIPT_INVALID"
+                        );
+                    }
+                    const response = await supabase.rpc(
+                        "record_manual_reconcile_coordinator_exit_receipt_v1",
+                        {
+                            p_attempt_id: attemptId,
+                            p_operation_token: reservationToken,
+                            p_execution_id: executionId,
+                            p_server_instance_id: serverInstanceId,
+                            p_connector_id: connectorId,
+                            p_socket_id: receipt.socketId,
+                            p_owner_token: receipt.ownerToken,
+                            p_coordinator_exited: true,
+                            p_admission_sealed: true,
+                            p_pending_work: 0,
+                            p_callback_started: receipt.callbackStarted,
+                            p_callback_settled: receipt.callbackSettled,
+                            p_late_work_detected: false,
+                            p_outcome: "LOCALLY_SETTLED_UNVERIFIED"
+                        }
+                    );
+
+                    if (response?.error) {
+                        throw response.error;
+                    }
+
+                    const result = Array.isArray(response?.data)
+                        ? response.data.length === 1
+                            ? response.data[0]
+                            : null
+                        : response?.data;
+
+                    if (
+                        result?.recorded !== true ||
+                        result.reason !==
+                            "RECEIPT_RECORDED_OR_ALREADY_PRESENT"
+                    ) {
+                        throw new Error(
+                            "RECONCILE_COORDINATOR_RECEIPT_NOT_CONFIRMED"
+                        );
+                    }
                 }
             }
         );

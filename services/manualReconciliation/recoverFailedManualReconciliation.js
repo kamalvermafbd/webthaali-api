@@ -759,23 +759,31 @@ async function recoverFailedManualReconciliation({
             };
         }
 
+                       // Process-local lifecycle is additional evidence.
+        // It may be absent after a server restart.
+        // Missing local evidence does NOT authorize recovery:
+        // the durable SQL receipt remains mandatory below.
+
         const lifecycle =
             getManualReconcileCoordinatorLifecycle(attemptId);
 
         if (
-            !lifecycle ||
-            lifecycle.attemptId !== attemptId ||
-            lifecycle.executionId !== execution.execution_id ||
-            lifecycle.serverInstanceId !==
-                execution.server_instance_id ||
-            lifecycle.connectorId !== execution.connector_id ||
-            lifecycle.socketId !== execution.socket_id ||
-            lifecycle.ownerToken !== execution.owner_token ||
-            lifecycle.coordinatorExited !== true ||
-            lifecycle.pendingWork !== 0 ||
-            lifecycle.locallySettled !== true ||
-            lifecycle.outcome !== "LOCALLY_SETTLED_UNVERIFIED" ||
-            lifecycle.recoveryAuthorized !== false
+            lifecycle !== null &&
+            (
+                lifecycle.attemptId !== attemptId ||
+                lifecycle.executionId !== execution.execution_id ||
+                lifecycle.serverInstanceId !==
+                    execution.server_instance_id ||
+                lifecycle.connectorId !== execution.connector_id ||
+                lifecycle.socketId !== execution.socket_id ||
+                lifecycle.ownerToken !== execution.owner_token ||
+                lifecycle.coordinatorExited !== true ||
+                lifecycle.pendingWork !== 0 ||
+                lifecycle.locallySettled !== true ||
+                lifecycle.outcome !==
+                    "LOCALLY_SETTLED_UNVERIFIED" ||
+                lifecycle.recoveryAuthorized !== false
+            )
         ) {
             return {
                 ...blocked(
@@ -816,25 +824,34 @@ async function recoverFailedManualReconciliation({
         // STEP 3E — DURABLE COORDINATOR DRAIN EVIDENCE
         // =====================================================
 
-        // Recheck process-local lifecycle immediately before
-        // recording durable evidence.
+              // Recheck any live process-local lifecycle.
+        // A missing lifecycle is permitted only because
+        // the original durable SQL receipt is mandatory next.
+
         const finalLifecycle =
             getManualReconcileCoordinatorLifecycle(attemptId);
 
         if (
-            !finalLifecycle ||
-            finalLifecycle.attemptId !== attemptId ||
-            finalLifecycle.executionId !== execution.execution_id ||
-            finalLifecycle.serverInstanceId !==
-                execution.server_instance_id ||
-            finalLifecycle.connectorId !== execution.connector_id ||
-            finalLifecycle.socketId !== execution.socket_id ||
-            finalLifecycle.ownerToken !== execution.owner_token ||
-            finalLifecycle.coordinatorExited !== true ||
-            finalLifecycle.pendingWork !== 0 ||
-            finalLifecycle.locallySettled !== true ||
-            finalLifecycle.outcome !== "LOCALLY_SETTLED_UNVERIFIED" ||
-            finalLifecycle.recoveryAuthorized !== false
+            finalLifecycle !== null &&
+            (
+                finalLifecycle.attemptId !== attemptId ||
+                finalLifecycle.executionId !==
+                    execution.execution_id ||
+                finalLifecycle.serverInstanceId !==
+                    execution.server_instance_id ||
+                finalLifecycle.connectorId !==
+                    execution.connector_id ||
+                finalLifecycle.socketId !==
+                    execution.socket_id ||
+                finalLifecycle.ownerToken !==
+                    execution.owner_token ||
+                finalLifecycle.coordinatorExited !== true ||
+                finalLifecycle.pendingWork !== 0 ||
+                finalLifecycle.locallySettled !== true ||
+                finalLifecycle.outcome !==
+                    "LOCALLY_SETTLED_UNVERIFIED" ||
+                finalLifecycle.recoveryAuthorized !== false
+            )
         ) {
             return {
                 ...blocked(
@@ -846,24 +863,112 @@ async function recoverFailedManualReconciliation({
                 coordinatorDrainVerified: false
             };
         }
-// FAIL-CLOSED: Durable original-coordinator quiescence
-// receipt verification is not implemented yet.
-//
-// Process-local lifecycle observations cannot authorize
-// Redis cleanup or SQL failure settlement.
-//
-// Remove this guard only after the original coordinator
-// receipt writer and all SQL authorization checks are deployed.
-return {
-    ...blocked(
-        attemptId,
-        "ORIGINAL_COORDINATOR_DURABLE_RECEIPT_REQUIRED"
-    ),
-    fenceAcknowledged: true,
-    observationVerified: true,
-    coordinatorDrainVerified: false,
-    durableDrainRecorded: false
-};
+        // =====================================================
+        // DURABLE ORIGINAL-COORDINATOR EXIT RECEIPT
+        // =====================================================
+        // Process-local lifecycle was verified above.
+        // SQL receipt is mandatory before recording drain.
+        // This does not prove remote Tally settlement.
+
+        let coordinatorReceipt;
+
+        try {
+            const receiptResponse = await supabase
+                .from("manual_reconcile_coordinator_exit_receipts")
+                .select(
+                    "attempt_id,operation_token,execution_id," +
+                    "server_instance_id,connector_id,socket_id," +
+                    "owner_token,coordinator_exited,admission_sealed," +
+                    "pending_work,callback_started,callback_settled," +
+                    "late_work_detected,outcome,recorded_at"
+                )
+                .eq("attempt_id", attemptId)
+                .maybeSingle();
+
+            if (receiptResponse?.error) {
+                return {
+                    ...blocked(
+                        attemptId,
+                        "COORDINATOR_DURABLE_RECEIPT_READ_UNCERTAIN"
+                    ),
+                    fenceAcknowledged: true,
+                    observationVerified: true,
+                    coordinatorDrainVerified: false,
+                    durableDrainRecorded: false
+                };
+            }
+
+            coordinatorReceipt = receiptResponse?.data;
+
+        } catch (_error) {
+            return {
+                ...blocked(
+                    attemptId,
+                    "COORDINATOR_DURABLE_RECEIPT_READ_UNCERTAIN"
+                ),
+                fenceAcknowledged: true,
+                observationVerified: true,
+                coordinatorDrainVerified: false,
+                durableDrainRecorded: false
+            };
+        }
+
+        if (!coordinatorReceipt) {
+            return {
+                ...blocked(
+                    attemptId,
+                    "ORIGINAL_COORDINATOR_DURABLE_RECEIPT_REQUIRED"
+                ),
+                fenceAcknowledged: true,
+                observationVerified: true,
+                coordinatorDrainVerified: false,
+                durableDrainRecorded: false
+            };
+        }
+
+        const durableReceiptValid =
+            coordinatorReceipt.attempt_id === attemptId &&
+            coordinatorReceipt.operation_token ===
+                attempt.operation_token &&
+            coordinatorReceipt.execution_id ===
+                execution.execution_id &&
+            coordinatorReceipt.server_instance_id ===
+                execution.server_instance_id &&
+            coordinatorReceipt.connector_id ===
+                execution.connector_id &&
+            coordinatorReceipt.socket_id ===
+                execution.socket_id &&
+            coordinatorReceipt.owner_token ===
+                execution.owner_token &&
+            coordinatorReceipt.coordinator_exited === true &&
+            coordinatorReceipt.admission_sealed === true &&
+            coordinatorReceipt.pending_work === 0 &&
+            coordinatorReceipt.callback_started === true &&
+            coordinatorReceipt.callback_settled === true &&
+            coordinatorReceipt.late_work_detected === false &&
+            coordinatorReceipt.outcome ===
+                "LOCALLY_SETTLED_UNVERIFIED" &&
+            typeof coordinatorReceipt.recorded_at === "string" &&
+            Number.isFinite(
+                Date.parse(coordinatorReceipt.recorded_at)
+            );
+
+        if (!durableReceiptValid) {
+            return {
+                ...blocked(
+                    attemptId,
+                    "COORDINATOR_DURABLE_RECEIPT_INVALID"
+                ),
+                fenceAcknowledged: true,
+                observationVerified: true,
+                coordinatorDrainVerified: false,
+                durableDrainRecorded: false
+            };
+        }
+
+        // The SQL drain RPC independently verifies the
+        // immutable receipt, execution identity and fence.
+        // No Redis cleanup is authorized by this read alone.
         let drainResponse;
 
         try {
