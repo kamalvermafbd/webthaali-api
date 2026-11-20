@@ -39650,7 +39650,20 @@ app.post("/reconcileNow", async (req, res) => {
 // ==============================================
 
 app.post("/reconcileRecovery", async (req, res) => {
+    // Recovery endpoint must only accept loopback requests.
+    // This protects both normal and failure recovery paths.
+    const remoteAddress = req.socket?.remoteAddress;
 
+    if (
+        remoteAddress !== "127.0.0.1" &&
+        remoteAddress !== "::ffff:127.0.0.1" &&
+        remoteAddress !== "::1"
+    ) {
+        return res.status(403).json({
+            success: false,
+            error_code: "RECONCILE_RECOVERY_LOCAL_ONLY"
+        });
+    }
     // ==========================================
     // 1. RECOVERY ACTIVATION GUARD
     // ==========================================
