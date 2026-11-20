@@ -2,7 +2,7 @@
 "use strict";
 
 const { randomUUID } = require("crypto");
-
+const http = require("http");
 const {
     recoverManualReconciliation
 } = require("./recoverManualReconciliation");
@@ -18,7 +18,110 @@ const ELIGIBLE = new Set([
     "CHECKPOINT_PRESENT_RELEASE_VERIFIED",
     "FINALIZATION_RECORDED"
 ]);
+async function dispatchFailureRecovery(attemptId, dispatchToken) {
+    const token =
+        process.env.MANUAL_RECONCILE_INTERNAL_RECOVERY_TOKEN;
 
+    const endpoint =
+        process.env.MANUAL_RECONCILE_RECOVERY_INTERNAL_URL;
+
+    if (
+        typeof token !== "string" ||
+        token.length < 32 ||
+        typeof endpoint !== "string"
+    ) {
+        throw new Error("FAILURE_DISPATCH_CONFIG_MISSING");
+    }
+
+    const url = new URL(endpoint);
+
+    if (
+        url.protocol !== "http:" ||
+        url.hostname !== "127.0.0.1" ||
+        !url.port ||
+        url.pathname !== "/reconcileRecovery" ||
+        url.search ||
+        url.hash ||
+        url.username ||
+        url.password
+    ) {
+        throw new Error("FAILURE_DISPATCH_URL_INVALID");
+    }
+
+   const body = JSON.stringify({
+    attempt_id: attemptId,
+    recovery_type: "FAILURE",
+    dispatch_token: dispatchToken
+});
+
+    return new Promise((resolve, reject) => {
+        const request = http.request(
+            url,
+            {
+                method: "POST",
+                headers: {
+                    "content-type": "application/json",
+                    "content-length": Buffer.byteLength(body),
+                    "x-manual-recovery-token": token
+                },
+                agent: false
+            },
+            response => {
+                let responseBody = "";
+
+                response.on("data", chunk => {
+                    responseBody += chunk;
+
+                    if (responseBody.length > 16384) {
+                        request.destroy(
+                            new Error("FAILURE_RESPONSE_TOO_LARGE")
+                        );
+                    }
+                });
+
+                response.on("end", () => {
+                    let result;
+
+                    try {
+                        result = JSON.parse(responseBody);
+                    } catch (_) {
+                        reject(
+                            new Error("FAILURE_RESPONSE_UNVERIFIED")
+                        );
+                        return;
+                    }
+
+                    if (
+                        response.statusCode === 200 &&
+                        result?.success === true &&
+                        result?.recovered === true &&
+                        result?.attempt_id === attemptId
+                    ) {
+                        resolve({
+                            recovered: true,
+                            reason: result.recovery_state
+                        });
+                        return;
+                    }
+
+                    resolve({
+                        recovered: false,
+                        reason: "FAILURE_OUTCOME_REQUIRES_INSPECTION"
+                    });
+                });
+            }
+        );
+
+        request.setTimeout(15000, () => {
+            request.destroy(
+                new Error("FAILURE_DISPATCH_TIMEOUT")
+            );
+        });
+
+        request.on("error", reject);
+        request.end(body);
+    });
+}
 function createManualReconcileAutoRecovery({
     supabase,
     intervalMs = 60000,
@@ -158,13 +261,177 @@ function createManualReconcileAutoRecovery({
                 };
             }
 
-            if (!ELIGIBLE.has(inspection.state)) {
-                return {
-                    attemptId,
-                    recovered: false,
-                    reason: inspection.state
-                };
-            }
+        if (inspection.state === "EXECUTION_UNCERTAIN") {
+    if (
+        process.env.MANUAL_RECONCILE_AUTO_FAILURE_DISPATCH_ENABLED
+        !== "true"
+    ) {
+        return {
+            attemptId,
+            recovered: false,
+            reason: "FAILURE_DISPATCH_DISABLED"
+        };
+    }
+
+    const endpoint =
+        process.env.MANUAL_RECONCILE_RECOVERY_INTERNAL_URL;
+
+    const token =
+        process.env.MANUAL_RECONCILE_INTERNAL_RECOVERY_TOKEN;
+
+    if (
+        typeof endpoint !== "string" ||
+        typeof token !== "string" ||
+        token.length < 32
+    ) {
+        return {
+            attemptId,
+            recovered: false,
+            reason: "FAILURE_DISPATCH_CONFIG_MISSING"
+        };
+    }
+
+    // Validate endpoint before taking permanent claim.
+    let url;
+
+    try {
+        url = new URL(endpoint);
+    } catch (_) {
+        return {
+            attemptId,
+            recovered: false,
+            reason: "FAILURE_DISPATCH_URL_INVALID"
+        };
+    }
+
+    if (
+        url.protocol !== "http:" ||
+        url.hostname !== "127.0.0.1" ||
+        !url.port ||
+        url.pathname !== "/reconcileRecovery" ||
+        url.search ||
+        url.hash ||
+        url.username ||
+        url.password
+    ) {
+        return {
+            attemptId,
+            recovered: false,
+            reason: "FAILURE_DISPATCH_URL_INVALID"
+        };
+    }
+
+    const stillOwned = await rpcBoolean(
+        "renew_manual_reconcile_auto_recovery_v1",
+        {
+            ...args,
+            p_lease_seconds: leaseSeconds
+        }
+    );
+
+    if (!stillOwned || leaseLost) {
+        return {
+            attemptId,
+            recovered: false,
+            reason: "LEASE_LOST"
+        };
+    }
+
+    // From this point, uncertain SQL/HTTP outcomes must
+    // retain the recovery lease for verification.
+    recoveryStarted = true;
+
+    const dispatchToken = randomUUID();
+
+    const claimed = await rpcBoolean(
+        "claim_manual_reconcile_failure_dispatch_v1",
+        {
+            p_attempt_id: attemptId,
+            p_dispatch_token: dispatchToken,
+            p_claimed_by: claimedBy
+        }
+    );
+
+    if (!claimed) {
+        return {
+            attemptId,
+            recovered: false,
+            reason: "FAILURE_DISPATCH_ALREADY_CLAIMED"
+        };
+    }
+
+    // Durable transition before network dispatch.
+    const { data: marked, error: markError } =
+        await supabase
+            .from("manual_reconcile_failure_dispatches")
+            .update({
+                dispatch_state: "DISPATCH_STARTED"
+            })
+            .eq("attempt_id", attemptId)
+            .eq("dispatch_token", dispatchToken)
+            .eq("dispatch_state", "CLAIMED")
+            .select("attempt_id");
+
+    if (
+        markError ||
+        !Array.isArray(marked) ||
+        marked.length !== 1
+    ) {
+        return {
+            attemptId,
+            recovered: false,
+            reason: "FAILURE_DISPATCH_MARK_UNCERTAIN"
+        };
+    }
+
+    if (leaseLost) {
+        return {
+            attemptId,
+            recovered: false,
+            reason: "LEASE_LOST_BEFORE_DISPATCH"
+        };
+    }
+
+    try {
+    const outcome = await dispatchFailureRecovery(
+    attemptId,
+    dispatchToken
+);
+
+        if (
+            outcome.recovered === true &&
+            !leaseLost
+        ) {
+            recoveryConfirmed = true;
+
+            return {
+                attemptId,
+                recovered: true,
+                reason: outcome.reason
+            };
+        }
+
+        return {
+            attemptId,
+            recovered: false,
+            reason: "FAILURE_OUTCOME_REQUIRES_INSPECTION"
+        };
+
+    } catch (_) {
+        return {
+            attemptId,
+            recovered: false,
+            reason: "FAILURE_DISPATCH_OUTCOME_UNCERTAIN"
+        };
+    }
+}
+if (!ELIGIBLE.has(inspection.state)) {
+    return {
+        attemptId,
+        recovered: false,
+        reason: inspection.state
+    };
+}
 
             // Renew before entering recovery.
             const stillOwned = await rpcBoolean(
