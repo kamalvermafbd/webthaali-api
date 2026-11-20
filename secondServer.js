@@ -39645,13 +39645,9 @@ app.post("/reconcileNow", async (req, res) => {
 // ==============================================
 // MANUAL RECONCILIATION — CONTROLLED RECOVERY
 // ==============================================
-// ==============================================
-// MANUAL RECONCILIATION — CONTROLLED RECOVERY
-// ==============================================
 
 app.post("/reconcileRecovery", async (req, res) => {
-    // Recovery endpoint must only accept loopback requests.
-    // This protects both normal and failure recovery paths.
+
     const remoteAddress = req.socket?.remoteAddress;
 
     if (
@@ -39664,9 +39660,6 @@ app.post("/reconcileRecovery", async (req, res) => {
             error_code: "RECONCILE_RECOVERY_LOCAL_ONLY"
         });
     }
-    // ==========================================
-    // 1. RECOVERY ACTIVATION GUARD
-    // ==========================================
 
     if (
         process.env.MANUAL_RECONCILE_RECOVERY_ENABLED !== "true"
@@ -39677,12 +39670,8 @@ app.post("/reconcileRecovery", async (req, res) => {
         });
     }
 
-    // ==========================================
-    // 2. REQUEST VALIDATION
-    // ==========================================
-
     const uuidPattern =
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
     const attemptId =
         typeof req.body?.attempt_id === "string"
@@ -39722,9 +39711,8 @@ app.post("/reconcileRecovery", async (req, res) => {
         });
     }
 
-    // ==========================================
-    // 3. FAILURE RECOVERY AUTHENTICATION
-    // ==========================================
+    let failureResumeClaimed = false;
+    let resumeClaimToken = null;
 
     if (failureRecovery) {
 
@@ -39745,11 +39733,8 @@ app.post("/reconcileRecovery", async (req, res) => {
             });
         }
 
-        const expected =
-            Buffer.from(configuredToken, "utf8");
-
-        const received =
-            Buffer.from(suppliedToken, "utf8");
+        const expected = Buffer.from(configuredToken, "utf8");
+        const received = Buffer.from(suppliedToken, "utf8");
 
         if (
             expected.length !== received.length ||
@@ -39782,22 +39767,13 @@ app.post("/reconcileRecovery", async (req, res) => {
         }
     }
 
-    // ==========================================
-    // 4. DURABLE ONE-SHOT ADMISSION
-    // ==========================================
-
     try {
 
-        if (failureRecovery) {
+        // ======================================
+        // 1. INITIAL DISPATCH OR RESUME CLAIM
+        // ======================================
 
-            // Atomic database transition:
-            //
-            // DISPATCH_STARTED -> OUTCOME_UNCERTAIN
-            //
-            // Exactly one matching request may enter
-            // the failure recovery engine.
-            //
-            // Duplicate requests cannot repeat execution.
+        if (failureRecovery) {
 
             const {
                 data: admitted,
@@ -39812,10 +39788,7 @@ app.post("/reconcileRecovery", async (req, res) => {
                 .eq("dispatch_state", "DISPATCH_STARTED")
                 .select("attempt_id");
 
-            if (
-                admissionError ||
-                !Array.isArray(admitted)
-            ) {
+            if (admissionError) {
                 return res.status(503).json({
                     success: false,
                     error_code:
@@ -39825,32 +39798,200 @@ app.post("/reconcileRecovery", async (req, res) => {
                 });
             }
 
-            if (admitted.length !== 1) {
-                return res.status(409).json({
-                    success: false,
-                    error_code:
-                        "RECONCILE_DISPATCH_NOT_ADMITTED",
-                    recovery_required: true,
-                    attempt_id: attemptId
-                });
+            if (
+                Array.isArray(admitted) &&
+                admitted.length === 1
+            ) {
+                failureResumeClaimed = false;
+
+            } else {
+
+                // Previously executed incomplete recovery.
+                // Require atomic SQL-closed continuation claim.
+
+                resumeClaimToken =
+                    require("crypto").randomUUID();
+
+                const {
+                    data: resumeClaimed,
+                    error: resumeClaimError
+                } = await supabase.rpc(
+                    "claim_manual_reconcile_failure_resume_v1",
+                    {
+                        p_attempt_id: attemptId,
+                        p_dispatch_token: dispatchToken,
+                        p_resume_claim_token: resumeClaimToken
+                    }
+                );
+
+                if (resumeClaimError) {
+                    return res.status(503).json({
+                        success: false,
+                        error_code:
+                            "RECONCILE_RESUME_ADMISSION_UNCERTAIN",
+                        recovery_required: true,
+                        attempt_id: attemptId
+                    });
+                }
+
+                if (resumeClaimed !== true) {
+                    return res.status(409).json({
+                        success: false,
+                        error_code:
+                            "RECONCILE_RESUME_NOT_ADMITTED",
+                        recovery_required: true,
+                        attempt_id: attemptId
+                    });
+                }
+
+                failureResumeClaimed = true;
             }
         }
 
         // ======================================
-        // 5. EXISTING RECOVERY ENGINE
+        // 2. EXECUTE RECOVERY
         // ======================================
 
-        const result = failureRecovery
-            ? await recoverFailedManualReconciliation({
-                supabase,
-                attemptId
-            })
-            : await recoverManualReconciliation({
-                supabase,
-                attemptId,
-                cancelAdmissionOnly:
-                    req.body?.cancel_admission_only === true
+        let result;
+        let recoveryExecutionError = null;
+
+        try {
+
+            result = failureRecovery
+                ? await recoverFailedManualReconciliation({
+                    supabase,
+                    attemptId
+                })
+                : await recoverManualReconciliation({
+                    supabase,
+                    attemptId,
+                    cancelAdmissionOnly:
+                        req.body?.cancel_admission_only === true
+                });
+
+        } catch (error) {
+            recoveryExecutionError = error;
+        }
+
+        // ======================================
+        // 3. DURABLE EXECUTION COMPLETION
+        // ======================================
+
+        if (failureRecovery) {
+
+            const executionResult =
+                recoveryExecutionError
+                    ? "ERROR"
+                    : result?.recovered === true
+                        ? "RECOVERED"
+                        : "INCOMPLETE";
+
+            let completionQuery = supabase
+                .from("manual_reconcile_failure_dispatches")
+                .update({
+                    execution_finished_at:
+                        new Date().toISOString(),
+                    execution_result: executionResult
+                })
+                .eq("attempt_id", attemptId)
+                .eq("dispatch_token", dispatchToken);
+
+            if (failureResumeClaimed) {
+
+                completionQuery = completionQuery
+                    .eq("dispatch_state", "RESUME_CLAIMED")
+                    .eq("resume_claim_token", resumeClaimToken);
+
+            } else {
+
+                completionQuery = completionQuery
+                    .eq("dispatch_state", "OUTCOME_UNCERTAIN")
+                    .is("execution_finished_at", null);
+            }
+
+            const {
+                data: finished,
+                error: finishError
+            } = await completionQuery.select("attempt_id");
+
+            if (
+                finishError ||
+                !Array.isArray(finished) ||
+                finished.length !== 1
+            ) {
+                return res.status(503).json({
+                    success: false,
+                    error_code:
+                        "RECONCILE_EXECUTION_COMPLETION_UNCERTAIN",
+                    recovery_required: true,
+                    attempt_id: attemptId
+                });
+            }
+
+            // ======================================
+            // 4. RELEASE COMPLETED INCOMPLETE CLAIM
+            // ======================================
+
+            if (
+                failureResumeClaimed &&
+                executionResult !== "RECOVERED"
+            ) {
+
+                const {
+                    data: released,
+                    error: releaseError
+                } = await supabase
+                    .from("manual_reconcile_failure_dispatches")
+                    .update({
+                        dispatch_state: "OUTCOME_UNCERTAIN",
+                        resume_claim_token: null,
+                        resume_claimed_at: null
+                    })
+                    .eq("attempt_id", attemptId)
+                    .eq("dispatch_token", dispatchToken)
+                    .eq("dispatch_state", "RESUME_CLAIMED")
+                    .eq("resume_claim_token", resumeClaimToken)
+                    .eq("execution_result", executionResult)
+                    .select("attempt_id");
+
+                if (
+                    releaseError ||
+                    !Array.isArray(released) ||
+                    released.length !== 1
+                ) {
+                    return res.status(503).json({
+                        success: false,
+                        error_code:
+                            "RECONCILE_RESUME_RELEASE_UNCERTAIN",
+                        recovery_required: true,
+                        attempt_id: attemptId
+                    });
+                }
+
+                failureResumeClaimed = false;
+            }
+        }
+
+        // ======================================
+        // 5. EXECUTION ERROR
+        // ======================================
+
+        if (recoveryExecutionError) {
+
+            console.error(
+                "[RECONCILE RECOVERY] EXECUTION FAILED",
+                {
+                    error_code: "RECONCILE_RECOVERY_FAILED"
+                }
+            );
+
+            return res.status(503).json({
+                success: false,
+                error_code: "RECONCILE_RECOVERY_FAILED",
+                recovery_required: true,
+                attempt_id: attemptId
             });
+        }
 
         // ======================================
         // 6. INCOMPLETE RECOVERY
@@ -39874,21 +40015,31 @@ app.post("/reconcileRecovery", async (req, res) => {
 
         if (failureRecovery) {
 
-            // Record confirmed recovery before
-            // returning HTTP 200 to the watchdog.
-
-            const {
-                data: confirmed,
-                error: confirmError
-            } = await supabase
+            let confirmationQuery = supabase
                 .from("manual_reconcile_failure_dispatches")
                 .update({
                     dispatch_state: "RECOVERY_CONFIRMED"
                 })
                 .eq("attempt_id", attemptId)
                 .eq("dispatch_token", dispatchToken)
-                .eq("dispatch_state", "OUTCOME_UNCERTAIN")
-                .select("attempt_id");
+                .eq("execution_result", "RECOVERED");
+
+            if (failureResumeClaimed) {
+
+                confirmationQuery = confirmationQuery
+                    .eq("dispatch_state", "RESUME_CLAIMED")
+                    .eq("resume_claim_token", resumeClaimToken);
+
+            } else {
+
+                confirmationQuery = confirmationQuery
+                    .eq("dispatch_state", "OUTCOME_UNCERTAIN");
+            }
+
+            const {
+                data: confirmed,
+                error: confirmError
+            } = await confirmationQuery.select("attempt_id");
 
             if (
                 confirmError ||
@@ -39906,7 +40057,7 @@ app.post("/reconcileRecovery", async (req, res) => {
         }
 
         // ======================================
-        // 8. VERIFIED SUCCESS RESPONSE
+        // 8. VERIFIED SUCCESS
         // ======================================
 
         return res.status(200).json({
@@ -39918,27 +40069,21 @@ app.post("/reconcileRecovery", async (req, res) => {
 
     } catch (error) {
 
-        // Never expose database errors,
-        // operation tokens or recovery evidence.
-
         console.error(
             "[RECONCILE RECOVERY] FAILED",
             {
-                error_code:
-                    "RECONCILE_RECOVERY_FAILED"
+                error_code: "RECONCILE_RECOVERY_FAILED"
             }
         );
 
         return res.status(503).json({
             success: false,
-            error_code:
-                "RECONCILE_RECOVERY_FAILED",
+            error_code: "RECONCILE_RECOVERY_FAILED",
             recovery_required: true,
             attempt_id: attemptId
         });
     }
 });
-
 
 // =========================
 // GET MASTERS

@@ -261,7 +261,15 @@ function createManualReconcileAutoRecovery({
                 };
             }
 
-        if (inspection.state === "EXECUTION_UNCERTAIN") {
+     if (inspection.state === "EXECUTION_UNCERTAIN") {
+
+    if (inspection.reservationOwned !== true) {
+        return {
+            attemptId,
+            recovered: false,
+            reason: "FAILURE_RESERVATION_NOT_OWNED"
+        };
+    }
     if (
         process.env.MANUAL_RECONCILE_AUTO_FAILURE_DISPATCH_ENABLED
         !== "true"
@@ -524,6 +532,164 @@ recoveryConfirmed =
 }
     }
 
+    // SQL-closed failure continuation.
+    // API owns atomic resume admission and completion.
+    async function scanSqlClosedContinuations(results) {
+        if (
+            stopped ||
+            process.env.MANUAL_RECONCILE_AUTO_FAILURE_DISPATCH_ENABLED !== "true"
+        ) {
+            return;
+        }
+
+        const staleResumeCutoff =
+            new Date(Date.now() - 150000).toISOString();
+
+        const incomplete = await supabase
+            .from("manual_reconcile_failure_dispatches")
+            .select("attempt_id,dispatch_token")
+            .eq("dispatch_state", "OUTCOME_UNCERTAIN")
+            .eq("execution_result", "INCOMPLETE")
+            .not("execution_finished_at", "is", null)
+            .order("execution_finished_at", { ascending: true })
+            .limit(batchSize);
+
+        const stale = await supabase
+            .from("manual_reconcile_failure_dispatches")
+            .select("attempt_id,dispatch_token")
+            .eq("dispatch_state", "RESUME_CLAIMED")
+            .is("execution_finished_at", null)
+            .is("execution_result", null)
+            .lt("resume_claimed_at", staleResumeCutoff)
+            .order("resume_claimed_at", { ascending: true })
+            .limit(batchSize);
+
+        const dispatchError = incomplete.error || stale.error;
+        const dispatches = [
+            ...(incomplete.data || []),
+            ...(stale.data || [])
+        ];
+
+        if (dispatchError || !Array.isArray(dispatches)) {
+            throw new Error(
+                "MANUAL_FAILURE_CONTINUATION_SCAN_FAILED"
+            );
+        }
+
+        for (const dispatch of dispatches) {
+            if (stopped) break;
+
+            const attemptId = dispatch.attempt_id;
+
+            if (
+                !UUID.test(attemptId || "") ||
+                !UUID.test(dispatch.dispatch_token || "")
+            ) {
+                continue;
+            }
+
+            try {
+                const { data: attempt, error: attemptError } =
+                    await supabase
+                        .from("manual_reconcile_attempts")
+                        .select(
+                            "reservation_id,company_code,tally_owner"
+                        )
+                        .eq("attempt_id", attemptId)
+                        .maybeSingle();
+
+                if (
+                    attemptError ||
+                    !attempt ||
+                    excluded.has(attempt.company_code)
+                ) {
+                    continue;
+                }
+
+                const { data: status, error: statusError } =
+                    await supabase
+                        .from("manual_reconcile_status")
+                        .select(
+                            "company_code,tally_owner,status," +
+                            "closed_at,last_terminal_attempt_id," +
+                            "operation_token"
+                        )
+                        .eq("id", attempt.reservation_id)
+                        .maybeSingle();
+
+                if (
+                    statusError ||
+                    !status ||
+                    status.company_code !== attempt.company_code ||
+                    status.tally_owner !== attempt.tally_owner ||
+                    status.status !== "FAILED" ||
+                    status.last_terminal_attempt_id !== attemptId ||
+                    status.operation_token !== null ||
+                    !status.closed_at
+                ) {
+                    continue;
+                }
+
+                const { data: evidence, error: evidenceError } =
+                    await supabase
+                        .from(
+                            "manual_reconcile_failure_recovery_evidence"
+                        )
+                        .select(
+                            "recovery_state,remote_execution_fenced," +
+                            "redis_cleanup_confirmed,redis_stage_receipt," +
+                            "redis_stage_confirmed_at,terminal_closed_at," +
+                            "redis_unblock_confirmed_at"
+                        )
+                        .eq("attempt_id", attemptId)
+                        .maybeSingle();
+
+                if (
+                    evidenceError ||
+                    !evidence ||
+                    evidence.recovery_state !== "SETTLED" ||
+                    evidence.remote_execution_fenced !== true ||
+                    evidence.redis_cleanup_confirmed !== true ||
+                    !evidence.redis_stage_receipt ||
+                    !evidence.redis_stage_confirmed_at ||
+                    !evidence.terminal_closed_at ||
+                    evidence.redis_unblock_confirmed_at !== null
+                ) {
+                    continue;
+                }
+
+                // API performs atomic RESUME_CLAIMED admission.
+                // Never mutate Redis directly from watchdog.
+                const outcome = await dispatchFailureRecovery(
+                    attemptId,
+                    dispatch.dispatch_token
+                );
+
+                const item = {
+                    attemptId,
+                    recovered: outcome.recovered === true,
+                    reason:
+                        outcome.reason ||
+                        "FAILURE_CONTINUATION_UNCERTAIN"
+                };
+
+                results.push(item);
+                report(item);
+
+            } catch (error) {
+                const item = {
+                    attemptId,
+                    recovered: false,
+                    reason: "FAILURE_CONTINUATION_UNCERTAIN",
+                    errorCode:
+                        error?.message || "UNKNOWN"
+                };
+
+                results.push(item);
+                report(item);
+            }
+        }
+    }
     async function scan() {
         const cutoff = new Date(
             Date.now() - staleAfterMs
@@ -542,15 +708,18 @@ recoveryConfirmed =
             })
             .limit(batchSize);
 
-        if (error || !Array.isArray(data)) {
-            throw new Error(
-                "MANUAL_RECOVERY_SCAN_FAILED"
-            );
-        }
-
         const results = [];
 
-        for (const row of data) {
+        if (error || !Array.isArray(data)) {
+            const item = {
+                recovered: false,
+                reason: "MANUAL_RECOVERY_SCAN_FAILED"
+            };
+            results.push(item);
+            report(item);
+        }
+
+        for (const row of (error || !Array.isArray(data) ? [] : data)) {
             if (
                 stopped ||
                 excluded.has(row.company_code)
@@ -620,6 +789,7 @@ recoveryConfirmed =
             }
         }
 
+        await scanSqlClosedContinuations(results);
         return results;
     }
 
