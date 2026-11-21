@@ -58,6 +58,8 @@ async function sendChunkedToConnector(
             ) &&
             typeof executionContext.before_dispatch === "function" &&
             typeof executionContext.after_transfer === "function" &&
+            typeof executionContext.activate_progress === "function" &&
+            !Array.isArray(payload?.requestItems) &&
             typeof executionContext.identity_scope === "string" &&
             executionContext.identity_scope.trim().length > 0 &&
             typeof executionContext.company_identity === "string" &&
@@ -2063,6 +2065,11 @@ if (lockLost || signal.aborted) {
     return;
 }
 
+// Activate authorization immediately before getMasters dispatch.
+// The durable validation above guarantees this callback exists.
+if (event === "getMasters") {
+    executionContext.activate_progress();
+}
 // Normal request is about to be dispatched to connector.
 requestDispatched = true;
 dispatchState.dispatched = true;

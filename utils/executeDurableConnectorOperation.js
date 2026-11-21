@@ -7,6 +7,12 @@ const {
     sendChunkedToConnector
 } = require("./sendChunkedToConnector");
 
+const {
+    registerGetMastersProgress,
+    activateGetMastersProgress,
+    revokeGetMastersProgress
+} = require("./getMastersProgressAuthorization");
+
 async function readDurableClaimByOrdinal({
     supabase,
     batchId,
@@ -539,34 +545,59 @@ const verifyAfterTransfer = async (result, signal) => {
     return result;
 };
 
-    const result = await sendChunkedToConnector(
-    socket,
-    event,
-    payload,
-    connectorId,
-    {
-        batch_id: batchId,
-        execution_claim_token: executionClaimToken,
-        request_id: requestId,
+      const progressAuthorization =
+        event === "getMasters"
+            ? registerGetMastersProgress({
+                requestId,
+                batchId,
+                connectorId,
+                socket,
+                executionClaimToken
+            })
+            : null;
 
-        // Durable execution identity
-        identity_scope: JSON.stringify([
-            "billey-tally-v1",
-            String(connectorId),
-            String(companyCode),
-            String(tallyOwner)
-        ]),
-        company_identity: `guid:${String(tallyCompanyGuid)}`,
-        payload_fingerprint: `sha256:${payloadFingerprint}`,
+    try {
+        const result = await sendChunkedToConnector(
+            socket,
+            event,
+            payload,
+            connectorId,
+            {
+                batch_id: batchId,
+                execution_claim_token: executionClaimToken,
+                request_id: requestId,
 
-        before_dispatch: beforeDispatch,
+                identity_scope: JSON.stringify([
+                    "billey-tally-v1",
+                    String(connectorId),
+                    String(companyCode),
+                    String(tallyOwner)
+                ]),
+
+                company_identity:
+                    `guid:${String(tallyCompanyGuid)}`,
+
+                payload_fingerprint:
+                    `sha256:${payloadFingerprint}`,
+
+                before_dispatch: beforeDispatch,
+
+activate_progress:
+    progressAuthorization
+        ? () => activateGetMastersProgress(
+            progressAuthorization
+        )
+        : undefined,
+
 after_transfer: verifyAfterTransfer
+            }
+        );
+
+        return result;
+
+    } finally {
+        revokeGetMastersProgress(progressAuthorization);
     }
-);
-
-   
-
-    return result;
 }
 
 module.exports = {

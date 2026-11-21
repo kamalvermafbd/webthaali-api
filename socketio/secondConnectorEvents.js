@@ -36,6 +36,12 @@ const masterFinalAckReceipts =
 const {
     updateSyncProgress
 } = require("../utils/syncProgress");
+
+const {
+    verifyGetMastersProgress,
+    revokeGetMastersProgressForSocket
+} = require("../utils/getMastersProgressAuthorization");
+
 const {
     dispatchRecoveredWaitingBatch
 } = require("../workers/secondQueueExistingBatch");
@@ -431,13 +437,35 @@ console.log(
 );
 // 060926 end
 
+   socket.protocolReceiver = null;
+
+function activateProtocolReceiver() {
+    if (!socket.connected) {
+        return false;
+    }
+
+    const hasRegisteredOwner = [
+        ...(socket.connectorIds || []),
+        socket.connectorId
+    ]
+        .filter(Boolean)
+        .some(connectorId =>
+            registry.get(String(connectorId)) === socket
+        );
+
+    if (!hasRegisteredOwner) {
+        return false;
+    }
+
+    if (!socket.protocolReceiver) {
         socket.protocolReceiver =
-            new ServerProtocolReceiver(
-                socket
-            );
+            new ServerProtocolReceiver(socket);
 
-                socket.protocolReceiver.start();
+        socket.protocolReceiver.start();
+    }
 
+    return true;
+}
         masterFinalAckReceipts.install(socket);
 
 socket.on("identifyConnector", async (data) => {
@@ -1006,7 +1034,17 @@ socket.emit("connector:registration:status", {
         registry.remove(connectorId, socket);
         break;
     }
+if (!activateProtocolReceiver()) {
+    console.error(
+        "[CONNECTOR IDENTIFY] Protocol activation blocked",
+        {
+            connector_id: connectorId,
+            socket_id: socket.id
+        }
+    );
 
+    continue;
+}
    console.log(
     "âœ… EXISTING CONNECTOR AUTO REGISTERED WITH OWNERSHIP",
     {
@@ -1422,7 +1460,17 @@ socket.connectorId = connectorId;
                 registry.remove(connectorId, socket);
                 return;
             }
+if (!activateProtocolReceiver()) {
+    console.error(
+        "[CONNECTOR REGISTER] Protocol activation blocked",
+        {
+            connector_id: connectorId,
+            socket_id: socket.id
+        }
+    );
 
+    return;
+}
             console.log("âœ… CONNECTOR REGISTERED WITH OWNERSHIP", {
                 socket_id: socket.id,
                 connector_id: connectorId,
@@ -1438,7 +1486,44 @@ socket.connectorId = connectorId;
 
 socket.on("getMastersProgress", async (data) => {
 
-    if (!socket.connected) {
+       if (!socket.connected || !data || typeof data !== "object") {
+        return;
+    }
+
+    const authorization = verifyGetMastersProgress({
+        socket,
+        requestId: data.requestId,
+        batchId: data.batchId
+    });
+
+    if (!authorization) {
+        console.warn(
+            "[SYNC PROGRESS] Rejected unauthorized getMasters progress",
+            {
+                socket_id: socket.id,
+                request_id: data.requestId || null,
+                batch_id: data.batchId || null
+            }
+        );
+        return;
+    }
+
+    // Verify ownership of the exact connector used by
+    // this durable getMasters execution.
+    if (
+        registry.get(authorization.connectorId) !== socket ||
+        !(
+            socket.connectorIds instanceof Set &&
+            socket.connectorIds.has(authorization.connectorId)
+        )
+    ) {
+        console.warn(
+            "[SYNC PROGRESS] Rejected: connector ownership mismatch",
+            {
+                socket_id: socket.id,
+                connector_id: authorization.connectorId
+            }
+        );
         return;
     }
 
@@ -1448,15 +1533,30 @@ socket.on("getMastersProgress", async (data) => {
     socket.lastTallyActivity =
         Date.now();
 
-            await updateOwnedSocketHealth({
-        connection_status: "CONNECTED",
-               operation_status:
-            socket.tallyRequestActive === true
-                ? "BUSY"
-                : "UNKNOWN",
-        last_heartbeat_at:
-            new Date(socket.lastHeartbeat).toISOString()
-    });
+             try {
+        await updateConnectorHealthIfSocketOwner(
+            authorization.connectorId,
+            socket.id,
+            {
+                connection_status: "CONNECTED",
+                operation_status:
+                    socket.tallyRequestActive === true
+                        ? "BUSY"
+                        : "UNKNOWN",
+                last_heartbeat_at:
+                    new Date(socket.lastHeartbeat).toISOString()
+            }
+        );
+    } catch (error) {
+        console.error(
+            "[SYNC PROGRESS] Connector health update failed",
+            {
+                connector_id: authorization.connectorId,
+                socket_id: socket.id,
+                error: error.message
+            }
+        );
+    }
 
     console.log(
         "ðŸ“Š TALLY PROGRESS :",
@@ -1473,13 +1573,15 @@ socket.on("getMastersProgress", async (data) => {
 
     try {
 
-        await updateSyncProgress({
-            supabase,
-            batchId: data.batchId,
-            stage: data.stage,
-            progress: data.progress,
-            action: `TALLY_${data.stage}`
-        });
+       await updateSyncProgress({
+    supabase,
+    batchId: authorization.batchId,
+    execution_claim_token:
+        authorization.executionClaimToken,
+    stage: data.stage,
+    progress: data.progress,
+    action: `TALLY_${data.stage}`
+});
 
     } catch (err) {
 
@@ -1824,6 +1926,9 @@ socket.on("getMastersProgress", async (data) => {
         // ============================================================
 
         socket.on("disconnect", async (reason) => {
+
+    // Immediately revoke active getMasters progress authorization.
+    revokeGetMastersProgressForSocket(socket);
     console.log("================================");
     console.log("âŒ Connector Disconnected");
     console.log("Socket ID :", socket.id);
