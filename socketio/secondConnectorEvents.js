@@ -1735,9 +1735,20 @@ for (const connectorId of leaseConnectorIds) {
         }
     );
 
-    // Remove only this socket's local mapping.
-    // Never change Redis ownership or operation locks here.
-    registry.remove(connectorId, socket);
+   // Remove only this socket's local mapping.
+// Never change Redis ownership or operation locks here.
+registry.remove(connectorId, socket);
+
+// Notify this exact socket that its registration is no longer valid.
+// Re-registration must pass the existing ownership and quarantine guards.
+if (socket.connected) {
+    socket.emit("connector:registration:status", {
+        connector_id: connectorId,
+        registered: false,
+        reason: "REDIS_LEASE_LOST",
+        socket_id: socket.id
+    });
+}
 }
     } catch (error) {
         console.error(
