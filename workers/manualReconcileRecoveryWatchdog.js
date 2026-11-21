@@ -42,7 +42,9 @@ const watchdog = createManualReconcileAutoRecovery({
         reservationId: result.reservationId || null,
         recovered: result.recovered === true,
         reason: result.reason || null,
-        errorCode: result.errorCode || null
+        errorCode: result.errorCode || null,
+        dispatchState: result.dispatchState || null,
+        action: result.action || null
     });
 }
 });

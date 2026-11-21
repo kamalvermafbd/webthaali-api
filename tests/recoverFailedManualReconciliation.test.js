@@ -69,6 +69,25 @@ function harness(options = {}) {
    
     const supabase = {
         from(table) {
+            if (table === "manual_reconcile_coordinator_exit_receipts") {
+                const e = snapshots[0].execution;
+                const data = options.missingExitReceipt ? null : {
+                    attempt_id: attemptId, operation_token: operationToken,
+                    execution_id: executionId,
+                    server_instance_id: e.server_instance_id,
+                    connector_id: e.connector_id, socket_id: e.socket_id,
+                    owner_token: e.owner_token, coordinator_exited: true,
+                    admission_sealed: true, pending_work: 0,
+                    callback_started: true, callback_settled: true,
+                    late_work_detected: false,
+                    outcome: "LOCALLY_SETTLED_UNVERIFIED",
+                    recorded_at: "2026-11-20T00:00:00Z",
+                    ...options.exitReceiptOverride
+                };
+                return { select() { return { eq() { return {
+                    async maybeSingle() { return { data, error: null }; }
+                }; } }; } };
+            }
             if (
                 table !==
                 "manual_reconcile_failure_recovery_evidence"
@@ -341,6 +360,7 @@ if (resolved === observationSenderPath) {
                     running: 0,
                     settled: 1,
                     locallyDrained: true,
+                    transportOutcomeKnown: true,
                     settlementEligible: false
                 }
 
@@ -675,14 +695,14 @@ test("socket timeout stays blocked without settlement", async () => {
 });
 
 test("valid fence ACK and observation remain non-settling", async () => {
-    const h = harness();
+    const h = harness({ missingExitReceipt: true });
 
     const result = await h.recover({
         supabase: h.supabase,
         attemptId
     });
 
-    assert.equal(result.reason, "COORDINATOR_DRAIN_NOT_VERIFIED");
+    assert.equal(result.reason, "ORIGINAL_COORDINATOR_DURABLE_RECEIPT_REQUIRED");
     assert.equal(result.recovered, false);
     assert.equal(result.settlementEligible, false);
     assert.equal(result.recoveryRequired, true);
@@ -820,8 +840,8 @@ function validCoordinatorLifecycle(snapshot) {
     };
 }
 
-test("missing coordinator lifecycle blocks recovery", async () => {
-    const h = harness({ lifecycle: null });
+test("missing lifecycle and durable exit receipt remain blocked", async () => {
+    const h = harness({ lifecycle: null, missingExitReceipt: true });
 
     const result = await h.recover({
         supabase: h.supabase,
@@ -830,7 +850,7 @@ test("missing coordinator lifecycle blocks recovery", async () => {
 
     assert.equal(
         result.reason,
-        "COORDINATOR_DRAIN_NOT_VERIFIED"
+        "ORIGINAL_COORDINATOR_DURABLE_RECEIPT_REQUIRED"
     );
     assert.equal(result.recovered, false);
     assert.equal(result.observationVerified, true);
@@ -1288,6 +1308,24 @@ test("existing mismatched Redis receipt blocks recovery", async () => {
     );
     assert.equal(result.recovered, false);
     assert.equal(result.settlementEligible, false);
+    assert.equal(h.calls.redisStages, 0);
+    assert.equal(h.calls.sqlSettlements, 0);
+});
+
+
+test("server restart with valid durable exit receipt reaches SQL drain verification", async () => {
+    const h = harness({ lifecycle: null });
+    const result = await h.recover({ supabase: h.supabase, attemptId });
+    assert.equal(result.reason, "COORDINATOR_DRAIN_RECORD_NOT_CONFIRMED");
+    assert.equal(h.calls.rpc.at(-1).name, "record_manual_reconcile_coordinator_drain_v1");
+    assert.equal(h.calls.redisStages, 0);
+});
+
+test("foreign durable exit receipt cannot authorize cleanup after restart", async () => {
+    const h = harness({ lifecycle: null, exitReceiptOverride: { owner_token: randomUUID() } });
+    const result = await h.recover({ supabase: h.supabase, attemptId });
+    assert.equal(result.reason, "COORDINATOR_DURABLE_RECEIPT_INVALID");
+    assert.equal(h.calls.rpc.length, 2);
     assert.equal(h.calls.redisStages, 0);
     assert.equal(h.calls.sqlSettlements, 0);
 });

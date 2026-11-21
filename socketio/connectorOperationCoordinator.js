@@ -77,11 +77,11 @@ const outcome =
 // ==========================================
 // WAIT AND ACQUIRE GLOBAL CONNECTOR LOCK
 // ==========================================
-
 async function waitForConnectorLock(
     connectorId,
     maxWaitMs = undefined,
-    observeManualWork = null
+    observeManualWork = null,
+    prepareManualAcquisition = null
 ) {
     const id = String(connectorId || "").trim();
 
@@ -136,7 +136,102 @@ async function waitForConnectorLock(
                 `Protocol receiver missing: ${id}`
             );
         }
+// Manual-only: one durable preparation and one Redis
+// acquisition attempt. No retry with a prepared identity.
+if (prepareManualAcquisition) {
+    await prepareManualAcquisition({
+        connectorId: id,
+        socketId: socket.id,
+        ownerToken
+    });
 
+    const acquisitionPromise = acquireConnectorAndSocketLock(
+        id,
+        socket.id,
+        ownerToken,
+        { ttlMs: LOCK_TTL_MS }
+    );
+
+    if (observeManualWork) {
+        observeManualWork(acquisitionPromise);
+    }
+
+       let acquisitionTimer;
+
+    try {
+        const acquired = await Promise.race([
+            acquisitionPromise,
+            new Promise((_, reject) => {
+                acquisitionTimer = setTimeout(
+                    () => reject(new Error(
+                        `GLOBAL_CONNECTOR_ACQUISITION_TIMEOUT: ${id}`
+                    )),
+                    OPERATION_SETTLE_TIMEOUT_MS
+                );
+            })
+        ]);
+
+        if (!acquired) {
+            throw new Error(
+                `MANUAL_RECONCILE_CONNECTOR_BUSY_AFTER_PREPARATION: ${id}`
+            );
+        }
+
+        if (
+            !socket.connected ||
+            !socket.protocolReceiver ||
+            registry.get(id) !== socket
+        ) {
+            throw new Error(
+                `MANUAL_RECONCILE_CONNECTOR_CHANGED_AFTER_ACQUISITION: ${id}`
+            );
+        }
+
+        return {
+            connectorId: id,
+            socketId: socket.id,
+            socket,
+            ownerToken
+        };
+    } catch (error) {
+        const acquisitionUncertain =
+            error.message?.startsWith(
+                "GLOBAL_CONNECTOR_ACQUISITION_TIMEOUT:"
+            ) ||
+            error.message?.startsWith(
+                "MANUAL_RECONCILE_CONNECTOR_CHANGED_AFTER_ACQUISITION:"
+            );
+
+        if (acquisitionUncertain) {
+            // Redis acquisition may have succeeded.
+            // Never release persistent markers without verification.
+            acquisitionPromise.then(
+                lateAcquired => {
+                    if (lateAcquired) {
+                        console.error(
+                            "[MANUAL RECONCILE] Acquisition requires verified recovery",
+                            { connectorId: id, socketId: socket.id }
+                        );
+                    }
+                },
+                lateError => {
+                    console.error(
+                        "[MANUAL RECONCILE] Late acquisition error",
+                        lateError
+                    );
+                }
+            );
+
+            if (socket.connected) {
+                socket.disconnect(true);
+            }
+        }
+
+        throw error;
+    } finally {
+        clearTimeout(acquisitionTimer);
+    }
+}
         const acquisitionPromise = acquireConnectorAndSocketLock(
     id,
     socket.id,
@@ -408,40 +503,179 @@ async function withGlobalConnectorLock(
         );
     }
 
-  // Manual-only asynchronous work observer.
-function observeAcquisitionWork(work) {
-    if (!manualLifecycle) return work;
+  // Manual-only F3-A durable exit finalization.
+  // This is local evidence, never remote Tally settlement.
+  function maybeFinalizeManualCoordinatorExit() {
+      const state = manualLifecycle;
 
-    const promise = Promise.resolve(work);
+      if (!state ||
+          typeof manualCoordinatorReceiptWriter !== "function" ||
+          state.coordinatorExited !== true ||
+          state.admissionSealed !== true ||
+          state.lateWorkDetected === true ||
+          state.outcome === "SUCCESS_RELEASED" ||
+          state.callbackStarted !== true ||
+          state.callbackSettled !== true ||
+          state.pending.size !== 0 ||
+          !state.socketId ||
+          !state.ownerToken) {
+          return Promise.resolve(false);
+      }
 
-    if (manualLifecycle.admissionSealed) {
-        manualLifecycle.lateWorkDetected = true;
-        manualLifecycle.outcome = "LATE_WORK_UNVERIFIED";
+      if (state.receiptAttempted === true) {
+          return state.receiptPromise || Promise.resolve(false);
+      }
 
-        // Observe rejection without suppressing the caller's result.
-        promise.catch(() => {});
+      state.outcome = "LOCALLY_SETTLED_UNVERIFIED";
+      state.receiptAttempted = true;
 
-        return promise;
+      const receipt = Object.freeze({
+          attemptId: state.attemptId,
+          executionId: state.executionId,
+          serverInstanceId: state.serverInstanceId,
+          connectorId: state.connectorId,
+          socketId: state.socketId,
+          ownerToken: state.ownerToken,
+          coordinatorExited: true,
+          admissionSealed: true,
+          lateWorkDetected: false,
+          pendingWork: 0,
+          callbackStarted: true,
+          callbackSettled: true,
+          locallySettled: true,
+          outcome: "LOCALLY_SETTLED_UNVERIFIED"
+      });
+
+      state.receiptPromise = Promise.resolve()
+          .then(() => {
+              if (state.lateWorkDetected === true ||
+                  state.pending.size !== 0 ||
+                  state.outcome !== "LOCALLY_SETTLED_UNVERIFIED") {
+                  return false;
+              }
+
+              return Promise.resolve(
+    manualCoordinatorReceiptWriter(receipt)
+).then(() => true);
+          })
+          .catch(error => {
+              console.error(
+                  "[MANUAL RECONCILE] Durable coordinator receipt failed",
+                  {
+                      attemptId: state.attemptId,
+                      executionId: state.executionId,
+                      error
+                  }
+              );
+
+              return false;
+          });
+
+      return state.receiptPromise;
+  }
+// F3-B: Persist an observed unsafe coordinator state.
+// This is Manual Reconciliation only.
+function notifyManualCoordinatorUnsafe() {
+    const state = manualLifecycle;
+
+    if (!state || state.lateWorkDetected !== true) {
+        return Promise.resolve(false);
     }
 
-    manualLifecycle.pending.add(promise);
+    if (
+        !state.socketId ||
+        !state.ownerToken ||
+        typeof manualCoordinatorReceiptWriter !== "function"
+    ) {
+        return Promise.resolve(false);
+    }
 
-    promise.then(
-        () => manualLifecycle.pending.delete(promise),
-        () => manualLifecycle.pending.delete(promise)
-    );
+    if (state.unsafeNotificationPromise) {
+        return state.unsafeNotificationPromise;
+    }
 
+    const receipt = Object.freeze({
+        attemptId: state.attemptId,
+        executionId: state.executionId,
+        serverInstanceId: state.serverInstanceId,
+        connectorId: state.connectorId,
+        socketId: state.socketId,
+        ownerToken: state.ownerToken,
+        coordinatorExited: state.coordinatorExited,
+        admissionSealed: true,
+        pendingWork: state.pending.size,
+        callbackStarted: state.callbackStarted,
+        callbackSettled: state.callbackSettled,
+        lateWorkDetected: true,
+        locallySettled: false,
+        outcome: "LATE_WORK_UNVERIFIED"
+    });
+
+    const pending = Promise.resolve()
+        .then(() => manualCoordinatorReceiptWriter(receipt))
+        .then(() => true);
+
+    state.unsafeNotificationPromise = pending;
+
+    pending.catch(error => {
+        console.error(
+            "[MANUAL RECONCILE] Durable unsafe notification failed",
+            {
+                attemptId: state.attemptId,
+                error
+            }
+        );
+
+        // Keep retry possible after an uncertain failure.
+        if (state.unsafeNotificationPromise === pending) {
+            state.unsafeNotificationPromise = null;
+        }
+    });
+
+    return pending;
+}
+  function observeAcquisitionWork(work) {
+      if (!manualLifecycle) return work;
+
+      const promise = Promise.resolve(work);
+
+      if (manualLifecycle.admissionSealed) {
+    manualLifecycle.lateWorkDetected = true;
+    manualLifecycle.outcome = "LATE_WORK_UNVERIFIED";
+
+    void notifyManualCoordinatorUnsafe().catch(() => {
+        // Error already logged; unsafe state remains latched.
+    });
+
+    promise.catch(() => {});
     return promise;
 }
 
+      manualLifecycle.pending.add(promise);
+
+      const onSettled = () => {
+          manualLifecycle.pending.delete(promise);
+
+          if (manualLifecycle.coordinatorExited === true) {
+              void maybeFinalizeManualCoordinatorExit();
+          }
+      };
+
+      promise.then(onSettled, onSettled);
+
+      return promise;
+  }
 let lock;
 
 try {
     lock = await waitForConnectorLock(
-        connectorId,
-        options?.lockWaitMs,
-        manualLifecycle ? observeAcquisitionWork : null
-    );
+    connectorId,
+    options?.lockWaitMs,
+    manualLifecycle ? observeAcquisitionWork : null,
+    receiptRequested
+        ? options?.prepareManualAcquisition
+        : null
+);
    } catch (error) {
     if (manualLifecycle) {
         manualLifecycle.admissionSealed = true;
@@ -1111,6 +1345,10 @@ trackManualWork(operationPromise);
 operationPromise.finally(() => {
     if (manualLifecycle) {
         manualLifecycle.callbackSettled = true;
+
+        if (manualLifecycle.coordinatorExited === true) {
+            void maybeFinalizeManualCoordinatorExit();
+        }
     }
 }).catch(() => {});
         return operationPromise;
@@ -1129,7 +1367,17 @@ operationPromise.finally(() => {
     settled = true;
     lockLost = true;
     cleanup();
-
+// Diagnostic only: NOT remote settlement proof.
+console.error("[GLOBAL LOCK] Operation failed; quarantine required", {
+    connector_id: lock.connectorId,
+    socket_id: lock.socketId,
+    reason: "OPERATION_FAILED_REMOTE_STATE_UNKNOWN",
+    error_code: error?.code || null,
+    error_message: error?.message || String(error),
+    request_dispatched: error?.requestDispatched ?? null,
+    manual_attempt_id: completionIdentity?.attemptId || null,
+    manual_execution_id: completionIdentity?.executionId || null
+});
     quarantineForCleanup(
     lock.connectorId,
     lock.socketId,
@@ -1593,69 +1841,23 @@ if (receiptRequested) {
 
             if (successReleased) {
                 manualLifecycle.outcome = "SUCCESS_RELEASED";
-            } else if (manualLifecycle.lateWorkDetected) {
+            } else if (manualLifecycle.lateWorkDetected === true) {
                 manualLifecycle.outcome = "LATE_WORK_UNVERIFIED";
-                } else if (
-            operationPromise !== null &&
-            manualLifecycle.callbackStarted === true &&
-            manualLifecycle.callbackSettled === true &&
-            manualLifecycle.pending.size === 0
-        ) {
+            } else if (
+                manualLifecycle.callbackStarted === true &&
+                manualLifecycle.callbackSettled === true &&
+                manualLifecycle.pending.size === 0
+            ) {
                 manualLifecycle.outcome = "LOCALLY_SETTLED_UNVERIFIED";
             } else {
                 manualLifecycle.outcome = "PENDING_WORK_UNVERIFIED";
             }
 
-            // Durable receipt is permitted only after verified
-            // local quiescence. Never claim remote Tally settlement.
-            if (
-                manualCoordinatorReceiptWriter &&
-                manualLifecycle.outcome ===
-                    "LOCALLY_SETTLED_UNVERIFIED" &&
-                manualLifecycle.admissionSealed === true &&
-                manualLifecycle.coordinatorExited === true &&
-                manualLifecycle.lateWorkDetected !== true &&
-                manualLifecycle.pending.size === 0 &&
-                manualLifecycle.callbackStarted === true &&
-manualLifecycle.callbackSettled === true &&
-operationPromise !== null &&
-                manualLifecycle.socketId &&
-                manualLifecycle.ownerToken
-            ) {
-                try {
-                    await manualCoordinatorReceiptWriter(
-                        Object.freeze({
-                            attemptId: manualLifecycle.attemptId,
-                            executionId: manualLifecycle.executionId,
-                            serverInstanceId:
-                                manualLifecycle.serverInstanceId,
-                            connectorId: manualLifecycle.connectorId,
-                            socketId: manualLifecycle.socketId,
-                            ownerToken: manualLifecycle.ownerToken,
-                            coordinatorExited: true,
-                            admissionSealed: true,
-                            lateWorkDetected: false,
-                            pendingWork: 0,
-                            callbackStarted: manualLifecycle.callbackStarted,
-                            callbackSettled: manualLifecycle.callbackSettled,
-                            locallySettled: true,
-                            outcome: "LOCALLY_SETTLED_UNVERIFIED"
-                        })
-                    );
-                } catch (receiptError) {
-                    console.error(
-                        "[MANUAL RECONCILE] Durable coordinator receipt failed",
-                        {
-                            attemptId: manualLifecycle.attemptId,
-                            executionId: manualLifecycle.executionId,
-                            error: receiptError
-                        }
-                    );
-
-                    // Never convert a failed receipt write
-                    // into successful recovery authorization.
-                }
-            }
+            if (manualLifecycle.lateWorkDetected === true) {
+                await notifyManualCoordinatorUnsafe();
+            } else {
+                await maybeFinalizeManualCoordinatorExit();
+            }   
         }
     }
 

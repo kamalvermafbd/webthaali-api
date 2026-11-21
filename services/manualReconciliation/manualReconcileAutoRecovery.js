@@ -18,107 +18,100 @@ const ELIGIBLE = new Set([
     "CHECKPOINT_PRESENT_RELEASE_VERIFIED",
     "FINALIZATION_RECORDED"
 ]);
-async function dispatchFailureRecovery(attemptId, dispatchToken) {
-    const token =
-        process.env.MANUAL_RECONCILE_INTERNAL_RECOVERY_TOKEN;
-
-    const endpoint =
-        process.env.MANUAL_RECONCILE_RECOVERY_INTERNAL_URL;
-
-    if (
-        typeof token !== "string" ||
-        token.length < 32 ||
-        typeof endpoint !== "string"
-    ) {
+function failureDispatchConfig() {
+    const token = process.env.MANUAL_RECONCILE_INTERNAL_RECOVERY_TOKEN;
+    const endpoint = process.env.MANUAL_RECONCILE_RECOVERY_INTERNAL_URL;
+    if (typeof token !== "string" || token.length < 32 ||
+        typeof endpoint !== "string") {
         throw new Error("FAILURE_DISPATCH_CONFIG_MISSING");
     }
-
-    const url = new URL(endpoint);
-
-    if (
-        url.protocol !== "http:" ||
-        url.hostname !== "127.0.0.1" ||
-        !url.port ||
-        url.pathname !== "/reconcileRecovery" ||
-        url.search ||
-        url.hash ||
-        url.username ||
-        url.password
-    ) {
+    let url;
+    try { url = new URL(endpoint); } catch (_) {
         throw new Error("FAILURE_DISPATCH_URL_INVALID");
     }
+    if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" ||
+        !url.port || url.pathname !== "/reconcileRecovery" ||
+        url.search || url.hash || url.username || url.password) {
+        throw new Error("FAILURE_DISPATCH_URL_INVALID");
+    }
+    return { token, url };
+}
 
-   const body = JSON.stringify({
-    attempt_id: attemptId,
-    recovery_type: "FAILURE",
-    dispatch_token: dispatchToken
-});
-
+async function dispatchFailureRecovery(attemptId, dispatchToken) {
+    const { token, url } = failureDispatchConfig();
+    const body = JSON.stringify({
+        attempt_id: attemptId, recovery_type: "FAILURE",
+        dispatch_token: dispatchToken
+    });
     return new Promise((resolve, reject) => {
-        const request = http.request(
-            url,
-            {
-                method: "POST",
-                headers: {
-                    "content-type": "application/json",
-                    "content-length": Buffer.byteLength(body),
-                    "x-manual-recovery-token": token
-                },
-                agent: false
+        let settled = false;
+        let deadline;
+        const finish = (error, result) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(deadline);
+            if (error) reject(error); else resolve(result);
+        };
+        const request = http.request(url, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                "content-length": Buffer.byteLength(body),
+                "x-manual-recovery-token": token
             },
-            response => {
-                let responseBody = "";
-
-                response.on("data", chunk => {
-                    responseBody += chunk;
-
-                    if (responseBody.length > 16384) {
-                        request.destroy(
-                            new Error("FAILURE_RESPONSE_TOO_LARGE")
-                        );
-                    }
+            agent: false
+        }, response => {
+            let responseBody = "";
+            let bytes = 0;
+            response.on("error", error => finish(error));
+            response.on("aborted", () => finish(
+                new Error("FAILURE_RESPONSE_ABORTED")
+            ));
+            response.on("data", chunk => {
+                bytes += Buffer.byteLength(chunk);
+                if (bytes > 16384) {
+                    const error = new Error("FAILURE_RESPONSE_TOO_LARGE");
+                    finish(error);
+                    response.destroy();
+                    request.destroy();
+                    return;
+                }
+                responseBody += chunk;
+            });
+            response.on("end", () => {
+                let result;
+                try { result = JSON.parse(responseBody); } catch (_) {
+                    finish(new Error("FAILURE_RESPONSE_UNVERIFIED"));
+                    return;
+                }
+                if (result?.attempt_id !== attemptId) {
+                    finish(new Error("FAILURE_RESPONSE_IDENTITY_INVALID"));
+                    return;
+                }
+                const recovered = response.statusCode === 200 &&
+                    result.success === true && result.recovered === true;
+                const reason = result.recovery_state || result.error_code;
+                finish(null, {
+                    recovered,
+                    reason: typeof reason === "string" &&
+                        /^[A-Z0-9_]{1,200}$/.test(reason)
+                        ? reason : "FAILURE_OUTCOME_REQUIRES_INSPECTION",
+                    recoveryRequired: !recovered,
+                    action: recovered ? undefined :
+                        typeof result.operator_action === "string" &&
+                        result.operator_action.length <= 500
+                            ? result.operator_action
+                            : "Inspect durable execution, coordinator exit receipt and recovery dispatch; do not clear ownership or replay Tally work."
                 });
-
-                response.on("end", () => {
-                    let result;
-
-                    try {
-                        result = JSON.parse(responseBody);
-                    } catch (_) {
-                        reject(
-                            new Error("FAILURE_RESPONSE_UNVERIFIED")
-                        );
-                        return;
-                    }
-
-                    if (
-                        response.statusCode === 200 &&
-                        result?.success === true &&
-                        result?.recovered === true &&
-                        result?.attempt_id === attemptId
-                    ) {
-                        resolve({
-                            recovered: true,
-                            reason: result.recovery_state
-                        });
-                        return;
-                    }
-
-                    resolve({
-                        recovered: false,
-                        reason: "FAILURE_OUTCOME_REQUIRES_INSPECTION"
-                    });
-                });
-            }
-        );
-
-        request.setTimeout(15000, () => {
-            request.destroy(
-                new Error("FAILURE_DISPATCH_TIMEOUT")
-            );
+            });
         });
-
-        request.on("error", reject);
+        request.on("error", error => finish(error));
+        // Absolute deadline: trickling response bytes cannot extend it.
+        deadline = setTimeout(() => {
+            const error = new Error("FAILURE_DISPATCH_TIMEOUT");
+            finish(error);
+            request.destroy();
+        }, 15000);
         request.end(body);
     });
 }
@@ -163,6 +156,7 @@ function createManualReconcileAutoRecovery({
     let timer = null;
     let running = null;
     let stopped = true;
+    let continuationCursor = null;
 
     function report(item) {
         try {
@@ -187,6 +181,47 @@ function createManualReconcileAutoRecovery({
         return response.data;
     }
 
+    async function resumeExistingDispatch(attemptId) {
+        const { data: dispatch, error } = await supabase
+            .from("manual_reconcile_failure_dispatches")
+            .select("dispatch_token,dispatch_state,execution_result,execution_finished_at")
+            .eq("attempt_id", attemptId).maybeSingle();
+        if (error) throw new Error("FAILURE_DISPATCH_READ_UNCERTAIN");
+        if (!dispatch) return null;
+        if (!UUID.test(dispatch.dispatch_token || "")) {
+            throw new Error("FAILURE_DISPATCH_IDENTITY_INVALID");
+        }
+        if (!["CLAIMED", "DISPATCH_STARTED"].includes(dispatch.dispatch_state)) {
+            return {
+                attemptId, recovered: false,
+                reason: "FAILURE_EXISTING_DISPATCH_REQUIRES_VERIFICATION",
+                dispatchState: dispatch.dispatch_state,
+                action: "Inspect the API recovery result and original coordinator exit receipt. Only SQL-closed cleanup may be resumed automatically."
+            };
+        }
+        failureDispatchConfig();
+        if (dispatch.dispatch_state === "CLAIMED") {
+            const marked = await supabase
+                .from("manual_reconcile_failure_dispatches")
+                .update({ dispatch_state: "DISPATCH_STARTED" })
+                .eq("attempt_id", attemptId)
+                .eq("dispatch_token", dispatch.dispatch_token)
+                .eq("dispatch_state", "CLAIMED").select("attempt_id");
+            if (marked.error || !Array.isArray(marked.data)) {
+                throw new Error("FAILURE_DISPATCH_MARK_UNCERTAIN");
+            }
+            if (marked.data.length !== 1) {
+                return { attemptId, recovered: false,
+                    reason: "FAILURE_DISPATCH_ADMISSION_CHANGED" };
+            }
+        }
+        // Same durable token only. The API CAS admits execution once.
+        // A repeated HTTP request is never permission to replay Tally.
+        return { attemptId, ...await dispatchFailureRecovery(
+            attemptId, dispatch.dispatch_token
+        ) };
+    }
+
     async function recoverWithLease(attemptId) {
         const claimToken = randomUUID();
 
@@ -203,6 +238,10 @@ function createManualReconcileAutoRecovery({
         let recoveryConfirmed = false;
 
         try {
+            if (process.env.MANUAL_RECONCILE_AUTO_FAILURE_DISPATCH_ENABLED === "true") {
+                const existing = await resumeExistingDispatch(attemptId);
+                if (existing) return existing;
+            }
             acquired = await rpcBoolean(
                 "claim_manual_reconcile_auto_recovery_v1",
                 {
@@ -277,57 +316,13 @@ function createManualReconcileAutoRecovery({
         return {
             attemptId,
             recovered: false,
-            reason: "FAILURE_DISPATCH_DISABLED"
+            reason: "FAILURE_DISPATCH_DISABLED",
+            action: "Enable failure dispatch only after API activation, RPC contracts and original coordinator exit evidence have been verified."
         };
     }
 
-    const endpoint =
-        process.env.MANUAL_RECONCILE_RECOVERY_INTERNAL_URL;
-
-    const token =
-        process.env.MANUAL_RECONCILE_INTERNAL_RECOVERY_TOKEN;
-
-    if (
-        typeof endpoint !== "string" ||
-        typeof token !== "string" ||
-        token.length < 32
-    ) {
-        return {
-            attemptId,
-            recovered: false,
-            reason: "FAILURE_DISPATCH_CONFIG_MISSING"
-        };
-    }
-
-    // Validate endpoint before taking permanent claim.
-    let url;
-
-    try {
-        url = new URL(endpoint);
-    } catch (_) {
-        return {
-            attemptId,
-            recovered: false,
-            reason: "FAILURE_DISPATCH_URL_INVALID"
-        };
-    }
-
-    if (
-        url.protocol !== "http:" ||
-        url.hostname !== "127.0.0.1" ||
-        !url.port ||
-        url.pathname !== "/reconcileRecovery" ||
-        url.search ||
-        url.hash ||
-        url.username ||
-        url.password
-    ) {
-        return {
-            attemptId,
-            recovered: false,
-            reason: "FAILURE_DISPATCH_URL_INVALID"
-        };
-    }
+    // Reject bad configuration before creating a durable dispatch.
+    failureDispatchConfig();
 
     const stillOwned = await rpcBoolean(
         "renew_manual_reconcile_auto_recovery_v1",
@@ -361,6 +356,8 @@ function createManualReconcileAutoRecovery({
     );
 
     if (!claimed) {
+        // A confirmed false claim created no dispatch owned by this worker.
+        recoveryStarted = false;
         return {
             attemptId,
             recovered: false,
@@ -422,7 +419,7 @@ function createManualReconcileAutoRecovery({
         return {
             attemptId,
             recovered: false,
-            reason: "FAILURE_OUTCOME_REQUIRES_INSPECTION"
+            ...outcome
         };
 
     } catch (_) {
@@ -542,39 +539,22 @@ recoveryConfirmed =
             return;
         }
 
-        const staleResumeCutoff =
-            new Date(Date.now() - 150000).toISOString();
-
-        const incomplete = await supabase
-            .from("manual_reconcile_failure_dispatches")
+        // Visit every unfinished dispatch, including crashes before API
+        // admission, completion recording or final confirmation. Keyset
+        // pagination prevents old RUNNING dispatches starving closed ones.
+        let query = supabase.from("manual_reconcile_failure_dispatches")
             .select("attempt_id,dispatch_token")
-            .eq("dispatch_state", "OUTCOME_UNCERTAIN")
-            .eq("execution_result", "INCOMPLETE")
-            .not("execution_finished_at", "is", null)
-            .order("execution_finished_at", { ascending: true })
-            .limit(batchSize);
-
-        const stale = await supabase
-            .from("manual_reconcile_failure_dispatches")
-            .select("attempt_id,dispatch_token")
-            .eq("dispatch_state", "RESUME_CLAIMED")
-            .is("execution_finished_at", null)
-            .is("execution_result", null)
-            .lt("resume_claimed_at", staleResumeCutoff)
-            .order("resume_claimed_at", { ascending: true })
-            .limit(batchSize);
-
-        const dispatchError = incomplete.error || stale.error;
-        const dispatches = [
-            ...(incomplete.data || []),
-            ...(stale.data || [])
-        ];
-
+            .in("dispatch_state", [
+                "CLAIMED", "DISPATCH_STARTED", "OUTCOME_UNCERTAIN", "RESUME_CLAIMED"
+            ])
+            .order("attempt_id", { ascending: true }).limit(batchSize);
+        if (continuationCursor) query = query.gt("attempt_id", continuationCursor);
+        const { data: dispatches, error: dispatchError } = await query;
         if (dispatchError || !Array.isArray(dispatches)) {
-            throw new Error(
-                "MANUAL_FAILURE_CONTINUATION_SCAN_FAILED"
-            );
+            throw new Error("MANUAL_FAILURE_CONTINUATION_SCAN_FAILED");
         }
+        continuationCursor = dispatches.length === batchSize
+            ? dispatches[dispatches.length - 1].attempt_id : null;
 
         for (const dispatch of dispatches) {
             if (stopped) break;
@@ -652,8 +632,7 @@ recoveryConfirmed =
                     evidence.redis_cleanup_confirmed !== true ||
                     !evidence.redis_stage_receipt ||
                     !evidence.redis_stage_confirmed_at ||
-                    !evidence.terminal_closed_at ||
-                    evidence.redis_unblock_confirmed_at !== null
+                    !evidence.terminal_closed_at
                 ) {
                     continue;
                 }
@@ -670,7 +649,8 @@ recoveryConfirmed =
                     recovered: outcome.recovered === true,
                     reason:
                         outcome.reason ||
-                        "FAILURE_CONTINUATION_UNCERTAIN"
+                        "FAILURE_CONTINUATION_UNCERTAIN",
+                    action: outcome.action
                 };
 
                 results.push(item);

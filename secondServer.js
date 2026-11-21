@@ -40005,7 +40005,11 @@ app.post("/reconcileRecovery", async (req, res) => {
                 recovery_required: true,
                 attempt_id: attemptId,
                 recovery_state:
-                    result?.reason || "UNKNOWN"
+                    result?.reason || "UNKNOWN",
+                operator_action:
+                    /COORDINATOR.*RECEIPT|ORIGINAL_COORDINATOR/.test(result?.reason || "")
+                        ? "Verify the original coordinator durable exit receipt. A restart or recovery-worker assertion cannot replace it."
+                        : "Inspect original execution, remote fence and Redis ownership before retrying; do not replay Tally work or clear locks."
             });
         }
 

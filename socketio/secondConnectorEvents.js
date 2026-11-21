@@ -8,11 +8,11 @@ const {
 
 const {
     claimConnectorSocketOwnership,
+    inspectConnectorRecoveryState,
     updateConnectorHealthIfSocketOwner,
     getConnectorWatchdogStatus,
     updateConnectorTallyQueueStatus
 } = require("./connectorHealthStore");
-
 // 060926 start
 const crypto = require("crypto");
 // 060926 end
@@ -679,7 +679,73 @@ for (const connectorId of connectorIds) {
         );
         break;
     }
+const recoveryState = await inspectConnectorRecoveryState(
+    connectorId
+).catch(error => {
+    console.error(
+        "[CONNECTOR IDENTIFY] Recovery inspection failed",
+        {
+            connector_id: connectorId,
+            error: error.message
+        }
+    );
+    return null;
+});
+if (recoveryState?.quarantined === true && socket.connected) {
+    // Candidate only: DB-mapped identity, NOT registered ownership.
+    // Never use this mapping to authorize quarantine release.
+    if (!socket.reconcileRecoveryCandidateIds) {
+        socket.reconcileRecoveryCandidateIds = new Set();
+    }
 
+    socket.reconcileRecoveryCandidateIds.add(
+        String(connectorId)
+    );
+
+    // Read-only probe. A new process cannot attest
+    // to an old execution.
+    const {
+        sendManualReconcileRecoveryIdentityRequest
+    } = require(
+        "./sendManualReconcileRecoveryIdentityRequest"
+    );
+
+    sendManualReconcileRecoveryIdentityRequest({
+        connectorId: String(connectorId),
+        expectedSocketId: socket.id,
+        timeoutMs: 10000
+    }).then(result => {
+        console.log(
+            "[RECONCILE RECOVERY] PROCESS IDENTITY OBSERVED",
+            {
+                connector_id: connectorId,
+                socket_id: socket.id,
+                identity: result.identity,
+                settlementEligible: false
+            }
+        );
+    }).catch(error => {
+        console.warn(
+            "[RECONCILE RECOVERY] IDENTITY PROBE FAILED",
+            {
+                connector_id: connectorId,
+                socket_id: socket.id,
+                error: error.message
+            }
+        );
+    });
+}
+if (!recoveryState || recoveryState.quarantined) {
+    socket.emit("connector:registration:status", {
+        connector_id: connectorId,
+        registered: false,
+        reason: recoveryState
+            ? "RECOVERY_VERIFICATION_REQUIRED"
+            : "RECOVERY_INSPECTION_FAILED"
+    });
+
+    continue;
+}
     const claimed = await claimConnectorSocketOwnership(
         connectorId,
         socket.id
@@ -1080,6 +1146,30 @@ socket.emit("connector:registration:status", {
             }
 
             const previousConnectorId = socket.connectorId;
+            const recoveryState = await inspectConnectorRecoveryState(
+    connectorId
+).catch(error => {
+    console.error(
+        "[CONNECTOR REGISTER] Recovery inspection failed",
+        {
+            connector_id: connectorId,
+            error: error.message
+        }
+    );
+    return null;
+});
+
+if (!recoveryState || recoveryState.quarantined) {
+    socket.emit("connector:registration:status", {
+        connector_id: connectorId,
+        registered: false,
+        reason: recoveryState
+            ? "RECOVERY_VERIFICATION_REQUIRED"
+            : "RECOVERY_INSPECTION_FAILED"
+    });
+
+    return;
+}
 
             const claimed = await claimConnectorSocketOwnership(
                 connectorId,
@@ -1127,18 +1217,25 @@ socket.emit("connector:registration:status", {
                 return;
             }
 
-            if (!claimed.claimed) {
-                console.error(
-                    "âŒ CONNECTOR REGISTRATION REJECTED: ownership unavailable",
-                    {
-                        socket_id: socket.id,
-connector_id: connectorId,
-current_owner: claimed.health?.socket_id || null,
-reason: claimed.reason || "UNSPECIFIED"
-                    }
-                );
-                return;
-            }
+           if (!claimed.claimed) {
+    console.error(
+        "CONNECTOR REGISTRATION REJECTED: ownership unavailable",
+        {
+            socket_id: socket.id,
+            connector_id: connectorId,
+            current_owner: claimed.health?.socket_id || null,
+            reason: claimed.reason || "UNSPECIFIED"
+        }
+    );
+
+    socket.emit("connector:registration:status", {
+        connector_id: connectorId,
+        registered: false,
+        reason: claimed.reason || "OWNERSHIP_UNAVAILABLE"
+    });
+
+    return;
+}
 
             
 const registered = registry.register(
@@ -1331,6 +1428,11 @@ socket.connectorId = connectorId;
                 connector_id: connectorId,
                 company_code: data.company_code
             });
+            socket.emit("connector:registration:status", {
+    connector_id: connectorId,
+    registered: true,
+    socket_id: socket.id
+});
         });
 
 

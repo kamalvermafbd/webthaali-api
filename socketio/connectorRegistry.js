@@ -428,7 +428,17 @@ function getPendingConnectors() {
 
 }
 // 060926 end
+// Recovery-only candidates: never treated as registered owners.
+function getPendingSocketsForRecovery(connectorId) {
+    if (typeof connectorId !== "string" || !connectorId.trim()) {
+        return [];
+    }
 
+    return [...pendingConnectors].filter(socket =>
+        socket?.connected === true &&
+        socket.reconcileRecoveryCandidateIds?.has(connectorId) === true
+    );
+}
 function getPendingByGuid(companyGuid) {
 
     if (!companyGuid) {
@@ -552,6 +562,7 @@ module.exports = {
     getCurrentPendingConnector,
     getPendingConnectors,
     getPendingByGuid,
+    getPendingSocketsForRecovery,
     remove,
     isOnline,
     list

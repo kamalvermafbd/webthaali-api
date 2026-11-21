@@ -25,6 +25,8 @@ const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 const RPC = {
     admission: "start_manual_reconcile_claimed_v1",
+    prepareAcquisition: "prepare_manual_reconcile_acquisition_v1",
+    confirmAcquisition: "confirm_manual_reconcile_acquisition_v1",
     bind: "bind_manual_reconcile_execution_v1",
     prepare: "prepare_manual_reconcile_fetch_v2",
     dispatch: "mark_manual_reconcile_fetch_dispatch_v2",
@@ -508,6 +510,25 @@ async function withHarness(mode, body) {
             },
 
             async rpc(name, args) {
+                if (name === "record_manual_reconcile_coordinator_exit_receipt_v1") {
+                    checkExecution(args);
+                    assert.equal(args.p_server_instance_id, state.binding.p_server_instance_id);
+                    assert.equal(args.p_connector_id, state.binding.p_connector_id);
+                    assert.equal(args.p_socket_id, state.binding.p_socket_id);
+                    assert.equal(args.p_owner_token, state.binding.p_owner_token);
+                    assert.equal(args.p_coordinator_exited, true);
+                    assert.equal(args.p_admission_sealed, true);
+                    assert.equal(args.p_pending_work, 0);
+                    assert.equal(args.p_callback_started, true);
+                    assert.equal(args.p_callback_settled, true);
+                    assert.equal(args.p_late_work_detected, false);
+                    assert.equal(args.p_outcome, "LOCALLY_SETTLED_UNVERIFIED");
+                    assert.equal(state.closed, false);
+                    events.push(name);
+                    state.exitReceipt = args;
+                    return row({ recorded: true,
+                        reason: "RECEIPT_RECORDED_OR_ALREADY_PRESENT" });
+                }
                 if (!Object.values(RPC).includes(name)) {
                     return fail(
                         "Unexpected RPC: " + name
@@ -540,8 +561,80 @@ async function withHarness(mode, body) {
                         reservation_token: TOKEN
                     });
                 }
+if (name === RPC.prepareAcquisition) {
+    assert.ok(state.admission, "admission must precede preparation");
+    assert.equal(state.lock, null, "prepare must precede Redis lock");
 
+    assert.equal(
+        args.p_attempt_id,
+        state.admission.p_attempt_id
+    );
+    assert.equal(args.p_operation_token, TOKEN);
+    assert.match(args.p_execution_id, UUID);
+    assert.match(args.p_server_instance_id, UUID);
+    assert.equal(
+        args.p_connector_id,
+        "local-synthetic-connector"
+    );
+    assert.equal(args.p_socket_id, socket.id);
+    assert.match(args.p_owner_token, UUID);
+
+    state.acquisitionPreparation = args;
+
+    return row({
+        prepared: true,
+        reason: "ACQUISITION_PREPARED"
+    });
+}
+
+if (name === RPC.confirmAcquisition) {
+    assert.ok(
+        state.acquisitionPreparation,
+        "preparation must precede confirmation"
+    );
+
+    const prepared = state.acquisitionPreparation;
+
+    for (const key of [
+        "p_attempt_id",
+        "p_operation_token",
+        "p_execution_id",
+        "p_server_instance_id",
+        "p_connector_id",
+        "p_socket_id",
+        "p_owner_token"
+    ]) {
+        assert.equal(
+            args[key],
+            prepared[key],
+            `acquisition identity mismatch: ${key}`
+        );
+    }
+
+    requireLock(
+        args.p_connector_id,
+        args.p_socket_id,
+        args.p_owner_token
+    );
+
+    assert.equal(
+        state.binding,
+        null,
+        "confirmation must precede execution binding"
+    );
+
+    state.acquisitionConfirmation = args;
+
+    return row({
+        confirmed: true,
+        reason: "ACQUISITION_CONFIRMED"
+    });
+}
                 if (name === RPC.bind) {
+                    assert.ok(
+                        state.acquisitionConfirmation,
+                        "acquisition confirmation must precede execution binding"
+                    );
                     assert.equal(
                         args.p_attempt_id,
                         state.admission.p_attempt_id
@@ -1121,6 +1214,13 @@ async function withHarness(mode, body) {
             }
         });
 
+        if (mode === "success") {
+            assert.equal(state.exitReceipt, undefined,
+                "success release must not produce a failure exit receipt");
+        } else {
+            assert.ok(state.exitReceipt,
+                "quiescent failure must persist its original identity receipt");
+        }
         assert.deepEqual(
             violations,
             [],

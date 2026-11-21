@@ -1830,7 +1830,71 @@ end
     };
 }
 
+// Read-only, atomic recovery inspection.
+// This does NOT authorize remote settlement.
+async function inspectConnectorRecoveryState(connectorId) {
+    const id = normalizeConnectorId(connectorId);
+    await ensureConnected();
 
+    const raw = await redis.eval(
+        `
+        local quarantine = redis.call("GET", KEYS[1])
+        local marker = redis.call("GET", KEYS[2])
+        local lockPresent = redis.call("EXISTS", KEYS[3])
+        local health = redis.call("GET", KEYS[4])
+
+        return {
+            quarantine or "",
+            marker or "",
+            tostring(lockPresent),
+            health or ""
+        }
+        `,
+        4,
+        getConnectorQuarantineKey(id),
+        getConnectorActiveOperationKey(id),
+        `billey:connector:operation-lock:${id}`,
+        getHealthKey(id)
+    );
+
+    let quarantine = null;
+    let health = null;
+
+    try {
+        quarantine = raw[0] ? JSON.parse(raw[0]) : null;
+        health = raw[3] ? JSON.parse(raw[3]) : null;
+    } catch (error) {
+        const failure = new Error(
+            "CONNECTOR_RECOVERY_STATE_MALFORMED"
+        );
+        failure.cause = error;
+        throw failure;
+    }
+
+    const oldSocketId =
+        String(quarantine?.socket_id || "").trim();
+
+    const ownerToken =
+        String(quarantine?.owner_token || "").trim();
+
+    const hasActiveMarker = raw[1] !== "";
+    const markerMatchesOwner =
+        Boolean(ownerToken && raw[1] === ownerToken);
+
+    const lockPresent = raw[2] === "1";
+
+    return Object.freeze({
+        connectorId: id,
+        quarantined: quarantine !== null,
+        oldSocketId: oldSocketId || null,
+        hasActiveMarker,
+        markerMatchesOwner,
+        lockPresent,
+        healthSocketId: health?.socket_id || null,
+        remoteSettlementVerified: false,
+        recoveryAuthorized: false
+    });
+}
 async function recoverConnectorAfterReconnect({
     connectorId,
     oldSocketId,
@@ -2080,12 +2144,13 @@ module.exports = {
     renewSocketOperationLock,
     getSocketOperationStatus,
     acquireConnectorAndSocketLock,
-       releaseConnectorAndSocketLock,
+    releaseConnectorAndSocketLock,
     releaseManualReconcileLockWithReceipt,
     readManualReconcileReleaseReceipt,
     renewConnectorAndSocketLock,
        quarantineConnectorAndSocket,
     clearVerifiedConnectorRecovery,
+    inspectConnectorRecoveryState,
     recoverConnectorAfterReconnect,
     acquireHttpBatchExecutionGuard,
     updateConnectorTallyQueueStatus,

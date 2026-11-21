@@ -25,6 +25,8 @@ function makeHarness(options = {}) {
     let checkpoint = null;
     let finalization = null;
     let voucherFetches = 0;
+    const ledgerOperations = [];
+const fetchIdsByLedger = new Map();
 
     const initial = options.initialMismatch ?? ["ledger-1"];
     const vouchers = options.voucherGuids ?? [];
@@ -185,41 +187,120 @@ function makeHarness(options = {}) {
             }
         },
 
-        fetchLedgerOpeningDurable: {
-            async fetchLedgerOpeningDurable(args) {
-                events.push("fetch");
+       fetchLedgerOpeningDurable: {
+    async fetchLedgerOpeningDurable(args) {
+        events.push("fetch");
 
-                assert.equal(locked, true);
-                assert.equal(args.operationOrdinal, 1);
+        assert.equal(locked, true);
 
-                if (options.fetchFailure) {
-                    throw Error("FETCH_UNCERTAIN");
-                }
+        const expectedOrdinal = ledgerOperations.length + 1;
 
-                return {
-                    guid: args.ledgerGuid,
-                    fetchOperationId:
-                        "55555555-5555-4555-8555-555555555555",
-                    openingBalance: "100.00",
-                    openingBalanceType: "CR"
-                };
-            }
-        },
+        assert.equal(
+            args.operationOrdinal,
+            expectedOrdinal
+        );
 
-        applyLedgerOpeningDurable: {
-            async applyLedgerOpeningDurable(args) {
-                events.push("apply");
+        assert.equal(args.operationOrdinal % 2, 1);
+        assert.equal(args.operationToken, TOKEN);
+        assert.ok(args.attemptId);
+        assert.ok(args.executionId);
 
-                assert.equal(locked, true);
-                assert.equal(args.operationOrdinal, 2);
+        const fetchOperationId =
+            `55555555-5555-4555-8555-${String(
+                expectedOrdinal
+            ).padStart(12, "0")}`;
 
-                if (options.applyFailure) {
-                    throw Error("APPLY_UNCERTAIN");
-                }
+        assert.equal(
+            fetchIdsByLedger.has(args.ledgerGuid),
+            false,
+            "duplicate ledger fetch"
+        );
 
-                return { result: "UPDATED" };
-            }
-        },
+        fetchIdsByLedger.set(
+            args.ledgerGuid,
+            fetchOperationId
+        );
+
+        ledgerOperations.push({
+            type: "TALLY_FETCH",
+            ledgerGuid: args.ledgerGuid,
+            ordinal: args.operationOrdinal,
+            operationId: fetchOperationId,
+            attemptId: args.attemptId,
+            executionId: args.executionId
+        });
+
+        if (options.fetchFailure) {
+            throw Error("FETCH_UNCERTAIN");
+        }
+
+        return {
+            guid: args.ledgerGuid,
+            fetchOperationId,
+            openingBalance: "100.00",
+            openingBalanceType: "CR"
+        };
+    }
+},
+     applyLedgerOpeningDurable: {
+    async applyLedgerOpeningDurable(args) {
+        events.push("apply");
+
+        assert.equal(locked, true);
+
+        const expectedOrdinal = ledgerOperations.length + 1;
+
+        assert.equal(
+            args.operationOrdinal,
+            expectedOrdinal
+        );
+
+        assert.equal(args.operationOrdinal % 2, 0);
+        assert.equal(args.operationToken, TOKEN);
+
+        const precedingFetch =
+            ledgerOperations[ledgerOperations.length - 1];
+
+        assert.ok(precedingFetch);
+        assert.equal(precedingFetch.type, "TALLY_FETCH");
+
+        assert.equal(
+            args.fetchOperationId,
+            precedingFetch.operationId
+        );
+
+        assert.equal(
+            args.attemptId,
+            precedingFetch.attemptId
+        );
+
+        assert.equal(
+            args.executionId,
+            precedingFetch.executionId
+        );
+
+        const applyOperationId =
+            `66666666-6666-4666-8666-${String(
+                expectedOrdinal
+            ).padStart(12, "0")}`;
+
+        ledgerOperations.push({
+            type: "LEDGER_APPLY",
+            ledgerGuid: precedingFetch.ledgerGuid,
+            ordinal: args.operationOrdinal,
+            operationId: applyOperationId,
+            fetchOperationId: args.fetchOperationId,
+            attemptId: args.attemptId,
+            executionId: args.executionId
+        });
+
+        if (options.applyFailure) {
+            throw Error("APPLY_UNCERTAIN");
+        }
+
+        return { result: "UPDATED" };
+    }
+},
 
         fetchSqlVoucherEntries: {
             async fetchSqlVoucherEntries(args) {
@@ -337,7 +418,43 @@ function makeHarness(options = {}) {
                 };
             }
 
-            assert.equal(locked, false);
+            if (
+    name === "prepare_manual_reconcile_acquisition_v1"
+) {
+    assert.equal(locked, false);
+
+    assert.equal(args.p_operation_token, TOKEN);
+    assert.equal(args.p_connector_id, "connector-1");
+
+    return {
+        data: {
+            prepared: true,
+            reason: "ACQUISITION_PREPARED"
+        },
+        error: null
+    };
+}
+
+if (
+    name === "confirm_manual_reconcile_acquisition_v1"
+) {
+    assert.equal(locked, true);
+
+    assert.equal(args.p_operation_token, TOKEN);
+    assert.equal(args.p_connector_id, "connector-1");
+    assert.equal(args.p_socket_id, identity.socketId);
+    assert.equal(args.p_owner_token, OWNER);
+
+    return {
+        data: {
+            confirmed: true,
+            reason: "ACQUISITION_CONFIRMED"
+        },
+        error: null
+    };
+}
+
+assert.equal(locked, false);
 
             if (
                 name ===
@@ -468,6 +585,10 @@ function makeHarness(options = {}) {
 
             get voucherFetches() {
                 return voucherFetches;
+            },
+
+            get ledgerOperations() {
+                return ledgerOperations;
             }
         },
 
@@ -978,6 +1099,121 @@ test(
         assert.deepEqual(
             h.state.events,
             []
+        );
+    }
+);
+test(
+    "F1: two ledgers use four sequential unique operations before checkpoint",
+    async () => {
+        const h = makeHarness({
+            initialMismatch: ["ledger-A", "ledger-B"],
+            remainingMismatch: [],
+            voucherGuids: []
+        });
+
+        const result = await h.run();
+
+        assert.equal(result.success, true);
+        assert.equal(result.ledgers.length, 2);
+
+        const operations = h.state.ledgerOperations;
+
+        assert.equal(operations.length, 4);
+
+        assert.deepEqual(
+            operations.map(op => ({
+                type: op.type,
+                ledgerGuid: op.ledgerGuid,
+                ordinal: op.ordinal
+            })),
+            [
+                {
+                    type: "TALLY_FETCH",
+                    ledgerGuid: "ledger-A",
+                    ordinal: 1
+                },
+                {
+                    type: "LEDGER_APPLY",
+                    ledgerGuid: "ledger-A",
+                    ordinal: 2
+                },
+                {
+                    type: "TALLY_FETCH",
+                    ledgerGuid: "ledger-B",
+                    ordinal: 3
+                },
+                {
+                    type: "LEDGER_APPLY",
+                    ledgerGuid: "ledger-B",
+                    ordinal: 4
+                }
+            ]
+        );
+
+        assert.equal(
+            new Set(operations.map(op => op.ordinal)).size,
+            4
+        );
+
+        assert.equal(
+            new Set(operations.map(op => op.operationId)).size,
+            4
+        );
+
+        assert.equal(
+            new Set(operations.map(op => op.attemptId)).size,
+            1
+        );
+
+        assert.equal(
+            new Set(operations.map(op => op.executionId)).size,
+            1
+        );
+
+        for (const op of operations) {
+            assert.ok(op.attemptId);
+            assert.ok(op.executionId);
+        }
+
+        const events = h.state.events;
+
+        const operationEvents = events.filter(
+            event => event === "fetch" || event === "apply"
+        );
+
+        assert.deepEqual(operationEvents, [
+            "fetch",
+            "apply",
+            "fetch",
+            "apply"
+        ]);
+
+        const checkpointIndex = events.indexOf(
+            "record_manual_reconcile_pre_release_checkpoint_v2"
+        );
+
+        assert.ok(checkpointIndex >= 0);
+
+        const lastApplyIndex = events.lastIndexOf("apply");
+
+        assert.ok(
+            checkpointIndex > lastApplyIndex,
+            "checkpoint must follow both ledger applies"
+        );
+
+        assert.ok(
+            events.indexOf("released") > checkpointIndex,
+            "connector release must follow checkpoint"
+        );
+
+        assert.deepEqual(
+            h.state.checkpoint.p_remaining_mismatch_ledger_guids,
+            []
+        );
+
+        assert.equal(
+            result.requiresTransactionInvestigation,
+            false
         );
     }
 );

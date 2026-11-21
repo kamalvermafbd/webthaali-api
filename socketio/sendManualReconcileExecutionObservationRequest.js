@@ -146,7 +146,7 @@ function sendManualReconcileExecutionObservationRequest({
                 !Number.isSafeInteger(o.running) ||
                 o.running !== 0 ||
                 !Number.isSafeInteger(o.settled) ||
-                o.settled !== 1 ||
+                o.settled < 1 ||
                 o.locallyDrained !== true ||
                 o.settlementEligible !== false
             ) {
@@ -156,7 +156,56 @@ function sendManualReconcileExecutionObservationRequest({
                 return;
             }
 
-                      finish(null, {
+                      const settledOperations = o.settledOperations;
+
+            if (
+                !Array.isArray(settledOperations) ||
+                settledOperations.length !== o.settled ||
+                settledOperations.length === 0
+            ) {
+                finish(new Error("RECONCILE_OBSERVATION_MANIFEST_INVALID"));
+                return;
+            }
+
+            const requestIds = new Set();
+            const operationIds = new Set();
+            const ordinals = new Set();
+
+            for (const entry of settledOperations) {
+                if (
+                    !entry ||
+                    typeof entry !== "object" ||
+                    Array.isArray(entry) ||
+                    !isUuid(entry.requestId) ||
+                    !isUuid(entry.attemptId) ||
+                    !isUuid(entry.executionId) ||
+                    !isUuid(entry.operationId) ||
+                    entry.attemptId.toLowerCase() !== attemptId.toLowerCase() ||
+                    entry.executionId.toLowerCase() !== executionId.toLowerCase() ||
+                    !Number.isSafeInteger(entry.operationOrdinal) ||
+                    entry.operationOrdinal <= 0
+                ) {
+                    finish(new Error("RECONCILE_OBSERVATION_MANIFEST_INVALID"));
+                    return;
+                }
+
+                const requestKey = entry.requestId.toLowerCase();
+                const operationKey = entry.operationId.toLowerCase();
+
+                if (
+                    requestIds.has(requestKey) ||
+                    operationIds.has(operationKey) ||
+                    ordinals.has(entry.operationOrdinal)
+                ) {
+                    finish(new Error("RECONCILE_OBSERVATION_MANIFEST_DUPLICATE"));
+                    return;
+                }
+
+                requestIds.add(requestKey);
+                operationIds.add(operationKey);
+                ordinals.add(entry.operationOrdinal);
+            }
+            finish(null, {
                 requestId,
                 attemptId,
                 executionId,
@@ -172,7 +221,14 @@ function sendManualReconcileExecutionObservationRequest({
                     executionKnown: true,
                     pending: 0,
                     running: 0,
-                    settled: 1,
+                    settled: o.settled,
+                    settledOperations: settledOperations.map(entry => ({
+                        requestId: entry.requestId,
+                        attemptId: entry.attemptId,
+                        executionId: entry.executionId,
+                        operationId: entry.operationId,
+                        operationOrdinal: entry.operationOrdinal
+                    })),
                     locallyDrained: true,
                     settlementEligible: false
                 },

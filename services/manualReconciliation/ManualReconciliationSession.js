@@ -229,11 +229,62 @@ async function runManualReconciliationSession({
 
                 await lockIdentity.assertOwnership();
 
-                if (signal.aborted) {
-                    throw new Error("RECONCILE_SESSION_ABORTED");
-                }
+if (signal.aborted) {
+    throw new Error("RECONCILE_SESSION_ABORTED");
+}
 
-                await bindManualReconcileExecution({
+// =====================================================
+// MANUAL RECONCILE — DURABLE ACQUISITION CONFIRMATION
+// =====================================================
+// Redis ownership has been verified immediately before
+// this call. SQL must confirm the same prepared identity
+// before execution binding is allowed.
+
+const acquisitionConfirmation = await supabase.rpc(
+    "confirm_manual_reconcile_acquisition_v1",
+    {
+        p_attempt_id: attemptId,
+        p_operation_token: reservationToken,
+        p_execution_id: executionId,
+        p_server_instance_id: serverInstanceId,
+        p_connector_id: connectorId,
+        p_socket_id: lockIdentity.socketId,
+        p_owner_token: lockIdentity.ownerToken
+    }
+);
+
+if (acquisitionConfirmation?.error) {
+    throw acquisitionConfirmation.error;
+}
+
+const acquisitionResult = Array.isArray(
+    acquisitionConfirmation?.data
+)
+    ? acquisitionConfirmation.data.length === 1
+        ? acquisitionConfirmation.data[0]
+        : null
+    : acquisitionConfirmation?.data;
+
+if (
+    acquisitionResult?.confirmed !== true ||
+    ![
+        "ACQUISITION_CONFIRMED",
+        "ALREADY_ACQUIRED"
+    ].includes(acquisitionResult.reason)
+) {
+    throw new Error(
+        "RECONCILE_ACQUISITION_CONFIRMATION_NOT_VERIFIED"
+    );
+}
+
+// Ownership may have changed during the SQL RPC.
+await lockIdentity.assertOwnership();
+
+if (signal.aborted) {
+    throw new Error("RECONCILE_SESSION_ABORTED");
+}
+
+await bindManualReconcileExecution({
                     supabase,
                     attemptId,
                     operationToken: reservationToken,
@@ -658,79 +709,163 @@ if (
                     }
                 };
             },
-                        {
-                exposeLockIdentity: true,
-                releaseEvidence: true,
+                       {
+    exposeLockIdentity: true,
+    releaseEvidence: true,
 
-                completionIdentity: {
+    // Manual-only durable acquisition preparation.
+    // This callback must run BEFORE the Redis acquisition request.
+    prepareManualAcquisition: async ({
+        connectorId: acquisitionConnectorId,
+        socketId,
+        ownerToken
+    }) => {
+        if (
+            acquisitionConnectorId !== connectorId ||
+            typeof socketId !== "string" ||
+            !socketId.trim() ||
+            typeof ownerToken !== "string" ||
+            !UUID.test(ownerToken)
+        ) {
+            throw new Error(
+                "RECONCILE_ACQUISITION_IDENTITY_INVALID"
+            );
+        }
+
+        const response = await supabase.rpc(
+            "prepare_manual_reconcile_acquisition_v1",
+            {
+                p_attempt_id: attemptId,
+                p_operation_token: reservationToken,
+                p_execution_id: executionId,
+                p_server_instance_id: serverInstanceId,
+                p_connector_id: connectorId,
+                p_socket_id: socketId,
+                p_owner_token: ownerToken
+            }
+        );
+
+        if (response?.error) {
+            throw response.error;
+        }
+
+        const result = Array.isArray(response?.data)
+            ? response.data.length === 1
+                ? response.data[0]
+                : null
+            : response?.data;
+
+        if (
+            result?.prepared !== true ||
+            result?.reason !== "ACQUISITION_PREPARED"
+        ) {
+            throw new Error(
+                "RECONCILE_ACQUISITION_PREPARATION_NOT_CONFIRMED"
+            );
+        }
+
+        return true;
+    },
+
+    completionIdentity: {
                     attemptId,
                     executionId,
                     serverInstanceId
                 },
 
-                manualCoordinatorReceiptWriter: async (receipt) => {
-                                     if (
-                        !receipt ||
-                        receipt.attemptId !== attemptId ||
-                        receipt.executionId !== executionId ||
-                        receipt.serverInstanceId !== serverInstanceId ||
-                        receipt.connectorId !== connectorId ||
-                        receipt.coordinatorExited !== true ||
-                        receipt.admissionSealed !== true ||
-                        receipt.lateWorkDetected !== false ||
-                        receipt.pendingWork !== 0 ||
-                        receipt.locallySettled !== true ||
-                        receipt.outcome !== "LOCALLY_SETTLED_UNVERIFIED" ||
-                        receipt.callbackStarted !== true ||
-                        receipt.callbackSettled !== true ||
-                        typeof receipt.socketId !== "string" ||
-                        !receipt.socketId ||
-                        !UUID.test(receipt.ownerToken || "")
-                    ) {
-                        throw new Error(
-                            "RECONCILE_COORDINATOR_RECEIPT_INVALID"
-                        );
-                    }
-                    const response = await supabase.rpc(
-                        "record_manual_reconcile_coordinator_exit_receipt_v1",
-                        {
-                            p_attempt_id: attemptId,
-                            p_operation_token: reservationToken,
-                            p_execution_id: executionId,
-                            p_server_instance_id: serverInstanceId,
-                            p_connector_id: connectorId,
-                            p_socket_id: receipt.socketId,
-                            p_owner_token: receipt.ownerToken,
-                            p_coordinator_exited: true,
-                            p_admission_sealed: true,
-                            p_pending_work: 0,
-                            p_callback_started: receipt.callbackStarted,
-                            p_callback_settled: receipt.callbackSettled,
-                            p_late_work_detected: false,
-                            p_outcome: "LOCALLY_SETTLED_UNVERIFIED"
-                        }
-                    );
+               manualCoordinatorReceiptWriter: async (receipt) => {
+    const unsafe =
+        receipt?.lateWorkDetected === true &&
+        receipt?.outcome === "LATE_WORK_UNVERIFIED";
 
-                    if (response?.error) {
-                        throw response.error;
-                    }
+    const safe =
+        receipt?.lateWorkDetected === false &&
+        receipt?.outcome === "LOCALLY_SETTLED_UNVERIFIED" &&
+        receipt?.coordinatorExited === true &&
+        receipt?.admissionSealed === true &&
+        receipt?.pendingWork === 0 &&
+        receipt?.locallySettled === true &&
+        receipt?.callbackStarted === true &&
+        receipt?.callbackSettled === true;
 
-                    const result = Array.isArray(response?.data)
-                        ? response.data.length === 1
-                            ? response.data[0]
-                            : null
-                        : response?.data;
+    if (
+        !receipt ||
+        receipt.attemptId !== attemptId ||
+        receipt.executionId !== executionId ||
+        receipt.serverInstanceId !== serverInstanceId ||
+        receipt.connectorId !== connectorId ||
+        typeof receipt.socketId !== "string" ||
+        !receipt.socketId ||
+        !UUID.test(receipt.ownerToken || "") ||
+        typeof receipt.coordinatorExited !== "boolean" ||
+        typeof receipt.admissionSealed !== "boolean" ||
+        !Number.isSafeInteger(receipt.pendingWork) ||
+        receipt.pendingWork < 0 ||
+        typeof receipt.callbackStarted !== "boolean" ||
+        typeof receipt.callbackSettled !== "boolean" ||
+        (!safe && !unsafe)
+    ) {
+        throw new Error(
+            "RECONCILE_COORDINATOR_RECEIPT_INVALID"
+        );
+    }
 
-                    if (
-                        result?.recorded !== true ||
-                        result.reason !==
-                            "RECEIPT_RECORDED_OR_ALREADY_PRESENT"
-                    ) {
-                        throw new Error(
-                            "RECONCILE_COORDINATOR_RECEIPT_NOT_CONFIRMED"
-                        );
-                    }
-                }
+    const response = await supabase.rpc(
+        "record_manual_reconcile_coordinator_exit_receipt_v1",
+        {
+            p_attempt_id: attemptId,
+            p_operation_token: reservationToken,
+            p_execution_id: executionId,
+            p_server_instance_id: serverInstanceId,
+            p_connector_id: connectorId,
+            p_socket_id: receipt.socketId,
+            p_owner_token: receipt.ownerToken,
+            p_coordinator_exited: receipt.coordinatorExited,
+            p_admission_sealed: receipt.admissionSealed,
+            p_pending_work: receipt.pendingWork,
+            p_callback_started: receipt.callbackStarted,
+            p_callback_settled: receipt.callbackSettled,
+            p_late_work_detected: receipt.lateWorkDetected,
+            p_outcome: receipt.outcome
+        }
+    );
+
+    if (response?.error) {
+        throw response.error;
+    }
+
+    const result = Array.isArray(response?.data)
+        ? response.data.length === 1
+            ? response.data[0]
+            : null
+        : response?.data;
+
+    if (unsafe) {
+        if (
+            result?.recorded !== false ||
+            ![
+                "COORDINATOR_UNSAFE_RECORDED",
+                "COORDINATOR_UNSAFE_ALREADY_RECORDED"
+            ].includes(result?.reason)
+        ) {
+            throw new Error(
+                "RECONCILE_COORDINATOR_UNSAFE_NOT_CONFIRMED"
+            );
+        }
+
+        return;
+    }
+
+    if (
+        result?.recorded !== true ||
+        result?.reason !==
+            "RECEIPT_RECORDED_OR_ALREADY_PRESENT"
+    ) {
+        throw new Error(
+            "RECONCILE_COORDINATOR_RECEIPT_NOT_CONFIRMED"
+        );
+    }
+}
             }
         );
 

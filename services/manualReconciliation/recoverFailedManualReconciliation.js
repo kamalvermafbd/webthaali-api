@@ -200,7 +200,8 @@ async function confirmFailureUnblock({
                 "coordinator_server_instance_id," +
                 "recovery_state,remote_execution_fenced," +
                 "redis_cleanup_confirmed," +
-                "redis_stage_confirmed_at,terminal_closed_at"
+                "redis_stage_confirmed_at,terminal_closed_at," +
+                "coordinator_unsafe_detected"
             )
             .eq("attempt_id", attemptId)
             .single();
@@ -223,6 +224,7 @@ async function confirmFailureUnblock({
         recovery.owner_token !== execution.owner_token ||
         recovery.coordinator_server_instance_id !==
             execution.server_instance_id ||
+            recovery.coordinator_unsafe_detected !== false ||
         recovery.recovery_state !== "SETTLED" ||
         recovery.remote_execution_fenced !== true ||
         recovery.redis_cleanup_confirmed !== true ||
@@ -296,17 +298,18 @@ async function resumeSqlClosedFailure({
     try {
         const response = await supabase
             .from("manual_reconcile_failure_recovery_evidence")
-            .select(
-                "attempt_id,execution_id,connector_id," +
-                "socket_id,owner_token," +
-                "coordinator_server_instance_id," +
-                "recovery_state,remote_execution_fenced," +
-                "redis_cleanup_confirmed," +
-                "redis_stage_receipt," +
-                "redis_stage_confirmed_at,terminal_closed_at," +
-                "redis_unblock_receipt," +
-                "redis_unblock_confirmed_at"
-            )
+           .select(
+    "attempt_id,execution_id,connector_id," +
+    "socket_id,owner_token," +
+    "coordinator_server_instance_id," +
+    "recovery_state,remote_execution_fenced," +
+    "redis_cleanup_confirmed," +
+    "redis_stage_receipt," +
+    "redis_stage_confirmed_at,terminal_closed_at," +
+    "redis_unblock_receipt," +
+    "redis_unblock_confirmed_at," +
+    "coordinator_unsafe_detected"
+)
             .eq("attempt_id", attemptId)
             .maybeSingle();
 
@@ -338,6 +341,15 @@ async function resumeSqlClosedFailure({
     if (!closureStarted) {
         return null;
     }
+
+    // F3-B: A durable unsafe coordinator state forbids
+// automatic resumption of SQL-closed Redis cleanup.
+if (recovery.coordinator_unsafe_detected !== false) {
+    return blocked(
+        attemptId,
+        "COORDINATOR_UNSAFE_OR_UNVERIFIED"
+    );
+}
 
     if (
         recovery.recovery_state !== "SETTLED" ||
@@ -920,6 +932,7 @@ async function recoverFailedManualReconciliation({
                     "ORIGINAL_COORDINATOR_DURABLE_RECEIPT_REQUIRED"
                 ),
                 fenceAcknowledged: true,
+                fenceEvidenceRecorded: true,
                 observationVerified: true,
                 coordinatorDrainVerified: false,
                 durableDrainRecorded: false

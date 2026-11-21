@@ -287,7 +287,7 @@ async function unblockManualReconcileAfterSqlClosure(input) {
                 "recovery_state,remote_execution_fenced," +
                 "redis_cleanup_confirmed," +
                 "redis_stage_receipt,redis_stage_confirmed_at," +
-                "terminal_closed_at"
+                "terminal_closed_at,coordinator_unsafe_detected"
             )
 
             .eq("attempt_id", i.attemptId)
@@ -307,6 +307,7 @@ async function unblockManualReconcileAfterSqlClosure(input) {
         recovery.owner_token !== i.ownerToken ||
 
         recovery.coordinator_server_instance_id !== i.serverInstanceId ||
+        recovery.coordinator_unsafe_detected !== false ||
         recovery.recovery_state !== "SETTLED" ||
         recovery.remote_execution_fenced !== true ||
 
