@@ -522,14 +522,15 @@ function remove(connectorId, socket) {
 
     }
 //060926 start
-    if (socket.pendingConnectorId) {
-    pendingConnectorMap.delete(
-        socket.pendingConnectorId
-    );
-}
-//end 060926
-    pendingConnectors.delete(socket);
+      // Pending connector cleanup — ownership protected
+    if (
+        socket.pendingConnectorId &&
+        pendingConnectorMap.get(socket.pendingConnectorId) === socket
+    ) {
+        pendingConnectorMap.delete(socket.pendingConnectorId);
+    }
 
+    pendingConnectors.delete(socket);
 }
 
 /**

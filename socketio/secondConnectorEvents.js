@@ -11,7 +11,8 @@ const {
     inspectConnectorRecoveryState,
     updateConnectorHealthIfSocketOwner,
     getConnectorWatchdogStatus,
-    updateConnectorTallyQueueStatus
+    updateConnectorTallyQueueStatus,
+    renewConnectorSocketLease
 } = require("./connectorHealthStore");
 // 060926 start
 const crypto = require("crypto");
@@ -1693,18 +1694,62 @@ socket.on("getMastersProgress", async (data) => {
     if (!socket.connected) {
         return;
     }
+socket.lastHeartbeat = Date.now();
 
-    socket.lastHeartbeat = Date.now();
+await updateOwnedSocketHealth({
+    connection_status: "CONNECTED",
+    operation_status:
+        socket.tallyRequestActive === true
+            ? "BUSY"
+            : "UNKNOWN",
+    last_heartbeat_at:
+        new Date(socket.lastHeartbeat).toISOString()
+});
+   // Renew Redis lease only for connectors registered to this socket.
+// A rejected renewal must never trigger an ownership takeover.
+const leaseConnectorIds = new Set([
+    ...(socket.connectorIds || []),
+    socket.connectorId
+].filter(Boolean));
 
-            await updateOwnedSocketHealth({
-                connection_status: "CONNECTED",
-                operation_status:
-    socket.tallyRequestActive === true
-        ? "BUSY"
-        : "UNKNOWN",
-                last_heartbeat_at:
-                    new Date(socket.lastHeartbeat).toISOString()
-            });
+for (const connectorId of leaseConnectorIds) {
+    if (
+        !socket.connected ||
+        registry.get(connectorId) !== socket
+    ) {
+        continue;
+    }
+
+    try {
+        const lease = await renewConnectorSocketLease(
+            connectorId,
+            socket.id
+        );
+
+      if (!lease.renewed) {
+    console.warn(
+        "[CONNECTOR LEASE] Renewal rejected; registration requires verification",
+        {
+            connector_id: connectorId,
+            socket_id: socket.id
+        }
+    );
+
+    // Remove only this socket's local mapping.
+    // Never change Redis ownership or operation locks here.
+    registry.remove(connectorId, socket);
+}
+    } catch (error) {
+        console.error(
+            "[CONNECTOR LEASE] Renewal failed",
+            {
+                connector_id: connectorId,
+                socket_id: socket.id,
+                error: error.message
+            }
+        );
+    }
+}
 
             if (
     socket.tallyRequestActive !== true &&
@@ -1944,9 +1989,17 @@ socket.on("getMastersProgress", async (data) => {
                 ...(socket.connectorIds || []),
                 socket.connectorId
             ].filter(Boolean));
-// Remove pending selection state before awaiting Redis.
+// Remove pending selection state immediately.
 registry.remove(null, socket);
-            for (const connectorId of connectorIds) {
+
+// Remove disconnected socket mappings before awaiting Redis.
+// Registry.remove() only deletes a mapping owned by this socket.
+for (const connectorId of connectorIds) {
+    registry.remove(connectorId, socket);
+}
+
+// Persist disconnected health for the same socket owner.
+for (const connectorId of connectorIds) {
                 try {
                     const result =
                         await updateConnectorHealthIfSocketOwner(
@@ -1978,7 +2031,7 @@ registry.remove(null, socket);
                     );
                 }
 
-                registry.remove(connectorId, socket);
+                
             }
 
             console.log("================================");
