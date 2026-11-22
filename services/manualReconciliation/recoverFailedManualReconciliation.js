@@ -35,6 +35,11 @@ const {
 } = require("./manualReconcileFailureSettlement");
 
 
+const {
+    ensureManualReconcileFailureFenceIntent
+} = require("./ensureManualReconcileFailureFenceIntent");
+
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 
@@ -525,39 +530,25 @@ async function recoverFailedManualReconciliation({
     return blocked(attemptId, "ORIGINAL_EXECUTION_UNVERIFIED");
 }
 
-    // This RPC records intent only. It does NOT establish remote quiescence.
-    let response;
-    try {
-        response = await supabase.rpc(
-            "request_manual_reconcile_failure_fence_v2",
-            {
-                p_attempt_id: attemptId,
-                p_operation_token: attempt.operation_token,
-                p_execution_id: execution.execution_id
-            }
-        );
-    } catch (_error) {
-        return blocked(attemptId, "FENCE_INTENT_OUTCOME_UNCERTAIN");
+   
+    // Durable intent only; this does not prove remote execution settlement.
+    const result = await ensureManualReconcileFailureFenceIntent({
+        supabase,
+        attemptId,
+        attempt,
+        execution,
+        onEvent: event => {
+            console.info(
+                "[MANUAL RECONCILE FENCE INTENT]",
+                event
+            );
+        }
+    });
+
+    if (result.fence_requested !== true) {
+        return blocked(attemptId, result.reason);
     }
 
-    if (response?.error) {
-        return blocked(attemptId, "FENCE_INTENT_OUTCOME_UNCERTAIN");
-    }
-
-    const result = Array.isArray(response?.data)
-        ? response.data.length === 1 ? response.data[0] : null
-        : response?.data;
-   if (
-    !result ||
-    typeof result !== "object" ||
-    Array.isArray(result) ||
-    result.fence_requested !== true ||
-    !["FENCE_REQUESTED", "ALREADY_REQUESTED"].includes(result.reason) ||
-    typeof result.fence_id !== "string" ||
-    !UUID.test(result.fence_id)
-) {
-    return blocked(attemptId, "FENCE_INTENT_NOT_CONFIRMED");
-}
 
     // Re-read after the intent RPC to avoid dispatch on a changed identity.
     const after = await readManualReconcileRecoverySnapshot(
