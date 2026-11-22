@@ -1,0 +1,241 @@
+﻿async function updateOwnedSocketHealth(patch) {
+    const connectorIds = new Set([
+        ...(socket.connectorIds || []),
+        socket.connectorId
+    ].filter(Boolean));
+
+    for (const connectorId of connectorIds) {
+        if (
+            !socket.connected ||
+            registry.get(connectorId) !== socket ||
+            !socket.connectorIds?.has(connectorId)
+        ) {
+            continue;
+        }
+
+        try {
+            const result =
+                await updateConnectorHealthIfSocketOwner(
+                    connectorId,
+                    socket.id,
+                    patch
+                );
+
+            if (result?.updated !== true) {
+                console.warn(
+                    "[SHARED HEALTH UPDATE] Ownership unverified; revoking local registration",
+                    {
+                        socket_id: socket.id,
+                        connector_id: connectorId
+                    }
+                );
+
+                if (registry.get(connectorId) === socket) {
+                    registry.remove(connectorId, socket);
+
+                    if (socket.connected) {
+                        socket.emit("connector:registration:status", {
+                            connector_id: connectorId,
+                            registered: false,
+                            reason: "REDIS_HEALTH_OWNER_UNVERIFIED",
+                            socket_id: socket.id
+                        });
+                    }
+                }
+            }
+        } catch (error) {
+            console.error(
+                "[SHARED HEALTH UPDATE] Redis failure; revoking local registration",
+                {
+                    socket_id: socket.id,
+                    connector_id: connectorId,
+                    error: error?.message || String(error)
+                }
+            );
+
+            if (registry.get(connectorId) === socket) {
+                registry.remove(connectorId, socket);
+
+                if (socket.connected) {
+                    socket.emit("connector:registration:status", {
+                        connector_id: connectorId,
+                        registered: false,
+                        reason: "REDIS_HEALTH_UNVERIFIED",
+                        socket_id: socket.id
+                    });
+                }
+            }
+        }
+    }
+}
+
+
+        // ============================================================
+        // PROTOCOL HEARTBEAT
+        // ============================================================
+
+    socket.on("tally:status", async (data = {}) => {
+
+    if (!socket.connected) {
+        return;
+    }
+
+    const status = data.status;
+
+    if (status !== "ONLINE" && status !== "OFFLINE") {
+        return;
+    }
+
+    // Verified Tally status received from connector monitor.
+    socket.tallyStatus = status;
+    socket.lastTallyStatusAt = Date.now();
+
+    await updateOwnedSocketHealth({
+            tally_status: status
+        });
+
+    socket.tallyCompanies =
+        status === "ONLINE" && Array.isArray(data.companies)
+            ? data.companies
+            : [];
+
+      console.log(
+        "[TALLY STATUS]",
+        "socket:", socket.id,
+        "status:", status
+    );
+
+    if (
+        status === "ONLINE" &&
+        Array.isArray(socket.companyGuids) &&
+        socket.companyGuids.length > 0
+    ) {
+        recoverWaitingBatchesForCompanies({
+            companyGuids: socket.companyGuids,
+            socket
+        }).catch(error => {
+            console.error(
+                "Ã¢ÂÅ’ TALLY ONLINE WAITING BATCH RECOVERY FAILED:",
+                error
+            );
+        });
+    }
+});
+
+        let heartbeatProcessing = false;
+
+socket.on("protocol:heartbeat", async () => {
+    if (!socket.connected || heartbeatProcessing) {
+        return;
+    }
+
+    heartbeatProcessing = true;
+
+    try {
+socket.lastHeartbeat = Date.now();
+
+await updateOwnedSocketHealth({
+    connection_status: "CONNECTED",
+    operation_status:
+        socket.tallyRequestActive === true
+            ? "BUSY"
+            : "UNKNOWN",
+    last_heartbeat_at:
+        new Date(socket.lastHeartbeat).toISOString()
+});
+   // Renew Redis lease only for connectors registered to this socket.
+// A rejected renewal must never trigger an ownership takeover.
+const leaseConnectorIds = new Set([
+    ...(socket.connectorIds || []),
+    socket.connectorId
+].filter(Boolean));
+
+for (const connectorId of leaseConnectorIds) {
+    if (
+        !socket.connected ||
+        registry.get(connectorId) !== socket
+    ) {
+        continue;
+    }
+
+    try {
+        const lease = await renewConnectorSocketLease(
+            connectorId,
+            socket.id
+        );
+
+      if (!lease.renewed) {
+    console.warn(
+        "[CONNECTOR LEASE] Renewal rejected; registration requires verification",
+        {
+            connector_id: connectorId,
+            socket_id: socket.id
+        }
+    );
+
+   // Remove only this socket's local mapping.
+// Never change Redis ownership or operation locks here.
+registry.remove(connectorId, socket);
+
+// Notify this exact socket that its registration is no longer valid.
+// Re-registration must pass the existing ownership and quarantine guards.
+if (socket.connected) {
+    socket.emit("connector:registration:status", {
+        connector_id: connectorId,
+        registered: false,
+        reason: "REDIS_LEASE_LOST",
+        socket_id: socket.id
+    });
+}
+}
+   
+    } catch (error) {
+        console.error(
+            "[CONNECTOR LEASE] Renewal failed; revoking local registration",
+            {
+                connector_id: connectorId,
+                socket_id: socket.id,
+                error: error?.message || String(error)
+            }
+        );
+
+        // Redis result is uncertain. Fail closed locally.
+        // Do not alter Redis ownership, locks or quarantine.
+        if (registry.get(connectorId) === socket) {
+            registry.remove(connectorId, socket);
+
+            if (socket.connected) {
+                socket.emit("connector:registration:status", {
+                    connector_id: connectorId,
+                    registered: false,
+                    reason: "REDIS_LEASE_UNVERIFIED",
+                    socket_id: socket.id
+                });
+            }
+        }
+    }
+
+}
+
+            if (
+    socket.tallyRequestActive !== true &&
+    socket.tallyStatus === "ONLINE" &&
+    Array.isArray(socket.companyGuids) &&
+    socket.companyGuids.length > 0
+) {
+    await recoverWaitingBatchesForCompanies({
+        companyGuids: socket.companyGuids,
+        socket
+       });
+}
+
+    } finally {
+        heartbeatProcessing = false;
+    }
+});
+
+                // ============================================================
+        // CONNECTOR TALLY QUEUE STATUS REPORT
+        // ============================================================
+
+       socket.on("tally:queue:status", async (data = {}) => {

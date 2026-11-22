@@ -503,8 +503,23 @@ function register(connectorId, socket) {
     }
 
     // Local registry commit: no await between these writes.
-    connectors.set(normalizedConnectorId, socket);
-    socket.connectorIds.add(normalizedConnectorId);
+    // Local registry commit: no await between these writes.
+connectors.set(normalizedConnectorId, socket);
+socket.connectorIds.add(normalizedConnectorId);
+
+// Every successful registration gets a fresh local generation.
+// Even when the same physical socket registers again.
+if (!(socket.connectorRegistrationGenerations instanceof Map)) {
+    socket.connectorRegistrationGenerations = new Map();
+}
+
+const previousGeneration =
+    socket.connectorRegistrationGenerations.get(normalizedConnectorId) || 0;
+
+socket.connectorRegistrationGenerations.set(
+    normalizedConnectorId,
+    previousGeneration + 1
+);
 
     // Preserve existing pending-connector behavior.
     if (!socket.pendingConnectorId) {
@@ -917,11 +932,14 @@ function remove(connectorId, socket) {
         // A stale socket must not remove a replacement
         // socket's connector mapping.
         if (currentSocket === socket) {
-            connectors.delete(connectorId);
+    connectors.delete(connectorId);
 
-            if (socket.connectorIds) {
-                socket.connectorIds.delete(connectorId);
-            }
+    if (socket.connectorIds) {
+        socket.connectorIds.delete(connectorId);
+    }
+
+    // Keep the generation counter so a future registration
+    // cannot reuse an earlier generation on this socket.
 
             // Remove only company registrations belonging
             // to this successfully removed alias.
@@ -973,6 +991,20 @@ function remove(connectorId, socket) {
 /**
  * Check Connector
  */
+
+function getRegistrationGeneration(connectorId, socket) {
+    if (
+        !socket ||
+        !socket.connected ||
+        connectors.get(connectorId) !== socket ||
+        !socket.connectorIds?.has(connectorId)
+    ) {
+        return null;
+    }
+
+    return socket.connectorRegistrationGenerations?.get(connectorId) ?? null;
+}
+
 function isOnline(connectorId) {
 
     return get(connectorId) !== null;
@@ -1008,7 +1040,8 @@ module.exports = {
     getPendingConnectors,
     getPendingByGuid,
     getPendingSocketsForRecovery,
-    remove,
+      remove,
+    getRegistrationGeneration,
     isOnline,
     list
 

@@ -1,0 +1,177 @@
+﻿
+  socketio\secondConnectorEvents.js:786:            }
+  socketio\secondConnectorEvents.js:787:        );
+  socketio\secondConnectorEvents.js:788:    });
+  socketio\secondConnectorEvents.js:789:}
+  socketio\secondConnectorEvents.js:790:if (!recoveryState || recoveryState.quarantined) {
+  socketio\secondConnectorEvents.js:791:    socket.emit("connector:registration:status", {
+  socketio\secondConnectorEvents.js:792:        connector_id: connectorId,
+  socketio\secondConnectorEvents.js:793:        registered: false,
+  socketio\secondConnectorEvents.js:794:        reason: recoveryState
+  socketio\secondConnectorEvents.js:795:            ? "RECOVERY_VERIFICATION_REQUIRED"
+  socketio\secondConnectorEvents.js:796:            : "RECOVERY_INSPECTION_FAILED"
+  socketio\secondConnectorEvents.js:797:    });
+  socketio\secondConnectorEvents.js:798:
+  socketio\secondConnectorEvents.js:799:    continue;
+  socketio\secondConnectorEvents.js:800:}
+> socketio\secondConnectorEvents.js:801:    const claimed = await claimConnectorSocketOwnership(
+  socketio\secondConnectorEvents.js:802:        connectorId,
+  socketio\secondConnectorEvents.js:803:        socket.id
+  socketio\secondConnectorEvents.js:804:    ).catch((error) => {
+  socketio\secondConnectorEvents.js:805:        console.error(
+  socketio\secondConnectorEvents.js:806:            "âŒ AUTO-REGISTER OWNERSHIP CLAIM FAILED",
+  socketio\secondConnectorEvents.js:807:            {
+  socketio\secondConnectorEvents.js:808:                socket_id: socket.id,
+  socketio\secondConnectorEvents.js:809:                connector_id: connectorId,
+  socketio\secondConnectorEvents.js:810:                error: error.message
+  socketio\secondConnectorEvents.js:811:            }
+  socketio\secondConnectorEvents.js:812:        );
+  socketio\secondConnectorEvents.js:813:
+  socketio\secondConnectorEvents.js:814:             return { claimed: false, health: null };
+  socketio\secondConnectorEvents.js:815:    });
+  socketio\secondConnectorEvents.js:816:
+  socketio\secondConnectorEvents.js:817:    if (!socket.connected && claimed.claimed) {
+  socketio\secondConnectorEvents.js:818:        console.warn(
+  socketio\secondConnectorEvents.js:819:            "[CONNECTOR IDENTIFY] Socket disconnected 
+after ownership claim",
+  socketio\secondConnectorEvents.js:820:            {
+  socketio\secondConnectorEvents.js:821:                socket_id: socket.id,
+  socketio\secondConnectorEvents.js:822:                connector_id: connectorId
+  socketio\secondConnectorEvents.js:823:            }
+  socketio\secondConnectorEvents.js:824:        );
+  socketio\secondConnectorEvents.js:825:
+  socketio\secondConnectorEvents.js:826:        await updateConnectorHealthIfSocketOwner(
+  socketio\secondConnectorEvents.js:862:connector_id: connectorId,
+  socketio\secondConnectorEvents.js:863:current_owner: claimed.health?.socket_id || null,
+  socketio\secondConnectorEvents.js:864:reason: claimed.reason || "UNSPECIFIED",
+  socketio\secondConnectorEvents.js:865:health_status: claimed.health?.connection_status || null,
+  socketio\secondConnectorEvents.js:866:health_operation_status: claimed.health?.operation_status 
+|| null
+  socketio\secondConnectorEvents.js:867:            }
+  socketio\secondConnectorEvents.js:868:        );
+  socketio\secondConnectorEvents.js:869:socket.emit("connector:registration:status", {
+  socketio\secondConnectorEvents.js:870:    connector_id: connectorId,
+  socketio\secondConnectorEvents.js:871:    registered: false,
+  socketio\secondConnectorEvents.js:872:    reason: claimed.reason || "OWNERSHIP_UNAVAILABLE"
+  socketio\secondConnectorEvents.js:873:});
+  socketio\secondConnectorEvents.js:874:        continue;
+  socketio\secondConnectorEvents.js:875:    }
+  socketio\secondConnectorEvents.js:876:
+> socketio\secondConnectorEvents.js:877:    const registered = registry.register(
+  socketio\secondConnectorEvents.js:878:        connectorId,
+  socketio\secondConnectorEvents.js:879:        socket
+  socketio\secondConnectorEvents.js:880:    );
+  socketio\secondConnectorEvents.js:881:
+  socketio\secondConnectorEvents.js:882:    if (!registered) {
+  socketio\secondConnectorEvents.js:883:
+  socketio\secondConnectorEvents.js:884:   // Registry rejected local ownership.
+  socketio\secondConnectorEvents.js:885:// Do not change Redis connection status here.
+  socketio\secondConnectorEvents.js:886:// An existing same-socket registration may still be 
+active.
+  socketio\secondConnectorEvents.js:887:console.warn(
+  socketio\secondConnectorEvents.js:888:    "[CONNECTOR IDENTIFY] Registry rejected; Redis 
+ownership retained",
+  socketio\secondConnectorEvents.js:889:    {
+  socketio\secondConnectorEvents.js:890:        connector_id: connectorId,
+  socketio\secondConnectorEvents.js:891:        socket_id: socket.id
+  socketio\secondConnectorEvents.js:892:    }
+  socketio\secondConnectorEvents.js:893:);
+  socketio\secondConnectorEvents.js:894:
+  socketio\secondConnectorEvents.js:895:        console.error(
+  socketio\secondConnectorEvents.js:896:            "âŒ EXISTING CONNECTOR AUTO REGISTER FAILED",
+  socketio\secondConnectorEvents.js:897:            {
+  socketio\secondConnectorEvents.js:898:                socket_id: socket.id,
+  socketio\secondConnectorEvents.js:899:                connector_id: connectorId
+  socketio\secondConnectorEvents.js:900:            }
+  socketio\secondConnectorEvents.js:901:        );
+  socketio\secondConnectorEvents.js:902:        socket.emit("connector:registration:status", {
+  socketio\secondConnectorEvents.js:1303:    return null;
+  socketio\secondConnectorEvents.js:1304:});
+  socketio\secondConnectorEvents.js:1305:
+  socketio\secondConnectorEvents.js:1306:if (!recoveryState || recoveryState.quarantined) {
+  socketio\secondConnectorEvents.js:1307:    socket.emit("connector:registration:status", {
+  socketio\secondConnectorEvents.js:1308:        connector_id: connectorId,
+  socketio\secondConnectorEvents.js:1309:        registered: false,
+  socketio\secondConnectorEvents.js:1310:        reason: recoveryState
+  socketio\secondConnectorEvents.js:1311:            ? "RECOVERY_VERIFICATION_REQUIRED"
+  socketio\secondConnectorEvents.js:1312:            : "RECOVERY_INSPECTION_FAILED"
+  socketio\secondConnectorEvents.js:1313:    });
+  socketio\secondConnectorEvents.js:1314:
+  socketio\secondConnectorEvents.js:1315:    return;
+  socketio\secondConnectorEvents.js:1316:}
+  socketio\secondConnectorEvents.js:1317:
+> socketio\secondConnectorEvents.js:1318:            const claimed = await 
+claimConnectorSocketOwnership(
+  socketio\secondConnectorEvents.js:1319:                connectorId,
+  socketio\secondConnectorEvents.js:1320:                socket.id
+  socketio\secondConnectorEvents.js:1321:            ).catch((error) => {
+  socketio\secondConnectorEvents.js:1322:                console.error(
+  socketio\secondConnectorEvents.js:1323:                    "âŒ CONNECTOR OWNERSHIP CLAIM 
+FAILED",
+  socketio\secondConnectorEvents.js:1324:                    {
+  socketio\secondConnectorEvents.js:1325:                        socket_id: socket.id,
+  socketio\secondConnectorEvents.js:1326:                        connector_id: connectorId,
+  socketio\secondConnectorEvents.js:1327:                        error: error.message
+  socketio\secondConnectorEvents.js:1328:                    }
+  socketio\secondConnectorEvents.js:1329:                );
+  socketio\secondConnectorEvents.js:1330:                return { claimed: false, health: null };
+  socketio\secondConnectorEvents.js:1331:            });
+  socketio\secondConnectorEvents.js:1332:
+  socketio\secondConnectorEvents.js:1333:                        if (!socket.connected) {
+  socketio\secondConnectorEvents.js:1334:                console.warn(
+  socketio\secondConnectorEvents.js:1335:                    "[CONNECTOR REGISTER STOPPED] Socket 
+disconnected after ownership claim",
+  socketio\secondConnectorEvents.js:1336:                    {
+  socketio\secondConnectorEvents.js:1337:                        socket_id: socket.id,
+  socketio\secondConnectorEvents.js:1338:                        connector_id: connectorId
+  socketio\secondConnectorEvents.js:1339:                    }
+  socketio\secondConnectorEvents.js:1340:                );
+  socketio\secondConnectorEvents.js:1341:
+  socketio\secondConnectorEvents.js:1342:                if (claimed.claimed) {
+  socketio\secondConnectorEvents.js:1343:                    await 
+updateConnectorHealthIfSocketOwner(
+  socketio\secondConnectorEvents.js:1370:            current_owner: claimed.health?.socket_id || 
+null,
+  socketio\secondConnectorEvents.js:1371:            reason: claimed.reason || "UNSPECIFIED"
+  socketio\secondConnectorEvents.js:1372:        }
+  socketio\secondConnectorEvents.js:1373:    );
+  socketio\secondConnectorEvents.js:1374:
+  socketio\secondConnectorEvents.js:1375:    socket.emit("connector:registration:status", {
+  socketio\secondConnectorEvents.js:1376:        connector_id: connectorId,
+  socketio\secondConnectorEvents.js:1377:        registered: false,
+  socketio\secondConnectorEvents.js:1378:        reason: claimed.reason || "OWNERSHIP_UNAVAILABLE"
+  socketio\secondConnectorEvents.js:1379:    });
+  socketio\secondConnectorEvents.js:1380:
+  socketio\secondConnectorEvents.js:1381:    return;
+  socketio\secondConnectorEvents.js:1382:}
+  socketio\secondConnectorEvents.js:1383:
+  socketio\secondConnectorEvents.js:1384:            
+> socketio\secondConnectorEvents.js:1385:const registered = registry.register(
+  socketio\secondConnectorEvents.js:1386:    connectorId,
+  socketio\secondConnectorEvents.js:1387:    socket
+  socketio\secondConnectorEvents.js:1388:);
+  socketio\secondConnectorEvents.js:1389:
+  socketio\secondConnectorEvents.js:1390:if (
+  socketio\secondConnectorEvents.js:1391:    registered === true &&
+  socketio\secondConnectorEvents.js:1392:    !registrationExistedBeforeAttempt
+  socketio\secondConnectorEvents.js:1393:) {
+  socketio\secondConnectorEvents.js:1394:    registrationAcquiredThisAttempt = true;
+  socketio\secondConnectorEvents.js:1395:}
+  socketio\secondConnectorEvents.js:1396:if (!registered) {
+  socketio\secondConnectorEvents.js:1397:
+  socketio\secondConnectorEvents.js:1398:    // Local registry rejected registration.
+  socketio\secondConnectorEvents.js:1399:// Do not mark Redis DISCONNECTED: the same socket may
+  socketio\secondConnectorEvents.js:1400:// already own this connector and be serving operations.
+  socketio\secondConnectorEvents.js:1401:// Leave Redis ownership to its existing lease and guards.
+  socketio\secondConnectorEvents.js:1402:console.warn(
+  socketio\secondConnectorEvents.js:1403:    "[CONNECTOR REGISTER] Registry rejected; Redis 
+ownership retained",
+  socketio\secondConnectorEvents.js:1404:    {
+  socketio\secondConnectorEvents.js:1405:        connector_id: connectorId,
+  socketio\secondConnectorEvents.js:1406:        socket_id: socket.id
+  socketio\secondConnectorEvents.js:1407:    }
+  socketio\secondConnectorEvents.js:1408:);
+  socketio\secondConnectorEvents.js:1409:
+  socketio\secondConnectorEvents.js:1410:                if (socket.connectorId === connectorId) {
+
+

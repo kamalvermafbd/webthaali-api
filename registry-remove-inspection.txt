@@ -1,0 +1,101 @@
+﻿
+> socketio\connectorRegistry.js:883:function remove(connectorId, socket) {
+  socketio\connectorRegistry.js:884:
+  socketio\connectorRegistry.js:885:    const currentSocket =
+  socketio\connectorRegistry.js:886:        connectors.get(connectorId);
+  socketio\connectorRegistry.js:887:
+  socketio\connectorRegistry.js:888:    if (currentSocket === socket) {
+  socketio\connectorRegistry.js:889:
+  socketio\connectorRegistry.js:890:        connectors.delete(connectorId);
+  socketio\connectorRegistry.js:891:
+  socketio\connectorRegistry.js:892:        console.log(
+  socketio\connectorRegistry.js:893:            `❌ Removed Connector : ${connectorId}`
+  socketio\connectorRegistry.js:894:        );
+  socketio\connectorRegistry.js:895:
+  socketio\connectorRegistry.js:896:    }
+  socketio\connectorRegistry.js:897:
+  socketio\connectorRegistry.js:898:    pendingConnectors.delete(socket);
+  socketio\connectorRegistry.js:899:
+  socketio\connectorRegistry.js:900:}
+  socketio\connectorRegistry.js:901:*/
+  socketio\connectorRegistry.js:902:
+> socketio\connectorRegistry.js:903:function remove(connectorId, socket) {
+  socketio\connectorRegistry.js:904:    if (!socket) {
+  socketio\connectorRegistry.js:905:        return;
+  socketio\connectorRegistry.js:906:    }
+  socketio\connectorRegistry.js:907:
+  socketio\connectorRegistry.js:908:    const isFullCleanup =
+  socketio\connectorRegistry.js:909:        connectorId === null || connectorId === undefined;
+  socketio\connectorRegistry.js:910:
+  socketio\connectorRegistry.js:911:    // ============================================
+  socketio\connectorRegistry.js:912:    // CASE 1: Remove a specific connector alias
+  socketio\connectorRegistry.js:913:    // ============================================
+  socketio\connectorRegistry.js:914:    if (!isFullCleanup) {
+  socketio\connectorRegistry.js:915:        const currentSocket = connectors.get(connectorId);
+  socketio\connectorRegistry.js:916:
+  socketio\connectorRegistry.js:917:        // A stale socket must not remove a replacement
+  socketio\connectorRegistry.js:918:        // socket's connector mapping.
+  socketio\connectorRegistry.js:919:        if (currentSocket === socket) {
+  socketio\connectorRegistry.js:920:            connectors.delete(connectorId);
+  socketio\connectorRegistry.js:921:
+  socketio\connectorRegistry.js:922:            if (socket.connectorIds) {
+  socketio\connectorRegistry.js:923:                socket.connectorIds.delete(connectorId);
+  socketio\connectorRegistry.js:924:            }
+  socketio\connectorRegistry.js:925:
+  socketio\connectorRegistry.js:926:            // Remove only company registrations belonging
+  socketio\connectorRegistry.js:927:            // to this successfully removed alias.
+  socketio\connectorRegistry.js:928:            for (
+  socketio\connectorRegistry.js:929:                const [key, registration] of
+  socketio\connectorRegistry.js:930:                socket.companyRegistrations || []
+  socketio\connectorRegistry.js:931:            ) {
+  socketio\connectorRegistry.js:932:                if (registration.connector_id === connectorId) 
+{
+  socketio\connectorRegistry.js:933:                    socket.companyRegistrations.delete(key);
+  socketio\connectorRegistry.js:934:                }
+  socketio\connectorRegistry.js:935:            }
+  socketio\connectorRegistry.js:936:
+  socketio\connectorRegistry.js:937:            console.log(
+  socketio\connectorRegistry.js:938:                `❌ Removed Connector : ${connectorId}`
+  socketio\connectorRegistry.js:939:            );
+  socketio\connectorRegistry.js:940:        }
+  socketio\connectorRegistry.js:941:
+  socketio\connectorRegistry.js:942:        // Never clear whole-socket pending state here.
+  socketio\connectorRegistry.js:943:        return;
+  socketio\connectorRegistry.js:944:    }
+  socketio\connectorRegistry.js:945:
+  socketio\connectorRegistry.js:946:    // ============================================
+  socketio\connectorRegistry.js:947:    // CASE 2: Full socket disconnect cleanup
+  socketio\connectorRegistry.js:948:    // ============================================
+  socketio\connectorRegistry.js:949:
+  socketio\connectorRegistry.js:950:    if (socket === currentPendingConnector) {
+  socketio\connectorRegistry.js:951:        currentPendingConnector = null;
+  socketio\connectorRegistry.js:952:    }
+  socketio\connectorRegistry.js:953:
+  socketio\connectorRegistry.js:954:    if (
+  socketio\connectorRegistry.js:955:        socket.pendingConnectorId &&
+  socketio\connectorRegistry.js:956:        pendingConnectorMap.get(socket.pendingConnectorId) === 
+socket
+  socketio\connectorRegistry.js:957:    ) {
+  socketio\connectorRegistry.js:958:        pendingConnectorMap.delete(socket.pendingConnectorId);
+  socketio\connectorRegistry.js:959:    }
+  socketio\connectorRegistry.js:960:
+  socketio\connectorRegistry.js:961:    pendingConnectors.delete(socket);
+  socketio\connectorRegistry.js:962:
+  socketio\connectorRegistry.js:963:    // Clear only this physical socket's local state.
+  socketio\connectorRegistry.js:964:    // Global alias mappings are removed separately
+  socketio\connectorRegistry.js:965:    // through exact socket-owner checks.
+  socketio\connectorRegistry.js:966:    socket.companyRegistrations?.clear();
+  socketio\connectorRegistry.js:967:    socket.availableCompanyGuids?.clear();
+  socketio\connectorRegistry.js:968:    socket.companyGuids = [];
+  socketio\connectorRegistry.js:969:}
+  socketio\connectorRegistry.js:970:
+  socketio\connectorRegistry.js:971:
+  socketio\connectorRegistry.js:972:
+  socketio\connectorRegistry.js:973:/**
+  socketio\connectorRegistry.js:974: * Check Connector
+  socketio\connectorRegistry.js:975: */
+  socketio\connectorRegistry.js:976:function isOnline(connectorId) {
+  socketio\connectorRegistry.js:977:
+  socketio\connectorRegistry.js:978:    return get(connectorId) !== null;
+
+

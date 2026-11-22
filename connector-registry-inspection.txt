@@ -1,0 +1,160 @@
+﻿function register(connectorId, socket) {
+    if (
+        typeof connectorId !== "string" ||
+        !connectorId.trim()
+    ) {
+        console.error(
+            "❌ REGISTER REJECTED: connector_id missing"
+        );
+        return false;
+    }
+
+    if (!socket || socket.connected !== true) {
+        console.error(
+            "❌ REGISTER REJECTED: socket unavailable",
+            {
+                connector_id: connectorId,
+                socket_id: socket?.id || null
+            }
+        );
+        return false;
+    }
+
+    const normalizedConnectorId = connectorId.trim();
+
+    initializeRegistrationState(socket);
+
+    // Check existing alias owner BEFORE modifying
+    // the incoming socket's local registration state.
+    const existingSocket =
+        connectors.get(normalizedConnectorId);
+
+    if (
+        existingSocket &&
+        existingSocket !== socket &&
+        existingSocket.connected === true
+    ) {
+        console.error(
+            "❌ REGISTRY REJECTED: CONNECTOR ALREADY HAS ACTIVE SOCKET",
+            {
+                connector_id: normalizedConnectorId,
+                existing_socket_id: existingSocket.id,
+                incoming_socket_id: socket.id
+            }
+        );
+
+        // Do not delete from socket.connectorIds here.
+        // A rejected attempt must not mutate existing state.
+        return false;
+    }
+
+    // A disconnected previous socket can leave an old
+    // alias mapping. Clean only that old socket's
+    // local state before replacing the mapping.
+    if (
+        existingSocket &&
+        existingSocket !== socket
+    ) {
+        existingSocket.connectorIds?.delete(
+            normalizedConnectorId
+        );
+
+        for (
+            const [key, registration] of
+            existingSocket.companyRegistrations || []
+        ) {
+            if (
+                registration.connector_id ===
+                normalizedConnectorId
+            ) {
+                existingSocket.companyRegistrations.delete(key);
+            }
+        }
+    }
+
+    // Local registry commit: no await between these writes.
+    connectors.set(normalizedConnectorId, socket);
+    socket.connectorIds.add(normalizedConnectorId);
+
+    // Preserve existing pending-connector behavior.
+    if (!socket.pendingConnectorId) {
+        pendingConnectors.delete(socket);
+    }
+
+    console.log("REGISTRY SET TRACE:", {
+        connector_id: normalizedConnectorId,
+        socket_id: socket.id,
+        socket_connector_id: socket.connectorId,
+        socket_company_code: socket.companyCode
+    });
+
+    console.log(
+        `✅ Registered Connector : ${normalizedConnectorId}`
+    );
+
+    return true;
+}
+
+
+function get(connectorId, companyCode) {
+
+    const socket = connectors.get(connectorId);
+
+if (!socket || socket.connected !== true) {
+    console.log(
+        "REGISTRY GET: CONNECTOR NOT AVAILABLE",
+        {
+            connector_id: connectorId,
+            socket_id: socket?.id || null,
+            connected: socket?.connected ?? false
+        }
+    );
+
+    return null;
+}
+
+    if (
+    !socket.connectorIds ||
+    !socket.connectorIds.has(connectorId)
+    ) {
+
+        console.error(
+            "❌ REGISTRY GET REJECTED: CONNECTOR ID MISMATCH",
+            {
+                connector_id: connectorId,
+                socket_connector_ids:
+                    socket.connectorIds
+                        ? [...socket.connectorIds]
+                        : [],
+                socket_id: socket.id
+            }
+        );
+
+        return null;
+    }
+
+    /*040926
+    if (socket.connectorId !== connectorId) {
+
+        console.error(
+            "❌ REGISTRY GET REJECTED: CONNECTOR ID MISMATCH",
+            {
+                connector_id: connectorId,
+                socket_connector_id: socket.connectorId,
+                socket_id: socket.id
+            }
+        );
+
+        return null;
+    }
+        */
+/* 030926
+    if (
+        companyCode &&
+        socket.companyCode !== companyCode
+    ) {
+
+        console.error(
+            "❌ REGISTRY GET REJECTED: COMPANY CODE MISMATCH",
+            {
+                requested_company_code: companyCode,
