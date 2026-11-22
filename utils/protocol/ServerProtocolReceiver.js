@@ -146,11 +146,7 @@ sendCompleted(
 
 registerChunkListener() {
 
-    this.socket.on(
-
-        EVENTS.CHUNK,
-
-       (data) => {
+    const listener = (data) => {
 
     if (!data || this.collectionCancelled) {
     return;
@@ -308,19 +304,18 @@ return;
     data.requestId
 );
 
-        }
+               };
 
-    );
+       this._chunkListener = listener;
 
+    this.socket.on(EVENTS.CHUNK, listener);
+
+    return listener;
 }
 
 registerCompleteListener() {
 
-    this.socket.on(
-
-        EVENTS.COMPLETE,
-
-      (data) => {
+    const listener = (data) => {
 
     if (!data || this.collectionCancelled) {
     return;
@@ -511,10 +506,13 @@ if (resolve) {
 
 }
 
-        }
+               };
 
-    );
+      this._completeListener = listener;
 
+    this.socket.on(EVENTS.COMPLETE, listener);
+
+    return listener;
 }
 
 waitForCollection() {
@@ -567,21 +565,62 @@ cancelCollection(reason = "Protocol collection cancelled") {
     }
 }
 
+
+
+
 start() {
 
-    this.registerChunkListener();
+    const socket = this.socket;
 
-    this.registerCompleteListener();
+    let chunkListener = null;
+    let completeListener = null;
+    let disconnectListener = null;
 
-    this.socket.once("disconnect", () => {
+    try {
 
-        this.cancelCollection(
-            "Socket disconnected during protocol collection"
-        );
+        chunkListener = this.registerChunkListener();
 
-    });
+        completeListener = this.registerCompleteListener();
 
+        disconnectListener = () => {
+            this.cancelCollection(
+                "Socket disconnected during protocol collection"
+            );
+        };
+
+        socket.once("disconnect", disconnectListener);
+
+    } catch (error) {
+
+        this.collectionCancelled = true;
+
+            if (this._chunkListener) {
+            socket.removeListener(
+                EVENTS.CHUNK,
+                this._chunkListener
+            );
+        }
+
+        if (this._completeListener) {
+            socket.removeListener(
+                EVENTS.COMPLETE,
+                this._completeListener
+            );
+        }
+
+        if (disconnectListener) {
+            socket.removeListener("disconnect", disconnectListener);
+        }
+
+        clearTimeout(this.inactivityTimer);
+        this.inactivityTimer = null;
+
+        throw error;
+    }
 }
+
+
+
 
 }
 

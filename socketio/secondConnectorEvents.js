@@ -408,7 +408,7 @@ continue;
 function registerEvents(io) {
 
     io.on("connection", (socket) => {
-
+registry.initializeRegistrationState(socket);
         console.log("================================");
         console.log("âœ… Connector Connected");
         console.log("Socket ID :", socket.id);
@@ -459,27 +459,48 @@ function activateProtocolReceiver() {
     }
 
     if (!socket.protocolReceiver) {
-        socket.protocolReceiver =
-            new ServerProtocolReceiver(socket);
+    const receiver = new ServerProtocolReceiver(socket);
 
-        socket.protocolReceiver.start();
+    try {
+        receiver.start();
+    } catch (error) {
+        // Never retain a receiver whose start() failed.
+        // A later registration must retry activation.
+        socket.protocolReceiver = null;
+        throw error;
     }
+
+    // Publish only after successful activation.
+    socket.protocolReceiver = receiver;
+}
 
     return true;
 }
         masterFinalAckReceipts.install(socket);
 
-socket.on("identifyConnector", async (data) => {
+socket.on(
+    "identifyConnector",
+    registry.registrationHandler(socket, async (data) => {
 
-    if (socket.identificationInProgress === true) {
-        console.warn(
-            "[CONNECTOR IDENTIFY SKIPPED] Identification already in progress",
-            { socket_id: socket.id }
-        );
-        return;
-    }
+  if (
+    socket.identificationInProgress === true ||
+    socket.directRegistrationInProgress === true
+) {
+    console.warn(
+        "[CONNECTOR IDENTIFY SKIPPED] Registration already in progress",
+        { socket_id: socket.id }
+    );
 
-    socket.identificationInProgress = true;
+    socket.emit("connector:registration:status", {
+        connector_id: null,
+        registered: false,
+        reason: "REGISTRATION_IN_PROGRESS"
+    });
+
+    return;
+}
+
+socket.identificationInProgress = true;
 
     console.log("[CONNECTOR IDENTIFY RECEIVED]", {
         socket_id: socket.id,
@@ -558,14 +579,16 @@ console.log("ðŸ“‹ CONNECTOR TALLY QUEUE STATUS:", {
     socket_id: socket.id,
     queue_status: socket.reportedTallyQueueStatus || null
 });
-        const company_guids =
-            Array.isArray(data?.company_guids)
-                ? [...new Set(
-                    data.company_guids
-                        .map(guid => String(guid).trim())
-                        .filter(Boolean)
-                )]
-                : [];
+       
+const company_guids =
+    registry.applyCompanyAvailability(socket, {
+        company_guids: Array.isArray(data?.company_guids)
+            ? data.company_guids
+            : [],
+        company_guids_mode:
+            data?.company_guids_mode || "add"
+    });
+
 
         console.log(
             "IDENTIFY CONNECTOR GUIDS:",
@@ -631,7 +654,7 @@ console.log("ðŸ“‹ CONNECTOR TALLY QUEUE STATUS:", {
             ...(clientResult.data || []).map(row => ({
                 company_code:
                     row.company_code,
-
+                tally_owner: "USER",
                 company_guid:
                     row.client_tally_company_guid,
 
@@ -642,7 +665,7 @@ console.log("ðŸ“‹ CONNECTOR TALLY QUEUE STATUS:", {
             ...(caResult.data || []).map(row => ({
                 company_code:
                     row.company_code,
-
+                 tally_owner: "CA",
                 company_guid:
                     row.ca_tally_company_guid,
 
@@ -655,8 +678,8 @@ console.log("ðŸ“‹ CONNECTOR TALLY QUEUE STATUS:", {
 );
 
     
-   socket.companyGuids =
-    company_guids;
+   const preparedRegistrations =
+    registry.prepareCompanyRegistrations(socket, matches);
 
 console.log(
     "ðŸ“‹ TALLY GUIDS AVAILABLE ON SOCKET:",
@@ -698,7 +721,7 @@ if (connectorIds.length === 0) {
 
 for (const connectorId of connectorIds) {
 
-    if (!socket.connected) {
+        if (!socket.connected) {
         console.warn(
             "[CONNECTOR IDENTIFY STOPPED] Socket disconnected before ownership claim",
             {
@@ -857,22 +880,17 @@ socket.emit("connector:registration:status", {
     );
 
     if (!registered) {
-        await updateConnectorHealthIfSocketOwner(
-            connectorId,
-            socket.id,
-            {
-                connection_status: "DISCONNECTED",
-                operation_status: "UNKNOWN"
-            }
-        ).catch((error) => {
-            console.error(
-                "âŒ AUTO-REGISTER OWNERSHIP ROLLBACK FAILED",
-                {
-                    connector_id: connectorId,
-                    error: error.message
-                }
-            );
-        });
+
+   // Registry rejected local ownership.
+// Do not change Redis connection status here.
+// An existing same-socket registration may still be active.
+console.warn(
+    "[CONNECTOR IDENTIFY] Registry rejected; Redis ownership retained",
+    {
+        connector_id: connectorId,
+        socket_id: socket.id
+    }
+);
 
         console.error(
             "âŒ EXISTING CONNECTOR AUTO REGISTER FAILED",
@@ -952,59 +970,28 @@ socket.emit("connector:registration:status", {
         break;
     }
 
-    if (!healthUpdate.updated) {
-        console.error(
-            "âŒ AUTO-REGISTER HEALTH UPDATE REJECTED",
-            {
-                socket_id: socket.id,
-                connector_id: connectorId
-            }
-        );
-
-                     let rollbackUpdated = false;
-
-        try {
-            const rollback =
-                await updateConnectorHealthIfSocketOwner(
-                    connectorId,
-                    socket.id,
-                    {
-                        connection_status: "DISCONNECTED",
-                        operation_status: "UNKNOWN"
-                    }
-                );
-
-            rollbackUpdated = rollback.updated;
-        } catch (error) {
-            console.error(
-                "âŒ AUTO-REGISTER OWNERSHIP ROLLBACK FAILED",
-                {
-                    connector_id: connectorId,
-                    socket_id: socket.id,
-                    error: error.message
-                }
-            );
+   if (!healthUpdate?.updated) {
+    console.error(
+        "[CONNECTOR IDENTIFY] Health ownership not verified",
+        {
+            connector_id: connectorId,
+            socket_id: socket.id,
+            reason: "HEALTH_UPDATE_UNVERIFIED"
         }
+    );
 
-        registry.remove(connectorId, socket);
+    // Revoke local authorization without changing
+    // uncertain Redis ownership or operation state.
+    registry.remove(connectorId, socket);
 
-        console.warn(
-            "AUTO-REGISTER OWNERSHIP ROLLBACK:",
-            {
-                connector_id: connectorId,
-                socket_id: socket.id,
-                rollback_updated: rollbackUpdated
-            }
-        );
+    socket.emit("connector:registration:status", {
+        connector_id: connectorId,
+        registered: false,
+        reason: "HEALTH_UPDATE_UNVERIFIED"
+    });
 
-        socket.emit("connector:registration:status", {
-    connector_id: connectorId,
-    registered: false,
-    reason: "HEALTH_UPDATE_FAILED"
-});
-
-        continue;
-    }
+    continue;
+}
 
         if (!socket.connected) {
         console.warn(
@@ -1036,6 +1023,7 @@ socket.emit("connector:registration:status", {
         break;
     }
 if (!activateProtocolReceiver()) {
+    
     console.error(
         "[CONNECTOR IDENTIFY] Protocol activation blocked",
         {
@@ -1043,6 +1031,25 @@ if (!activateProtocolReceiver()) {
             socket_id: socket.id
         }
     );
+
+  // Protocol activation failed.
+// Revoke only this connector's local registration below.
+// Do not disconnect Redis ownership while socket is connected.
+console.warn(
+    "[CONNECTOR IDENTIFY] Protocol activation failed; local authorization revoked",
+    {
+        connector_id: connectorId,
+        socket_id: socket.id
+    }
+);
+
+    registry.remove(connectorId, socket);
+
+    socket.emit("connector:registration:status", {
+        connector_id: connectorId,
+        registered: false,
+        reason: "PROTOCOL_ACTIVATION_FAILED"
+    });
 
     continue;
 }
@@ -1106,6 +1113,41 @@ if (!socket.connected) {
     break;
 }
 
+
+let committedRegistrations = [];
+
+try {
+    committedRegistrations =
+        registry.commitCompanyRegistrations(
+            socket,
+            preparedRegistrations.filter(
+                registration =>
+                    registration.connector_id === connectorId
+            )
+        );
+} catch (error) {
+    console.error(
+        "[CONNECTOR IDENTIFY] Company context commit failed",
+        {
+            connector_id: connectorId,
+            socket_id: socket.id,
+            error: error.message
+        }
+    );
+
+    socket.emit("connector:registration:context", {
+        connector_id: connectorId,
+        socket_id: socket.id,
+        context_resolved: false,
+        reason: "COMPANY_CONTEXT_COMMIT_FAILED"
+    });
+}
+
+for (const registration of committedRegistrations) {
+    registry.emitCompanyRegistration(socket, registration);
+}
+
+
 socket.emit("connector:registration:status", {
     connector_id: connectorId,
     registered: true,
@@ -1163,14 +1205,16 @@ socket.emit("connector:registration:status", {
     socket.identificationInProgress = false;
 }
 
-});
-
+    })
+);
 
 // Connector Register
 
 
         // Connector Register
-        socket.on("register", async (data) => {
+        socket.on(
+    "register",
+    registry.registrationHandler(socket, async (data) => {
             console.log("Register Request :", data);
 
             const connectorId =
@@ -1183,9 +1227,67 @@ socket.emit("connector:registration:status", {
                 );
                 return;
             }
+if (
+    !socket.connected ||
+    socket.identificationInProgress === true ||
+    socket.directRegistrationInProgress === true
+) {
+    socket.emit("connector:registration:status", {
+        connector_id: connectorId,
+        registered: false,
+        reason: !socket.connected
+            ? "SOCKET_DISCONNECTED"
+            : "REGISTRATION_IN_PROGRESS"
+    });
 
-            const previousConnectorId = socket.connectorId;
-            const recoveryState = await inspectConnectorRecoveryState(
+    return;
+}
+
+socket.directRegistrationInProgress = true;
+
+// Capture identity before this registration attempt.
+const previousConnectorId = socket.connectorId;
+const previousCompanyCode = socket.companyCode;
+const previousCompanyGuid = socket.companyGuid;
+
+// Track whether this connector alias existed before
+// the current registration attempt.
+const registrationExistedBeforeAttempt =
+    registry.get(connectorId) === socket &&
+    socket.connectorIds?.has(connectorId) === true;
+
+// Only a newly acquired local alias may be removed
+// when this registration attempt fails.
+let registrationAcquiredThisAttempt = false;
+
+try {
+
+
+const resolvedDirect =
+    await registry.resolveDirectRegistration(supabase, data);
+
+const preparedDirectRegistrations =
+    registry.prepareCompanyRegistrations(
+        socket,
+        resolvedDirect.contexts
+    );
+
+if (!socket.connected) {
+    return;
+}
+
+function restoreRegistrationIdentity() {
+    // Do not overwrite identity changed by another handler.
+    if (socket.connectorId !== connectorId) {
+        return;
+    }
+
+    socket.connectorId = previousConnectorId;
+    socket.companyCode = previousCompanyCode;
+    socket.companyGuid = previousCompanyGuid;
+}
+
+const recoveryState = await inspectConnectorRecoveryState(
     connectorId
 ).catch(error => {
     console.error(
@@ -1282,33 +1384,31 @@ const registered = registry.register(
     socket
 );
 
+if (
+    registered === true &&
+    !registrationExistedBeforeAttempt
+) {
+    registrationAcquiredThisAttempt = true;
+}
 if (!registered) {
 
-                try {
-                    await updateConnectorHealthIfSocketOwner(
-                        connectorId,
-                        socket.id,
-                        {
-                            connection_status: "DISCONNECTED",
-                            operation_status: "UNKNOWN"
-                        }
-                    );
-                } catch (error) {
-                    console.error(
-                        "âŒ OWNERSHIP ROLLBACK FAILED",
-                        {
-                            socket_id: socket.id,
-                            connector_id: connectorId,
-                            error: error.message
-                        }
-                    );
-                }
+    // Local registry rejected registration.
+// Do not mark Redis DISCONNECTED: the same socket may
+// already own this connector and be serving operations.
+// Leave Redis ownership to its existing lease and guards.
+console.warn(
+    "[CONNECTOR REGISTER] Registry rejected; Redis ownership retained",
+    {
+        connector_id: connectorId,
+        socket_id: socket.id
+    }
+);
 
                 if (socket.connectorId === connectorId) {
                     socket.connectorId = previousConnectorId || null;
                 }
 
-                registry.remove(connectorId, socket);
+                
 
                 console.error(
                     "âŒ CONNECTOR REGISTRATION REJECTED",
@@ -1328,13 +1428,7 @@ socket.companyGuid = data.company_guid;
 socket.connectorId = connectorId;
 
 
-            if (
-                previousConnectorId &&
-                previousConnectorId !== connectorId
-            ) {
-                registry.remove(previousConnectorId, socket);
-            }
-
+           
             
             let healthUpdate;
 
@@ -1395,42 +1489,33 @@ socket.connectorId = connectorId;
                 });
 
                 registry.remove(connectorId, socket);
+                restoreRegistrationIdentity();
                 return;
             }
 
-            if (!healthUpdate.updated) {
-                try {
-                    await updateConnectorHealthIfSocketOwner(
-                        connectorId,
-                        socket.id,
-                        {
-                            connection_status: "DISCONNECTED",
-                            operation_status: "UNKNOWN"
-                        }
-                    );
-                } catch (error) {
-                    console.error(
-                        "âŒ CONNECTOR OWNERSHIP ROLLBACK FAILED",
-                        {
-                            socket_id: socket.id,
-                            connector_id: connectorId,
-                            error: error.message
-                        }
-                    );
-                }
+          if (!healthUpdate?.updated) {
+    console.error(
+        "[CONNECTOR REGISTER] Health ownership not verified",
+        {
+            connector_id: connectorId,
+            socket_id: socket.id,
+            reason: "HEALTH_UPDATE_UNVERIFIED"
+        }
+    );
 
-                registry.remove(connectorId, socket);
+    // Fail closed locally. Do not mark a connected
+    // socket DISCONNECTED in Redis on an uncertain result.
+    registry.remove(connectorId, socket);
+    restoreRegistrationIdentity();
 
-                console.error(
-                    "âŒ CONNECTOR REGISTRATION ROLLED BACK",
-                    {
-                        socket_id: socket.id,
-                        connector_id: connectorId
-                    }
-                );
+    socket.emit("connector:registration:status", {
+        connector_id: connectorId,
+        registered: false,
+        reason: "HEALTH_UPDATE_UNVERIFIED"
+    });
 
-                return;
-            }
+    return;
+}
 
                         if (!socket.connected) {
                 console.warn(
@@ -1458,10 +1543,12 @@ socket.connectorId = connectorId;
                     );
                 });
 
-                registry.remove(connectorId, socket);
-                return;
+             registry.remove(connectorId, socket);
+            restoreRegistrationIdentity();
+            return;
             }
 if (!activateProtocolReceiver()) {
+        
     console.error(
         "[CONNECTOR REGISTER] Protocol activation blocked",
         {
@@ -1470,6 +1557,20 @@ if (!activateProtocolReceiver()) {
         }
     );
 
+    // Protocol activation failed.
+// Revoke local registration below.
+// Do not mark a still-connected socket DISCONNECTED in Redis.
+// Redis ownership remains guarded by its existing lease.
+
+  registry.remove(connectorId, socket);
+restoreRegistrationIdentity();
+
+    socket.emit("connector:registration:status", {
+        connector_id: connectorId,
+        registered: false,
+        reason: "PROTOCOL_ACTIVATION_FAILED"
+    });
+
     return;
 }
             console.log("âœ… CONNECTOR REGISTERED WITH OWNERSHIP", {
@@ -1477,12 +1578,100 @@ if (!activateProtocolReceiver()) {
                 connector_id: connectorId,
                 company_code: data.company_code
             });
-            socket.emit("connector:registration:status", {
-    connector_id: connectorId,
-    registered: true,
-    socket_id: socket.id
-});
-        });
+
+
+
+let committedDirectRegistrations = [];
+
+try {
+    committedDirectRegistrations =
+        registry.commitCompanyRegistrations(
+            socket,
+            preparedDirectRegistrations.filter(
+                registration =>
+                    registration.connector_id === connectorId
+            )
+        );
+} catch (error) {
+    console.error(
+        "[CONNECTOR REGISTER] Company context commit failed",
+        {
+            connector_id: connectorId,
+            socket_id: socket.id,
+            error: error.message
+        }
+    );
+}
+
+for (const registration of committedDirectRegistrations) {
+    registry.emitCompanyRegistration(socket, registration);
+}
+
+if (committedDirectRegistrations.length === 0) {
+    socket.emit("connector:registration:context", {
+        connector_id: connectorId,
+        socket_id: socket.id,
+        context_resolved: false,
+        reason: "LEGACY_CONTEXT_UNRESOLVED"
+    });
+}
+
+    socket.emit("connector:registration:status", {
+        connector_id: connectorId,
+        registered: true,
+        socket_id: socket.id
+    });
+
+} catch (error) {
+    console.error(
+        "[CONNECTOR REGISTER] Unexpected registration error",
+        {
+            socket_id: socket.id,
+            connector_id: connectorId,
+            error: error?.message || String(error)
+        }
+    );
+
+       // Preserve an existing same-socket registration if
+// this repeat attempt fails unexpectedly.
+// Revoke only an alias newly acquired by this attempt.
+if (
+    registrationAcquiredThisAttempt === true &&
+    !registrationExistedBeforeAttempt
+) {
+    registry.remove(connectorId, socket);
+}
+    // Restore previous identity only if its local registration
+    // is still valid. Never restore a stale connector alias.
+    if (socket.connectorId === connectorId) {
+        const previousIdentityStillValid =
+            previousConnectorId &&
+            registry.get(previousConnectorId) === socket;
+
+        socket.connectorId = previousIdentityStillValid
+            ? previousConnectorId
+            : null;
+
+        socket.companyCode = previousIdentityStillValid
+            ? previousCompanyCode
+            : null;
+
+        socket.companyGuid = previousIdentityStillValid
+            ? previousCompanyGuid
+            : null;
+    }
+
+    // Redis ownership and operation locks are not modified.
+    socket.emit("connector:registration:status", {
+        connector_id: connectorId,
+        registered: false,
+        reason: "REGISTRATION_ERROR"
+    });
+} finally {
+    socket.directRegistrationInProgress = false;
+}
+    })
+);
 
 
 socket.on("getMastersProgress", async (data) => {
