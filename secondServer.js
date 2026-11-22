@@ -40535,6 +40535,16 @@ console.log(
 );
 
 if (!socket || socket.connected !== true) {
+  console.warn("[BILLEY_TRACE_GETMASTERS_01]", {
+    source: "secondServer/getMasters",
+    rejection: "SOCKET_MISSING_OR_DISCONNECTED",
+    batch_id: sync_batch_id,
+    connector_id,
+    socket_found: !!socket,
+    socket_connected: socket?.connected === true,
+    socket_id: socket?.id || null,
+    timestamp: new Date().toISOString()
+});
        return res.status(503).json({
     success: false,
     error: "Connector offline",
@@ -40550,6 +40560,15 @@ if (
     socket.connected === true &&
     socket.tallyStatus === "OFFLINE"
 ) {
+  console.warn("[BILLEY_TRACE_GETMASTERS_02]", {
+    source: "secondServer/getMasters",
+    rejection: "TALLY_OFFLINE",
+    batch_id: sync_batch_id,
+    connector_id,
+    socket_id: socket?.id || null,
+    tally_status: socket?.tallyStatus,
+    timestamp: new Date().toISOString()
+});
     return res.status(503).json({
         success: false,
         error: "Tally application offline",
