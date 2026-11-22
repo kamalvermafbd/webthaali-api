@@ -454,11 +454,41 @@ end
             and currentSocket ~= ""
             and currentSocket ~= ARGV[2]
             and currentStatus ~= "DISCONNECTED" then
-            return "REJECTED:OTHER_CONNECTED_SOCKET"
+            return "REJECTED_HEALTH:" .. cjson.encode({
+    reason = "OTHER_CONNECTED_SOCKET",
+    health = {
+        socket_id = currentSocket,
+        connection_status = currentStatus,
+        operation_status = record["operation_status"],
+        shared_updated_at = record["shared_updated_at"]
+    }
+})
         end
     end
 
-   local previousSocket = record["socket_id"]
+   
+local previousSocket = record["socket_id"]
+
+-- Never transfer ownership while the previous socket
+-- has an unfinished operation or quarantine.
+if previousSocket
+    and type(previousSocket) == "string"
+    and previousSocket ~= ""
+    and previousSocket ~= ARGV[2] then
+
+    if redis.call("EXISTS", KEYS[8] .. previousSocket) == 1 then
+        return "REJECTED:PREVIOUS_SOCKET_OPERATION_LOCK"
+    end
+
+    if redis.call("EXISTS", KEYS[9] .. previousSocket) == 1 then
+        return "REJECTED:PREVIOUS_SOCKET_QUARANTINE"
+    end
+
+    if redis.call("EXISTS", KEYS[10] .. previousSocket) == 1 then
+        return "REJECTED:PREVIOUS_SOCKET_ACTIVE_MARKER"
+    end
+end
+
 
 record["connector_id"] = ARGV[1]
 record["socket_id"] = ARGV[2]
@@ -482,26 +512,46 @@ record["shared_updated_at"] = ARGV[3]
     redis.call("SET", KEYS[1], updated, "EX", ARGV[4])
 
     return updated
+   
     `,
-    7,
-getHealthKey(id),
-`billey:connector:operation-lock:${id}`,
-getConnectorActiveOperationKey(id),
-getConnectorQuarantineKey(id),
-`billey:socket:operation-lock:${sid}`,
-getSocketQuarantineKey(sid),
-getSocketActiveOperationKey(sid),
-id,
-sid,
-new Date().toISOString(),
-String(ttlSeconds)
+    10,
+    getHealthKey(id),
+    `billey:connector:operation-lock:${id}`,
+    getConnectorActiveOperationKey(id),
+    getConnectorQuarantineKey(id),
+    `billey:socket:operation-lock:${sid}`,
+    getSocketQuarantineKey(sid),
+    getSocketActiveOperationKey(sid),
+    "billey:socket:operation-lock:",
+    "billey:socket:quarantine:",
+    "billey:socket:operation-active:",
+    id,
+    sid,
+    new Date().toISOString(),
+    String(ttlSeconds)
 );
+
 
     if (result === 0) {
     return {
         claimed: false,
         health: null,
         reason: "UNSPECIFIED"
+    };
+}
+
+if (
+    typeof result === "string" &&
+    result.startsWith("REJECTED_HEALTH:")
+) {
+    const payload = JSON.parse(
+        result.slice("REJECTED_HEALTH:".length)
+    );
+
+    return {
+        claimed: false,
+        health: payload.health || null,
+        reason: payload.reason || "UNSPECIFIED"
     };
 }
 

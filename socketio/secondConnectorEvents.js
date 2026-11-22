@@ -1022,26 +1022,29 @@ console.warn(
         registry.remove(connectorId, socket);
         break;
     }
-if (!activateProtocolReceiver()) {
-    
+let protocolActivated = false;
+
+try {
+    protocolActivated = activateProtocolReceiver();
+} catch (error) {
     console.error(
-        "[CONNECTOR IDENTIFY] Protocol activation blocked",
+        "[CONNECTOR IDENTIFY] Protocol activation threw",
+        {
+            connector_id: connectorId,
+            socket_id: socket.id,
+            error: error.message
+        }
+    );
+}
+
+if (!protocolActivated) {
+    console.error(
+        "[CONNECTOR IDENTIFY] Protocol activation failed",
         {
             connector_id: connectorId,
             socket_id: socket.id
         }
     );
-
-  // Protocol activation failed.
-// Revoke only this connector's local registration below.
-// Do not disconnect Redis ownership while socket is connected.
-console.warn(
-    "[CONNECTOR IDENTIFY] Protocol activation failed; local authorization revoked",
-    {
-        connector_id: connectorId,
-        socket_id: socket.id
-    }
-);
 
     registry.remove(connectorId, socket);
 
@@ -1488,8 +1491,14 @@ socket.connectorId = connectorId;
                     );
                 });
 
-                registry.remove(connectorId, socket);
-                restoreRegistrationIdentity();
+                if (
+    registrationAcquiredThisAttempt &&
+    !registrationExistedBeforeAttempt
+) {
+    registry.remove(connectorId, socket);
+}
+
+restoreRegistrationIdentity();
                 return;
             }
 
@@ -1505,8 +1514,14 @@ socket.connectorId = connectorId;
 
     // Fail closed locally. Do not mark a connected
     // socket DISCONNECTED in Redis on an uncertain result.
+    if (
+    registrationAcquiredThisAttempt &&
+    !registrationExistedBeforeAttempt
+) {
     registry.remove(connectorId, socket);
-    restoreRegistrationIdentity();
+}
+
+restoreRegistrationIdentity();
 
     socket.emit("connector:registration:status", {
         connector_id: connectorId,
@@ -1543,27 +1558,48 @@ socket.connectorId = connectorId;
                     );
                 });
 
-             registry.remove(connectorId, socket);
-            restoreRegistrationIdentity();
+             if (
+    registrationAcquiredThisAttempt &&
+    !registrationExistedBeforeAttempt
+) {
+    registry.remove(connectorId, socket);
+}
+
+restoreRegistrationIdentity();
             return;
             }
-if (!activateProtocolReceiver()) {
-        
+let protocolActivated = false;
+
+try {
+    protocolActivated = activateProtocolReceiver();
+} catch (error) {
     console.error(
-        "[CONNECTOR REGISTER] Protocol activation blocked",
+        "[CONNECTOR REGISTER] Protocol activation threw",
+        {
+            connector_id: connectorId,
+            socket_id: socket.id,
+            error: error.message
+        }
+    );
+}
+
+if (!protocolActivated) {
+    console.error(
+        "[CONNECTOR REGISTER] Protocol activation failed",
         {
             connector_id: connectorId,
             socket_id: socket.id
         }
     );
 
-    // Protocol activation failed.
-// Revoke local registration below.
-// Do not mark a still-connected socket DISCONNECTED in Redis.
-// Redis ownership remains guarded by its existing lease.
+    if (
+        registrationAcquiredThisAttempt &&
+        !registrationExistedBeforeAttempt
+    ) {
+        registry.remove(connectorId, socket);
+    }
 
-  registry.remove(connectorId, socket);
-restoreRegistrationIdentity();
+    restoreRegistrationIdentity();
 
     socket.emit("connector:registration:status", {
         connector_id: connectorId,
@@ -1791,41 +1827,49 @@ socket.on("getMastersProgress", async (data) => {
         // ============================================================
 
         async function updateOwnedSocketHealth(patch) {
-            const connectorIds = new Set([
-                ...(socket.connectorIds || []),
-                socket.connectorId
-            ].filter(Boolean));
+    const connectorIds = new Set([
+        ...(socket.connectorIds || []),
+        socket.connectorId
+    ].filter(Boolean));
 
-            for (const connectorId of connectorIds) {
-                try {
-                    const result =
-                        await updateConnectorHealthIfSocketOwner(
-                            connectorId,
-                            socket.id,
-                            patch
-                        );
-
-                    if (!result.updated) {
-                        console.warn(
-                            "âš ï¸ SHARED HEALTH UPDATE SKIPPED: SOCKET IS NOT OWNER",
-                            {
-                                socket_id: socket.id,
-                                connector_id: connectorId
-                            }
-                        );
-                    }
-                } catch (error) {
-                    console.error(
-                        "âŒ SHARED HEALTH UPDATE FAILED",
-                        {
-                            socket_id: socket.id,
-                            connector_id: connectorId,
-                            error: error.message
-                        }
-                    );
-                }
-            }
+    for (const connectorId of connectorIds) {
+        if (
+            !socket.connected ||
+            registry.get(connectorId) !== socket ||
+            !socket.connectorIds?.has(connectorId)
+        ) {
+            continue;
         }
+
+        try {
+            const result =
+                await updateConnectorHealthIfSocketOwner(
+                    connectorId,
+                    socket.id,
+                    patch
+                );
+
+            if (!result.updated) {
+                console.warn(
+                    "[SHARED HEALTH UPDATE] Ownership not verified",
+                    {
+                        socket_id: socket.id,
+                        connector_id: connectorId
+                    }
+                );
+            }
+        } catch (error) {
+            console.error(
+                "[SHARED HEALTH UPDATE] Failed",
+                {
+                    socket_id: socket.id,
+                    connector_id: connectorId,
+                    error: error.message
+                }
+            );
+        }
+    }
+}
 
         // ============================================================
         // PROTOCOL HEARTBEAT
