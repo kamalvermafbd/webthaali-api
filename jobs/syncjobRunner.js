@@ -244,6 +244,19 @@ console.log(
         errorData.reason === "CONNECTOR_OFFLINE" &&
         errorData.batch_id === job.batch_id
     ) {
+        console.warn("[BILLEY_TRACE_SYNC_OFFLINE_01]", {
+    source: "syncjobRunner",
+    batch_id: job.batch_id,
+    http_status: response.status,
+    error_code: errorData.error_code,
+    reason: errorData.reason,
+    response_batch_id: errorData.batch_id,
+    offline_elapsed_ms:
+        offlineSince === null
+            ? 0
+            : Date.now() - offlineSince,
+    timestamp: new Date().toISOString()
+});
 
                        if (offlineSince === null) {
             offlineSince = Date.now();
