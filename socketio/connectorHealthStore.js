@@ -412,6 +412,44 @@ async function claimConnectorSocketOwnership(
     }
 
     await ensureConnected();
+
+    const previousHealthRaw = await redis.get(getHealthKey(id));
+
+    let previousSid = "";
+
+    if (previousHealthRaw !== null) {
+        let previousHealth;
+
+        try {
+            previousHealth = JSON.parse(previousHealthRaw);
+        } catch {
+            throw new Error("CONNECTOR_HEALTH_MALFORMED");
+        }
+
+        if (
+            !previousHealth ||
+            typeof previousHealth !== "object" ||
+            Array.isArray(previousHealth)
+        ) {
+            throw new Error("CONNECTOR_HEALTH_MALFORMED");
+        }
+
+        const storedSocket = previousHealth.socket_id;
+
+        if (storedSocket !== undefined && storedSocket !== null) {
+            if (
+                typeof storedSocket !== "string" ||
+                storedSocket !== storedSocket.trim()
+            ) {
+                throw new Error("CONNECTOR_HEALTH_SOCKET_INVALID");
+            }
+
+            previousSid = storedSocket;
+        }
+    }
+
+    const previousKeySid = previousSid || sid;
+
 const result = await redis.eval(
     `
 -- Do not change ownership while connector/socket
@@ -467,27 +505,38 @@ end
     end
 
    
+
 local previousSocket = record["socket_id"]
 
--- Never transfer ownership while the previous socket
--- has an unfinished operation or quarantine.
-if previousSocket
-    and type(previousSocket) == "string"
-    and previousSocket ~= ""
-    and previousSocket ~= ARGV[2] then
+if previousSocket == nil or previousSocket == cjson.null then
+    previousSocket = ""
+end
 
-    if redis.call("EXISTS", KEYS[8] .. previousSocket) == 1 then
+if type(previousSocket) ~= "string" then
+    return "REJECTED:INVALID_PREVIOUS_SOCKET"
+end
+
+-- Prevent transfer if ownership changed after the JS pre-read.
+if previousSocket ~= ARGV[5] then
+    return "REJECTED:STALE_PREVIOUS_SOCKET"
+end
+
+-- All Redis keys must be supplied explicitly in KEYS.
+if previousSocket ~= "" and previousSocket ~= ARGV[2] then
+
+    if redis.call("EXISTS", KEYS[8]) == 1 then
         return "REJECTED:PREVIOUS_SOCKET_OPERATION_LOCK"
     end
 
-    if redis.call("EXISTS", KEYS[9] .. previousSocket) == 1 then
+    if redis.call("EXISTS", KEYS[9]) == 1 then
         return "REJECTED:PREVIOUS_SOCKET_QUARANTINE"
     end
 
-    if redis.call("EXISTS", KEYS[10] .. previousSocket) == 1 then
+    if redis.call("EXISTS", KEYS[10]) == 1 then
         return "REJECTED:PREVIOUS_SOCKET_ACTIVE_MARKER"
     end
 end
+
 
 
 record["connector_id"] = ARGV[1]
@@ -522,13 +571,16 @@ record["shared_updated_at"] = ARGV[3]
     `billey:socket:operation-lock:${sid}`,
     getSocketQuarantineKey(sid),
     getSocketActiveOperationKey(sid),
-    "billey:socket:operation-lock:",
-    "billey:socket:quarantine:",
-    "billey:socket:operation-active:",
+  
+    `billey:socket:operation-lock:${previousKeySid}`,
+    getSocketQuarantineKey(previousKeySid),
+    getSocketActiveOperationKey(previousKeySid),
     id,
     sid,
     new Date().toISOString(),
-    String(ttlSeconds)
+    String(ttlSeconds),
+    previousSid
+
 );
 
 
