@@ -679,7 +679,7 @@ const company_guids =
     row => row.connector_id
 );
 
-    
+
    const preparedRegistrations =
     registry.prepareCompanyRegistrations(socket, matches);
 
@@ -888,7 +888,10 @@ socket.emit("connector:registration:status", {
 });
         continue;
     }
-
+const registrationExistedBeforeAttempt =
+    registry.get(connectorId) === socket &&
+    socket.connectorIds?.has(connectorId) === true;
+    
     const registered = registry.register(
         connectorId,
         socket
@@ -1178,6 +1181,7 @@ try {
                     registration.connector_id === connectorId
             )
         );
+
 } catch (error) {
     console.error(
         "[CONNECTOR IDENTIFY] Company context commit failed",
@@ -1188,13 +1192,36 @@ try {
         }
     );
 
+    // Remove only a current, newly acquired alias.
+    // Preserve an alias that existed before this attempt.
+   const attemptStillCurrent = isCurrentRegistration();
+
+if (
+    attemptStillCurrent &&
+    !registrationExistedBeforeAttempt
+) {
+    registry.remove(connectorId, socket);
+}
+
+if (attemptStillCurrent && socket.connected) {
     socket.emit("connector:registration:context", {
         connector_id: connectorId,
         socket_id: socket.id,
         context_resolved: false,
         reason: "COMPANY_CONTEXT_COMMIT_FAILED"
     });
+
+    socket.emit("connector:registration:status", {
+        connector_id: connectorId,
+        socket_id: socket.id,
+        registered: false,
+        reason: "COMPANY_CONTEXT_COMMIT_FAILED"
+    });
 }
+
+continue;
+}
+
 
 for (const registration of committedRegistrations) {
     registry.emitCompanyRegistration(socket, registration);
@@ -1354,6 +1381,63 @@ const recoveryState = await inspectConnectorRecoveryState(
     return null;
 });
 
+
+if (recoveryState?.quarantined === true && socket.connected) {
+    // Recovery candidate only.
+    // This does NOT grant connector ownership or
+    // permission to execute Tally operations.
+    if (!(socket.reconcileRecoveryCandidateIds instanceof Set)) {
+        socket.reconcileRecoveryCandidateIds = new Set();
+    }
+
+    socket.reconcileRecoveryCandidateIds.add(
+        String(connectorId)
+    );
+
+    console.warn(
+        "[CONNECTOR REGISTER] RECOVERY CANDIDATE ADMITTED",
+        {
+            connector_id: connectorId,
+            socket_id: socket.id,
+            registered: false,
+            operation_authorized: false
+        }
+    );
+    // =====================================================
+// RECOVERY-ONLY PROCESS IDENTITY PROBE
+// Diagnostic only — never authorizes quarantine release.
+// =====================================================
+
+const {
+    sendManualReconcileRecoveryIdentityRequest
+} = require("./sendManualReconcileRecoveryIdentityRequest");
+
+sendManualReconcileRecoveryIdentityRequest({
+    connectorId: String(connectorId),
+    expectedSocketId: socket.id,
+    timeoutMs: 10000
+}).then(result => {
+    console.log(
+        "[CONNECTOR REGISTER] RECOVERY PROCESS IDENTITY OBSERVED",
+        {
+            connector_id: connectorId,
+            socket_id: socket.id,
+            identity: result.identity,
+            settlementEligible: false
+        }
+    );
+}).catch(error => {
+    console.warn(
+        "[CONNECTOR REGISTER] RECOVERY IDENTITY PROBE FAILED",
+        {
+            connector_id: connectorId,
+            socket_id: socket.id,
+            error: error.message
+        }
+    );
+});
+}
+
 if (!recoveryState || recoveryState.quarantined) {
     socket.emit("connector:registration:status", {
         connector_id: connectorId,
@@ -1365,6 +1449,7 @@ if (!recoveryState || recoveryState.quarantined) {
 
     return;
 }
+
 
             const claimed = await claimConnectorSocketOwnership(
                 connectorId,
@@ -1703,6 +1788,7 @@ try {
                     registration.connector_id === connectorId
             )
         );
+
 } catch (error) {
     console.error(
         "[CONNECTOR REGISTER] Company context commit failed",
@@ -1712,7 +1798,37 @@ try {
             error: error.message
         }
     );
+
+    const attemptStillCurrent = isCurrentRegistration();
+
+    if (
+        attemptStillCurrent &&
+        registrationAcquiredThisAttempt &&
+        !registrationExistedBeforeAttempt
+    ) {
+        registry.remove(connectorId, socket);
+        restoreRegistrationIdentity();
+    }
+
+    if (attemptStillCurrent && socket.connected) {
+        socket.emit("connector:registration:context", {
+            connector_id: connectorId,
+            socket_id: socket.id,
+            context_resolved: false,
+            reason: "COMPANY_CONTEXT_COMMIT_FAILED"
+        });
+
+        socket.emit("connector:registration:status", {
+            connector_id: connectorId,
+            socket_id: socket.id,
+            registered: false,
+            reason: "COMPANY_CONTEXT_COMMIT_FAILED"
+        });
+    }
+
+    return;
 }
+
 
 for (const registration of committedDirectRegistrations) {
     registry.emitCompanyRegistration(socket, registration);
