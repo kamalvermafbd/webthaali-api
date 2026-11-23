@@ -596,6 +596,62 @@ state.receiptPromise = writePromise;
 
 return writePromise;
   }
+// Manual Reconciliation only.
+// Shared, bounded retry for eligible durable exit receipts.
+function retryManualCoordinatorExitReceipt() {
+    const state = manualLifecycle;
+
+    if (!state) {
+        return Promise.resolve(false);
+    }
+
+    if (state.receiptRetryPromise) {
+        return state.receiptRetryPromise;
+    }
+
+    const work = Promise.resolve()
+        .then(async () => {
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                const confirmed =
+                    await maybeFinalizeManualCoordinatorExit();
+
+                if (confirmed === true) {
+                    return true;
+                }
+
+                // Retry only for an eligible settled coordinator.
+                // Never manufacture evidence for pending/unsafe work.
+                if (
+                    state.coordinatorExited !== true ||
+                    state.admissionSealed !== true ||
+                    state.callbackStarted !== true ||
+                    state.callbackSettled !== true ||
+                    state.pending.size !== 0 ||
+                    state.lateWorkDetected === true ||
+                    state.outcome !== "LOCALLY_SETTLED_UNVERIFIED"
+                ) {
+                    return false;
+                }
+
+                if (attempt < 3) {
+                    await new Promise(resolve =>
+                        setTimeout(resolve, attempt * 250)
+                    );
+                }
+            }
+
+            return false;
+        })
+        .finally(() => {
+            if (state.receiptRetryPromise === work) {
+                state.receiptRetryPromise = null;
+            }
+        });
+
+    state.receiptRetryPromise = work;
+
+    return work;
+}
 // F3-B: Persist an observed unsafe coordinator state.
 // This is Manual Reconciliation only.
 function notifyManualCoordinatorUnsafe() {
@@ -680,7 +736,7 @@ function notifyManualCoordinatorUnsafe() {
           manualLifecycle.pending.delete(promise);
 
           if (manualLifecycle.coordinatorExited === true) {
-              void maybeFinalizeManualCoordinatorExit();
+              void retryManualCoordinatorExitReceipt();
           }
       };
 
@@ -1370,7 +1426,7 @@ operationPromise.finally(() => {
         manualLifecycle.callbackSettled = true;
 
         if (manualLifecycle.coordinatorExited === true) {
-            void maybeFinalizeManualCoordinatorExit();
+            void retryManualCoordinatorExitReceipt();
         }
     }
 }).catch(() => {});
@@ -1876,11 +1932,29 @@ if (receiptRequested) {
                 manualLifecycle.outcome = "PENDING_WORK_UNVERIFIED";
             }
 
-            if (manualLifecycle.lateWorkDetected === true) {
-                await notifyManualCoordinatorUnsafe();
-            } else {
-                await maybeFinalizeManualCoordinatorExit();
-            }   
+          if (manualLifecycle.lateWorkDetected === true) {
+    await notifyManualCoordinatorUnsafe();
+} else {
+    const receiptConfirmed =
+    await retryManualCoordinatorExitReceipt();
+
+    if (
+        receiptConfirmed !== true &&
+        manualLifecycle.outcome ===
+            "LOCALLY_SETTLED_UNVERIFIED"
+    ) {
+        console.error(
+            "[MANUAL RECONCILE] DURABLE EXIT RECEIPT UNCONFIRMED",
+            {
+                attemptId: manualLifecycle.attemptId,
+                executionId: manualLifecycle.executionId,
+                connectorId: manualLifecycle.connectorId,
+                socketId: manualLifecycle.socketId,
+                pendingWork: manualLifecycle.pending.size
+            }
+        );
+    }
+}
         }
     }
 
