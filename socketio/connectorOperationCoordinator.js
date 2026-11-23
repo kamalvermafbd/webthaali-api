@@ -522,12 +522,15 @@ async function withGlobalConnectorLock(
           return Promise.resolve(false);
       }
 
-      if (state.receiptAttempted === true) {
-          return state.receiptPromise || Promise.resolve(false);
-      }
+     if (state.receiptConfirmed === true) {
+    return Promise.resolve(true);
+}
 
-      state.outcome = "LOCALLY_SETTLED_UNVERIFIED";
-      state.receiptAttempted = true;
+if (state.receiptPromise) {
+    return state.receiptPromise;
+}
+
+state.outcome = "LOCALLY_SETTLED_UNVERIFIED";
 
       const receipt = Object.freeze({
           attemptId: state.attemptId,
@@ -546,32 +549,52 @@ async function withGlobalConnectorLock(
           outcome: "LOCALLY_SETTLED_UNVERIFIED"
       });
 
-      state.receiptPromise = Promise.resolve()
-          .then(() => {
-              if (state.lateWorkDetected === true ||
-                  state.pending.size !== 0 ||
-                  state.outcome !== "LOCALLY_SETTLED_UNVERIFIED") {
-                  return false;
-              }
+   const writePromise = Promise.resolve()
+    .then(async () => {
+        if (
+            state.lateWorkDetected === true ||
+            state.admissionSealed !== true ||
+            state.coordinatorExited !== true ||
+            state.pending.size !== 0 ||
+            state.outcome !== "LOCALLY_SETTLED_UNVERIFIED"
+        ) {
+            return false;
+        }
 
-              return Promise.resolve(
-    manualCoordinatorReceiptWriter(receipt)
-).then(() => true);
-          })
-          .catch(error => {
-              console.error(
-                  "[MANUAL RECONCILE] Durable coordinator receipt failed",
-                  {
-                      attemptId: state.attemptId,
-                      executionId: state.executionId,
-                      error
-                  }
-              );
+        await manualCoordinatorReceiptWriter(receipt);
 
-              return false;
-          });
+        if (
+            state.lateWorkDetected === true ||
+            state.pending.size !== 0 ||
+            state.outcome !== "LOCALLY_SETTLED_UNVERIFIED"
+        ) {
+            return false;
+        }
 
-      return state.receiptPromise;
+        state.receiptConfirmed = true;
+        return true;
+    })
+    .catch(error => {
+        console.error(
+            "[MANUAL RECONCILE] Durable coordinator receipt failed",
+            {
+                attemptId: state.attemptId,
+                executionId: state.executionId,
+                error
+            }
+        );
+
+        return false;
+    })
+    .finally(() => {
+        if (state.receiptPromise === writePromise) {
+            state.receiptPromise = null;
+        }
+    });
+
+state.receiptPromise = writePromise;
+
+return writePromise;
   }
 // F3-B: Persist an observed unsafe coordinator state.
 // This is Manual Reconciliation only.

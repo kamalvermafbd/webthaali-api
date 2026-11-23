@@ -1,6 +1,8 @@
 const registry = require("./connectorRegistry");
 
-
+const {
+    revokeRecoveryTransportsForSocket
+} = require("./manualReconcileRecoveryTransportRegistry");
 const {
     publishConnectorHealth,
     updateConnectorHealth
@@ -700,7 +702,20 @@ const connectorIds = [
             .filter(Boolean)
     )
 ];
-
+console.log("[CONNECTOR IDENTIFY MAPPING AUDIT]", {
+    socket_id: socket.id,
+    company_guids,
+    matched_companies: matches.map(row => ({
+        company_code: row.company_code,
+        company_guid: row.company_guid,
+        connector_id: row.connector_id,
+        tally_owner: row.tally_owner
+    })),
+    selected_connector_ids: connectorIds,
+    target_connector_selected: connectorIds.includes(
+        "CON-21a18942-4ad8-49fa-9073-13908c3b1841"
+    )
+});
 if (connectorIds.length === 0) {
     console.warn(
         "âš ï¸ CONNECTOR IDENTIFICATION: NO DATABASE MAPPING",
@@ -2380,8 +2395,12 @@ if (
 
         socket.on("disconnect", async (reason) => {
 
+    // Revoke recovery-only transport immediately.
+    revokeRecoveryTransportsForSocket(socket);
+
     // Immediately revoke active getMasters progress authorization.
     revokeGetMastersProgressForSocket(socket);
+
     console.log("================================");
     console.log("âŒ Connector Disconnected");
     console.log("Socket ID :", socket.id);
