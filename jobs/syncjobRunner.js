@@ -279,75 +279,40 @@ console.log(
             continue;
         }
 
-             let waitingMarked = false;
-        let waitingTransitionError = null;
+                       const timeoutFailed =
+              await BatchStatusManager.markConnectorOfflineTimeoutFailed({
+                  batch_id: job.batch_id,
+                  execution_claim_token: job.execution_claim_token
+              });
 
-        try {
-            waitingMarked =
-                await BatchStatusManager.markWaitingConnector({
-                    batch_id: job.batch_id,
-                    execution_claim_token: job.execution_claim_token
-                });
-        } catch (error) {
-            waitingTransitionError = error;
-        }
+          if (timeoutFailed !== true) {
+              console.warn(
+                  "CONNECTOR OFFLINE TIMEOUT — FAILURE TRANSITION REJECTED:",
+                  job.batch_id
+              );
 
-        if (waitingMarked !== true) {
-            let waitingBatch = null;
+              return {
+                  outcome: "CONNECTOR_OFFLINE_TIMEOUT_TRANSITION_REJECTED",
+                  skipped: true,
+                  sync_completed: false,
+                  batch_id: job.batch_id,
+                  http_status: response.status
+              };
+          }
 
-            try {
-                waitingBatch = await BatchStatusManager.loadBatch({
-                    batch_id: job.batch_id
-                });
-            } catch (error) {
-                return {
-                    outcome: "WAITING_CONNECTOR_TRANSITION_UNVERIFIED",
-                    skipped: true,
-                    sync_completed: false,
-                    batch_id: job.batch_id,
-                    http_status: response.status,
-                    reason: error?.message || String(error)
-                };
-            }
+          console.error(
+              "CONNECTOR OFFLINE TIMEOUT — BATCH FAILED:",
+              job.batch_id
+          );
 
-            const waitingConfirmed =
-                waitingBatch?.batch_id === job.batch_id &&
-                typeof waitingBatch.execution_claim_token === "string" &&
-                waitingBatch.execution_claim_token.toLowerCase() ===
-                    job.execution_claim_token.toLowerCase() &&
-                waitingBatch.batch_status === "PENDING" &&
-                waitingBatch.worker_status === "PENDING" &&
-                waitingBatch.current_stage === "WAITING_CONNECTOR" &&
-                waitingBatch.worker_id == null &&
-                waitingBatch.batch_closed !== true &&
-                waitingBatch.cleanup_claim_token == null &&
-                waitingBatch.retry_claim_token == null;
-
-            if (!waitingConfirmed) {
-                return {
-                    outcome: waitingTransitionError
-                        ? "WAITING_CONNECTOR_TRANSITION_UNVERIFIED"
-                        : "WAITING_CONNECTOR_TRANSITION_REJECTED",
-                    skipped: true,
-                    sync_completed: false,
-                    batch_id: job.batch_id,
-                    http_status: response.status,
-                    reason: waitingTransitionError
-                        ? waitingTransitionError.message ||
-                            String(waitingTransitionError)
-                        : "Waiting state for this execution claim was not verified"
-                };
-            }
-        }
-
-        return {
-            outcome: "WAITING_CONNECTOR",
-            skipped: true,
-            sync_completed: false,
-            batch_id: job.batch_id,
-            http_status: response.status,
-            reason: "CONNECTOR_OFFLINE"
-        };
+          return {
+              outcome: "CONNECTOR_OFFLINE_TIMEOUT",
+              skipped: false,
+              sync_completed: false,
+              batch_id: job.batch_id,
+              http_status: response.status,
+              reason: "CONNECTOR_OFFLINE_TIMEOUT"
+          };
     }
 
     return {
