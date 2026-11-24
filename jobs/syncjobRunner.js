@@ -279,40 +279,65 @@ console.log(
             continue;
         }
 
-                       const timeoutFailed =
-              await BatchStatusManager.markConnectorOfflineTimeoutFailed({
-                  batch_id: job.batch_id,
-                  execution_claim_token: job.execution_claim_token
-              });
+                  const timeoutFailed =
+            await BatchStatusManager.markConnectorOfflineTimeoutFailed({
+                batch_id: job.batch_id,
+                execution_claim_token: job.execution_claim_token
+            });
 
-          if (timeoutFailed !== true) {
-              console.warn(
-                  "CONNECTOR OFFLINE TIMEOUT — FAILURE TRANSITION REJECTED:",
-                  job.batch_id
-              );
+        if (timeoutFailed !== true) {
+            console.error(
+                "CONNECTOR OFFLINE TIMEOUT — ATOMIC FAILURE REJECTED:",
+                job.batch_id
+            );
 
-              return {
-                  outcome: "CONNECTOR_OFFLINE_TIMEOUT_TRANSITION_REJECTED",
-                  skipped: true,
-                  sync_completed: false,
-                  batch_id: job.batch_id,
-                  http_status: response.status
-              };
-          }
+            let verifiedBatch;
 
-          console.error(
-              "CONNECTOR OFFLINE TIMEOUT — BATCH FAILED:",
-              job.batch_id
-          );
+            try {
+                verifiedBatch =
+                    await BatchStatusManager.loadBatch({
+                        batch_id: job.batch_id
+                    });
+            } catch (verifyError) {
+                throw new Error(
+                    "CONNECTOR_OFFLINE_TIMEOUT_OUTCOME_UNKNOWN: " +
+                    verifyError.message
+                );
+            }
 
-          return {
-              outcome: "CONNECTOR_OFFLINE_TIMEOUT",
-              skipped: false,
-              sync_completed: false,
-              batch_id: job.batch_id,
-              http_status: response.status,
-              reason: "CONNECTOR_OFFLINE_TIMEOUT"
-          };
+            const timeoutConfirmed =
+                verifiedBatch?.batch_id === job.batch_id &&
+                typeof verifiedBatch.execution_claim_token === "string" &&
+                verifiedBatch.execution_claim_token.toLowerCase() ===
+                    job.execution_claim_token.toLowerCase() &&
+                verifiedBatch.batch_status === "FAILED" &&
+                verifiedBatch.worker_status === "FAILED" &&
+                verifiedBatch.current_stage === "FAILED" &&
+                verifiedBatch.error_message === "CONNECTOR_OFFLINE_TIMEOUT" &&
+                verifiedBatch.connector_retry_ready === false;
+
+            if (!timeoutConfirmed) {
+                throw new Error(
+                    "CONNECTOR_OFFLINE_TIMEOUT_TRANSITION_REJECTED: " +
+                    "Expected terminal state not verified for batch " +
+                    job.batch_id
+                );
+            }
+        }
+
+        console.error(
+            "CONNECTOR OFFLINE TIMEOUT — BATCH FAILED:",
+            job.batch_id
+        );
+
+        return {
+            outcome: "CONNECTOR_OFFLINE_TIMEOUT",
+            skipped: true,
+            sync_completed: false,
+            batch_id: job.batch_id,
+            http_status: response.status,
+            reason: "CONNECTOR_OFFLINE_TIMEOUT"
+        };
     }
 
     return {

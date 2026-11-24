@@ -150,7 +150,8 @@ const registry =
 
 const {
     acquireHttpBatchExecutionGuard,
-    releaseHttpBatchExecutionGuard
+    releaseHttpBatchExecutionGuard,
+    inspectConnectorRecoveryState
 } = require("./socketio/connectorHealthStore");
 
 const {

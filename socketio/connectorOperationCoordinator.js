@@ -238,10 +238,17 @@ try {
             }
         );
 
-        // Prevent an uncertain acquisition from starting Tally work.
-        if (socket.connected) {
-            socket.disconnect(true);
-        }
+      // Acquisition timed out before operation dispatch.
+// Do not disconnect a healthy transport.
+// Any late successful acquisition retains its persistent
+// connector and socket ownership markers.
+console.warn(
+    `[GLOBAL LOCK] Acquisition timeout; socket retained: ${id}`,
+    {
+        socketId: socket.id,
+        ownerToken
+    }
+);
     }
 
     throw error;
@@ -824,16 +831,12 @@ function markOwnershipFailure(error) {
         operationAbortController.abort(error);
     }
 
-    if (lock.socket.connected) {
-        try {
-            lock.socket.disconnect(true);
-        } catch (disconnectError) {
-            console.error(
-                `[GLOBAL LOCK] Ownership-check disconnect failed: ${lock.connectorId}`,
-                disconnectError
-            );
-        }
-    }
+    // Operation abort triggers settlement handling.
+// Preserve transport until quarantine is evaluated.
+console.warn(
+    `[GLOBAL LOCK] Ownership failure; operation aborted: ${lock.connectorId}`,
+    { socketId: lock.socketId }
+);
 
     return ownershipFailure;
 }
@@ -1174,23 +1177,34 @@ if (manualLifecycle) {
 
     operationAbortController.abort(error);
 
-    try {
-       await quarantineForCleanup(
-    lock.connectorId,
-    lock.socketId,
-    "GLOBAL_LOCK_OWNERSHIP_LOST",
-    lock.ownerToken
-);
-    } catch (quarantineError) {
-        console.error(
-            `[GLOBAL LOCK] Quarantine failed: ${lock.connectorId}`,
-            quarantineError
-        );
-    }
+   let quarantineConfirmed = false;
 
-    if (lock.socket.connected) {
-        lock.socket.disconnect(true);
-    }
+try {
+    const quarantineResult = await quarantineForCleanup(
+        lock.connectorId,
+        lock.socketId,
+        "GLOBAL_LOCK_OWNERSHIP_LOST",
+        lock.ownerToken
+    );
+
+    quarantineConfirmed =
+        quarantineResult?.quarantined === true;
+
+} catch (quarantineError) {
+    console.error(
+        `[GLOBAL LOCK] Quarantine failed: ${lock.connectorId}`,
+        quarantineError
+    );
+}
+
+if (quarantineConfirmed) {
+    console.warn(
+        `[GLOBAL LOCK] Ownership lost; quarantined socket retained: ${lock.connectorId}`,
+        { socketId: lock.socketId }
+    );
+} else if (lock.socket.connected) {
+    lock.socket.disconnect(true);
+}
 }
    } catch (error) {
     lockLost = true;
@@ -1202,23 +1216,34 @@ if (manualLifecycle) {
 
     operationAbortController.abort(error);
 
-    try {
-      await quarantineForCleanup(
-    lock.connectorId,
-    lock.socketId,
-    "GLOBAL_LOCK_RENEWAL_ERROR",
-    lock.ownerToken
-);
-    } catch (quarantineError) {
-        console.error(
-            `[GLOBAL LOCK] Renewal quarantine failed: ${lock.connectorId}`,
-            quarantineError
-        );
-    }
+  let quarantineConfirmed = false;
 
-    if (lock.socket.connected) {
-        lock.socket.disconnect(true);
-    }
+try {
+    const quarantineResult = await quarantineForCleanup(
+        lock.connectorId,
+        lock.socketId,
+        "GLOBAL_LOCK_RENEWAL_ERROR",
+        lock.ownerToken
+    );
+
+    quarantineConfirmed =
+        quarantineResult?.quarantined === true;
+
+} catch (quarantineError) {
+    console.error(
+        `[GLOBAL LOCK] Renewal quarantine failed: ${lock.connectorId}`,
+        quarantineError
+    );
+}
+
+if (quarantineConfirmed) {
+    console.warn(
+        `[GLOBAL LOCK] Renewal error quarantined; socket retained: ${lock.connectorId}`,
+        { socketId: lock.socketId }
+    );
+} else if (lock.socket.connected) {
+    lock.socket.disconnect(true);
+}
 } finally {
     renewing = false;
 
@@ -1250,9 +1275,32 @@ if (manualLifecycle) {
 const result = await new Promise((resolve, reject) => {
     let settled = false;
 
-    const cleanup = () => {
-        lock.socket.off("disconnect", onDisconnect);
-    };
+  const cleanup = () => {
+    lock.socket.off("disconnect", onDisconnect);
+
+    operationAbortController.signal.removeEventListener(
+        "abort",
+        onOperationAbort
+    );
+};
+
+const onOperationAbort = () => {
+    if (settled) return;
+
+    settled = true;
+    lockLost = true;
+
+    cleanup();
+
+    const error =
+        ownershipFailure ||
+        operationAbortController.signal.reason ||
+        new Error(
+            `Global connector operation aborted: ${lock.connectorId}`
+        );
+
+    reject(error);
+};
 
   const onDisconnect = () => {
     if (settled) return;
@@ -1290,6 +1338,17 @@ const result = await new Promise((resolve, reject) => {
     );
 };
     lock.socket.once("disconnect", onDisconnect);
+
+    operationAbortController.signal.addEventListener(
+    "abort",
+    onOperationAbort,
+    { once: true }
+);
+
+if (operationAbortController.signal.aborted) {
+    onOperationAbort();
+    return;
+}
 
     if (!lock.socket.connected) {
         onDisconnect();
@@ -1488,9 +1547,7 @@ try {
 
     operationAbortController.abort(error);
 
-    if (lock.socket.connected) {
-        lock.socket.disconnect(true);
-    }
+   // Defer transport handling to unsafe finalization.
 
     throw error;
 }
@@ -1507,9 +1564,8 @@ try {
 
     operationAbortController.abort(error);
 
-    if (lock.socket.connected) {
-        lock.socket.disconnect(true);
-    }
+   // Unsafe finalization handles quarantine confirmation
+// and the transport safety fallback.
 
     throw error;
 }
@@ -1598,9 +1654,33 @@ if (operationPromise) {
         error
     );
 
+ try {
+    const quarantineResult = await quarantineForCleanup(
+        lock.connectorId,
+        lock.socketId,
+        "PENDING_OPERATION_FAILED",
+        lock.ownerToken
+    );
+
+    if (quarantineResult?.quarantined !== true) {
+        throw new Error("CONNECTOR_QUARANTINE_UNVERIFIED");
+    }
+
+    console.warn(
+        `[GLOBAL LOCK] Pending operation quarantined; socket retained: ${lock.connectorId}`,
+        { socketId: lock.socketId }
+    );
+
+} catch (quarantineError) {
+    console.error(
+        `[GLOBAL LOCK] Pending operation quarantine failed: ${lock.connectorId}`,
+        quarantineError
+    );
+
     if (lock.socket.connected) {
         lock.socket.disconnect(true);
     }
+}
   if (error.message?.startsWith(
     "Global operation settle timeout:"
 )) {
@@ -1697,13 +1777,19 @@ if (
     );
 }
 
+let quarantineConfirmed = false;
+
 try {
-    await quarantineForCleanup(
+    const quarantineResult = await quarantineForCleanup(
         lock.connectorId,
         lock.socketId,
         "UNSAFE_OPERATION_FINALIZATION",
         lock.ownerToken
     );
+
+    quarantineConfirmed =
+        quarantineResult?.quarantined === true;
+
 } catch (quarantineError) {
     console.error(
         `[GLOBAL LOCK] Unsafe finalization quarantine failed: ${lock.connectorId}`,
@@ -1711,7 +1797,12 @@ try {
     );
 }
 
-if (lock.socket.connected) {
+if (quarantineConfirmed) {
+    console.warn(
+        `[GLOBAL LOCK] Unsafe operation quarantined; socket retained: ${lock.connectorId}`,
+        { socketId: lock.socketId }
+    );
+} else if (lock.socket.connected) {
     lock.socket.disconnect(true);
 }
 
@@ -1837,23 +1928,34 @@ if (receiptRequested) {
         error
     );
 
-    try {
-       await quarantineForCleanup(
-    lock.connectorId,
-    lock.socketId,
-    "GLOBAL_LOCK_RELEASE_FAILED",
-    lock.ownerToken
-);
-    } catch (quarantineError) {
-        console.error(
-            `[GLOBAL LOCK] Release quarantine failed: ${lock.connectorId}`,
-            quarantineError
-        );
-    }
+  let quarantineConfirmed = false;
 
-    if (lock.socket.connected) {
-        lock.socket.disconnect(true);
-    }
+try {
+    const quarantineResult = await quarantineForCleanup(
+        lock.connectorId,
+        lock.socketId,
+        "GLOBAL_LOCK_RELEASE_FAILED",
+        lock.ownerToken
+    );
+
+    quarantineConfirmed =
+        quarantineResult?.quarantined === true;
+
+} catch (quarantineError) {
+    console.error(
+        `[GLOBAL LOCK] Release quarantine failed: ${lock.connectorId}`,
+        quarantineError
+    );
+}
+
+if (quarantineConfirmed) {
+    console.warn(
+        `[GLOBAL LOCK] Connector quarantined; socket retained: ${lock.connectorId}`,
+        { socketId: lock.socketId }
+    );
+} else if (lock.socket.connected) {
+    lock.socket.disconnect(true);
+}
 
        throw error;
 }
