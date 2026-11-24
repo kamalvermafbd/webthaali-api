@@ -737,6 +737,19 @@ if (connectorIds.length === 0) {
 
 for (const connectorId of connectorIds) {
 
+        if (registry.get(connectorId) === socket &&
+        socket.connectorIds?.has(connectorId) === true) {
+
+        console.warn("[BILLEY_REPEAT_REGISTRATION]", {
+            connector_id: connectorId,
+            socket_id: socket.id,
+            generation: registry.getRegistrationGeneration(
+                connectorId,
+                socket
+            ),
+            tally_request_active: socket.tallyRequestActive === true
+        });
+    }
         if (!socket.connected) {
         console.warn(
             "[CONNECTOR IDENTIFY STOPPED] Socket disconnected before ownership claim",
