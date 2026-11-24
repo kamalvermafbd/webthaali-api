@@ -1083,28 +1083,43 @@ async function dispatchRecoveredWaitingBatch(batch) {
         throw new Error("Valid recovery batch is required");
     }
 
-    const { data: current, error } = await supabase
-        .from("sync_batches")
-        .select("*")
-        .eq("id", batch.id)
-        .eq("batch_id", batch.batch_id)
-        .maybeSingle();
+    async function loadCurrent() {
+        const { data, error } = await supabase
+            .from("sync_batches")
+            .select("*")
+            .eq("id", batch.id)
+            .eq("batch_id", batch.batch_id)
+            .maybeSingle();
 
-    if (error) {
-        throw new Error(
-            "RECOVERY_BATCH_LOOKUP_FAILED: " + error.message
+        if (error) {
+            throw new Error(
+                "RECOVERY_BATCH_LOOKUP_FAILED: " + error.message
+            );
+        }
+
+        return data;
+    }
+
+    function eligible(row) {
+        const message = String(row?.error_message || "");
+
+        return (
+            row?.waiting_recovery_pending === true &&
+            row.batch_status === "PENDING" &&
+            row.worker_status === "PENDING" &&
+            row.current_stage === "PENDING" &&
+            row.batch_closed !== true &&
+            row.cleanup_claim_token == null &&
+            row.retry_claim_token == null &&
+            Number(row.operation_count || 0) === 0 &&
+            !message.startsWith("CONNECTOR_OUTCOME_UNKNOWN:") &&
+            !message.startsWith("HTTP_OUTCOME_UNKNOWN:")
         );
     }
 
-    if (
-        !current ||
-        current.batch_status !== "PENDING" ||
-        current.worker_status !== "PENDING" ||
-        current.current_stage !== "PENDING" ||
-        current.worker_id != null ||
-        current.batch_closed === true ||
-        current.cleanup_claim_token != null
-    ) {
+    const current = await loadCurrent();
+
+    if (!eligible(current)) {
         return {
             success: false,
             queued: false,
@@ -1112,7 +1127,129 @@ async function dispatchRecoveredWaitingBatch(batch) {
         };
     }
 
-    return dispatchBatch(current);
+    // Unassigned batch: use the existing atomic reservation.
+    if (current.worker_id == null) {
+        return dispatchBatch(current);
+    }
+
+    // Assigned batch: retain the original reservation.
+    const generation = Number(current.dispatch_generation);
+
+    if (!Number.isSafeInteger(generation) || generation < 1) {
+        throw new Error(
+            "INVALID_DISPATCH_GENERATION: " + current.batch_id
+        );
+    }
+
+    const workerConfig = await resolveWorkerForBatch(current, {
+        connectorLossRetry: true
+    });
+
+    if (
+        !workerConfig?.id ||
+        !workerConfig?.queue_name ||
+        !workerConfig?.server_id ||
+        workerConfig.worker_name !== current.worker_id
+    ) {
+        throw new Error(
+            "RECOVERY_RESERVED_WORKER_MISMATCH: " + current.batch_id
+        );
+    }
+
+    const latest = await loadCurrent();
+
+    const sameReservation =
+        eligible(latest) &&
+        latest.worker_id === current.worker_id &&
+        latest.locked_at === current.locked_at &&
+        Number(latest.dispatch_generation) === generation &&
+        (latest.execution_claim_token ?? null) ===
+            (current.execution_claim_token ?? null) &&
+        latest.company_code === current.company_code &&
+        latest.tally_owner === current.tally_owner &&
+        latest.worker_type === current.worker_type &&
+        latest.job_type === current.job_type &&
+        latest.sync_mode === current.sync_mode &&
+        latest.sync_period === current.sync_period;
+
+    if (!sameReservation) {
+        return {
+            success: false,
+            queued: false,
+            reason: "RECOVERY_RESERVATION_CHANGED"
+        };
+    }
+
+    const liveStates = new Set([
+        "waiting",
+        "active",
+        "delayed",
+        "prioritized",
+        "waiting-children"
+    ]);
+
+    function existingLiveJob(check) {
+        return (
+            check.matches === true &&
+            liveStates.has(check.state)
+        );
+    }
+
+    let queueCheck = await inspectNormalBatchJob(
+        latest,
+        workerConfig
+    );
+
+    if (existingLiveJob(queueCheck)) {
+        return {
+            success: true,
+            queued: true,
+            reason: "JOB_ALREADY_EXISTS",
+            batch: latest,
+            worker: workerConfig
+        };
+    }
+
+    if (queueCheck.state !== "NOT_FOUND") {
+        throw new Error(
+            "RECOVERY_QUEUE_HANDOFF_UNCERTAIN: " +
+            latest.batch_id +
+            ": BullMQ state=" +
+            queueCheck.state
+        );
+    }
+
+    try {
+        await addBatchToQueue(latest, workerConfig);
+    } catch (queueError) {
+        // Enqueue failure does not prove that the job
+        // was never added to BullMQ.
+        queueCheck = await inspectNormalBatchJob(
+            latest,
+            workerConfig
+        );
+
+        if (!existingLiveJob(queueCheck)) {
+            const error = new Error(
+                "RECOVERY_QUEUE_HANDOFF_UNCERTAIN: " +
+                latest.batch_id +
+                ": BullMQ state=" +
+                queueCheck.state
+            );
+
+            error.code = "RECOVERY_QUEUE_HANDOFF_UNCERTAIN";
+            error.cause = queueError;
+
+            throw error;
+        }
+    }
+
+    return {
+        success: true,
+        queued: true,
+        batch: latest,
+        worker: workerConfig
+    };
 }
 /* 261026
 async function dispatchPendingBatches() {

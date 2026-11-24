@@ -1,0 +1,612 @@
+﻿MANUAL RECONCILIATION DEFUSE REPORT
+
+========================================
+FILE: C:\Users\15FC0704AU\Downloads\webthaali-api\manualReconcileAdmissionV2.js
+========================================
+     1: "use strict";
+     2: 
+     3: const UUID =
+     4:     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+     5: 
+     6: const REJECTIONS = new Set([
+     7:     "INVALID_INPUT",
+     8:     "RECONCILE_ALREADY_RUNNING",
+     9:     "SYNC_IN_PROGRESS",
+    10:     "HTTP_EXECUTION_UNRESOLVED",
+    11:     "SYNC_OUTCOME_UNKNOWN",
+    12:     "BATCH_NOT_FOUND",
+    13:     "ATTEMPT_ID_CONFLICT",
+    14:     "ATTEMPT_NOT_CURRENT"
+    15: ]);
+    16: 
+    17: /**
+    18:  * Phase 1: Durable manual reconciliation admission.
+    19:  *
+    20:  * This adapter is intentionally NOT wired to the reconciliation
+    21:  * executor yet.
+    22:  *
+    23:  * The caller must retain attemptId and identical inputs before
+    24:  * invoking this function.
+    25:  *
+    26:  * A transport failure must never cause a fresh attemptId to be
+    27:  * generated automatically.
+    28:  *
+    29:  * ALREADY_ACQUIRED confirms admission identity only.
+    30:  * It does NOT authorize another executor to perform Tally work.
+    31:  */
+    32: async function startManualReconcileV2({
+    33:     supabase,
+    34:     attemptId,
+    35:     companyCode,
+    36:     tallyOwner,
+    37:     reconcileType,
+    38:     workerId,
+    39:     batchId = null
+    40: }) {
+    41:     if (
+    42:         !supabase ||
+    43:         typeof supabase.rpc !== "function" ||
+    44:         typeof attemptId !== "string" ||
+    45:         !UUID.test(attemptId) ||
+    46:         typeof companyCode !== "string" ||
+    47:         !companyCode.trim() ||
+    48:         !["USER", "CA"].includes(tallyOwner) ||
+    49:         typeof reconcileType !== "string" ||
+    50:         !reconcileType.trim() ||
+    51:         typeof workerId !== "string" ||
+    52:         !workerId.trim() ||
+    53:         (
+    54:             batchId !== null &&
+    55:             typeof batchId !== "string"
+    56:         )
+    57:     ) {
+    58:         throw new Error(
+    59:             "RECONCILE_ADMISSION_INPUT_INVALID"
+    60:         );
+    61:     }
+    62: 
+    63:     try {
+    64:         const { data, error } = await supabase.rpc(
+    65:             "start_manual_reconcile_v2",
+    66:             {
+    67:                 p_attempt_id: attemptId,
+    68:                 p_company_code: companyCode,
+    69:                 p_tally_owner: tallyOwner,
+    70:                 p_reconcile_type: reconcileType,
+    71:                 p_worker_id: workerId,
+    72:                 p_batch_id: batchId
+    73:             }
+    74:         );
+    75: 
+    76:         if (error) {
+    77:             throw error;
+    78:         }
+    79: 
+    80:         const row =
+    81:             Array.isArray(data) && data.length === 1
+    82:                 ? data[0]
+    83:                 : null;
+    84: 
+    85:         if (
+    86:             row?.acquired === true &&
+    87:             ["ACQUIRED", "ALREADY_ACQUIRED"].includes(
+    88:                 row.reason
+    89:             ) &&
+    90:             typeof row.reservation_token === "string" &&
+    91:             UUID.test(row.reservation_token)
+    92:         ) {
+    93:             return {
+    94:                 acquired: true,
+    95:                 reason: row.reason,
+    96:                 reservationToken: row.reservation_token
+    97:             };
+    98:         }
+    99: 
+   100:         if (
+   101:             row?.acquired === false &&
+   102:             row.reservation_token === null &&
+   103:             REJECTIONS.has(row.reason)
+   104:         ) {
+   105:             return {
+   106:                 acquired: false,
+   107:                 reason: row.reason
+   108:             };
+   109:         }
+   110: 
+   111:         throw new Error(
+   112:             "RECONCILE_ADMISSION_RESULT_INVALID"
+   113:         );
+   114: 
+   115:     } catch (cause) {
+   116:         const error = new Error(
+   117:             "RECONCILE_ADMISSION_OUTCOME_UNVERIFIED",
+   118:             { cause }
+   119:         );
+   120: 
+   121:         error.reconcileAdmissionUncertain = true;
+   122:         error.reconcileRecoveryRequired = true;
+   123:         error.attemptId = attemptId;
+   124: 
+   125:         // Internal recovery context.
+   126:         // Never serialize this object directly to frontend.
+   127:         error.admissionInput = {
+   128:             attemptId,
+   129:             companyCode,
+   130:             tallyOwner,
+   131:             reconcileType,
+   132:             workerId,
+   133:             batchId
+   134:         };
+   135: 
+   136:         throw error;
+   137:     }
+   138: }
+   139: 
+   140: module.exports = {
+   141:     startManualReconcileV2
+   142: };
+
+========================================
+FILE: C:\Users\15FC0704AU\Downloads\webthaali-api\secondServer.js
+========================================
+     1: require("dotenv").config();
+     2: 
+     3: const express = require("express");
+     4: 
+     5: 
+     6: const { google } = require("googleapis");
+     7: 
+     8: const http = require("http");
+     9: 
+    10: 
+    11: const cors = require("cors");
+    12: const crypto = require("crypto");
+    13: // Unique identity for this secondServer.js process.
+    14: // Changes automatically after every PM2 restart.
+    15: const CLEANUP_SERVER_INSTANCE_ID = crypto.randomUUID();
+    16: const bcrypt = require("bcrypt");
+    17: 
+    18: const fs = require("fs");
+    19: const path = require("path");
+    20: 
+    21: const LOG_DIR =
+    22:   path.join(__dirname, "logs");
+    23: 
+    24: if (!fs.existsSync(LOG_DIR)) {
+    25: 
+    26:   fs.mkdirSync(LOG_DIR, {
+    27:     recursive: true
+    28:   });
+    29: 
+    30: }
+    31: 
+    32: 
+    33: function logServerMemory(label = 'MEMORY CHECK') {
+    34:   const m = process.memoryUsage();
+    35: 
+    36:   const toMiB = bytes => (bytes / 1024 / 1024).toFixed(1);
+    37: 
+    38:   const line =
+    39:     `[${new Date().toISOString()}] ${label} | ` +
+    40:     `RSS=${toMiB(m.rss)} MiB | ` +
+    41:     `HeapUsed=${toMiB(m.heapUsed)} MiB | ` +
+    45:   console.log(line);
+    50: }, 5 * 60 * 1000).unref();
+    51: 
+    52: 
+    53: function masterFlowDebug(data){
+    54: 
+    55:     fs.appendFileSync(
+    56:         "./logs/master-flow-debug.jsonl",
+    57:         JSON.stringify({
+    58: 
+    59:             time:
+    60:             new Date().toISOString(),
+    61: 
+    62:             ...data
+    63: 
+    64:         }) + "\n"
+    65:     );
+    66: 
+    67: }
+    68: 
+    69: function syncDebug(data){
+    70: 
+    71:     fs.appendFileSync(
+    72:         "./logs/master-flow-debug.jsonl",
+    73:         JSON.stringify({
+    74:             time:new Date().toISOString(),
+    75:             ...data
+    76:         }) + "\n"
+    77:     );
+    78: 
+    79: }
+    80: 
+    81: 
+    82: const nodemailer =
+    83:   require("nodemailer");
+    84: 
+    85: const rateLimit =
+    86:   require("express-rate-limit");
+    87: 
+    88: const { Resend } = require("resend");
+    89: 
+    90: const {
+    91:     getSyncMasterData,
+    92:     getTrialBalance,
+    93:     getStockGodownBalance
+    94: } = require("./services/syncService");
+    95: const {
+    96: 
+    97:   sendToTally,
+    98:   createUnit,
+    99:   createStockItem,
+   100:   createSalesLedger,
+   101:   createLedger,
+   102:   createTaxLedger,
+   103:   createSale,
+   104: 
+   105:   getTallyCompanies,
+   106: 
+   107:   selectCompany,
+   108: 
+   109:   getAllLedgers,
+   110: 
+   111:   createDebtorLedger,
+   112: 
+   113:   getStockItems,
+   114: 
+   115:   getUnits,
+   116: 
+   117: } = require("./services/tallyService");
+   118: 
+   119: 
+   120: 
+   121: const resend = new Resend(
+   122:   process.env.RESEND_API_KEY
+   123: ); 
+   124: 
+   125: const {
+   126:   createClient
+   127: } = require("@supabase/supabase-js");
+   128: 
+   129: const app = express();
+   130: 
+   131: const { sendToConnector } =
+   132:   require("./socketio/sendToConnector");
+   133: 
+   134: const sendToConnectorWithGlobalLock =
+   135:   require("./socketio/sendToConnectorWithGlobalLock");
+   136: 
+   137: 
+   138: const {
+   139:     recoverFailedManualReconciliation
+   140: } = require("./services/manualReconciliation/recoverFailedManualReconciliation");
+   141: 
+   142: 
+   143: const {
+   144:     sendReconcileRequestWithGlobalLock
+   145: } = require("./socketio/sendReconcileRequestWithGlobalLock");
+   146: 
+   147: 
+   148: const registry =
+   149:   require("./socketio/connectorRegistry");
+   150: 
+   151: const {
+   152:     acquireHttpBatchExecutionGuard,
+   153:     releaseHttpBatchExecutionGuard
+   154: } = require("./socketio/connectorHealthStore");
+   155: 
+   156: const {
+   157:     pairConnector,
+   158:     pairConnectorForBatch
+   159: } = require("./services/PairConnectorService");
+   160: 
+   161: const {
+   162:     runManualReconciliationSession
+   163: } = require("./services/manualReconciliation/ManualReconciliationSession");
+   164: 
+   165: const {
+   166:     recoverManualReconciliation
+   167: } = require("./services/manualReconciliation/recoverManualReconciliation");
+   168: 
+   169: const {
+   170:     executeDurableConnectorOperation
+   171: } = require("./utils/executeDurableConnectorOperation");
+   172: const {
+   173: 
+   174:     ENTITY_METADATA,
+   175: 
+   176:     SYNC_MODE,
+   177: 
+   178:     ENTITY_TYPE,
+   179:     
+   180:     VOUCHER_SYNC_PERIOD
+   181: 
+   182: } = require("./sync-engine/constants");
+   183: 
+   184: const server = http.createServer(app);
+   185: 
+   186: const SyncController =
+   187:     require("./sync-controller/SyncController");
+   188: 
+   189: const { initializeSocket } = require("./socketio/socketserver");
+   190: 
+   191: const io = initializeSocket(server);
+   192: 
+   193: const { saveGroups } = require("./services/saveGroups");
+   194: const { saveLedgers } = require("./services/saveLedgers");
+   195: const { saveUnits } = require("./services/saveUnits");
+   196: const { saveGodowns } = require("./services/saveGodowns");
+   197: const { saveCostCentres } = require("./services/saveCostCentres");
+   198: const { saveStockGroups } = require("./services/saveStockGroups");
+   199: const { saveStocks } = require("./services/saveStocks");
+   200: const {
+   201:     runChildVoucherReconciliation
+   202: } = require("./sync-engine/ChildVoucherReconciliationService")
+   203: 
+   204: 
+   205: 
+   206: /*
+   207: const {
+   208:     saveSyncSnapshotChunk
+   209: } = require("./services/sync/SyncSnapshotService");
+   210: */
+   211: 
+   212: const {
+   213:     saveSyncSnapshotChunk,
+   214:     removeMissingSnapshotGuids
+   215: } = require("./services/sync/SyncSnapshotService");
+   216: 
+   217: const {
+   218:     addBatchToQueue
+   219: } = require("./workers/secondAddBatchToQueue");
+   220: 
+   221: const {
+   222:     resolveWorkerForBatch
+   223: } = require("./workers/secondResolveWorkerForBatch");
+   224: 
+   225: const {
+   226:     dispatchBatch
+   227: } = require("./workers/secondQueueExistingBatch");
+   228: /*
+   229: const {
+   230:   reconcileMasters
+   231: } = require("./services/masters/MasterReconciliationService");
+   232: */
+   233: 
+   234: const ReconciliationManager =
+   235:     require("./sync-engine/ReconciliationManager");
+   236: 
+   237: const CleanupManager =
+   238: require("./sync-engine/CleanupManager");
+   239: 
+   240: const {
+   241:     LocalCacheSyncService,
+   242:     TABLES: LOCAL_CACHE_TABLES,
+   243:     TABLE_LIST: LOCAL_CACHE_TABLE_LIST
+   244: } = require("./services/LocalCacheSyncService");
+   245: 
+   246: 
+   247: /*
+   248: const {
+   249:   applyMasterActions
+   250: } = require("./services/masters/MasterActionService");
+   251: */
+   252: 
+   253: /*
+   254: const {
+   255:     getResumePoint
+   256: } = require("./services/sync/SyncResumeService");
+   257: 
+   258: const {
+   259:     cleanupDeletedMasters
+   260: } = require("./services/masters/MasterCleanupService");
+   261: */
+   262: /*
+   263: const {
+   264:   validateMasters
+   265: } = require("./services/masters/MasterValidationService");
+   266: */
+   267: /*
+   268: const {
+   269:     updateMasterStatus
+   270: } = require("./services/masters/MasterStatusService");
+   271: */
+   272: 
+   273: const {
+   274:     saveVouchers,
+   275:     saveVoucherGuids
+   276: } = require("./services/saveVouchers");
+   277: 
+   278: const {
+   279:     sendChunkedToConnector
+   280: } = require("./utils/sendChunkedToConnector");
+   281: 
+   282: const {
+   283:   sendGmailEmail
+   284: } = require("./utils/gmailSender");
+   285: 
+   286: const BatchStatusManager =
+   287:     require("./sync-engine/BatchStatusManager");
+   288: 
+   289: 
+   290: const {
+   291:     startConnectorWatchdog,
+   292:     startSyncBatchStatusMonitor
+   293: } = require("./workers/connectorWatchdog");
+   294: 
+   295: 
+   296: const { startSync } = require("./workers/secondSyncStartService");
+   297: 
+   298: const {
+   299:     updateSyncProgress
+   300: } = require("./utils/syncProgress");
+   301: 
+   302: const { registerEvents } = require("./socketio/secondConnectorEvents");
+   303: const BatchManager = require("./sync-engine/BatchManager");
+   304: console.log("BatchManager =", typeof BatchManager);
+   305: 
+   306: registerEvents(io);
+   307: 
+   308: 
+   309: 
+   310: app.set("trust proxy", 1);
+   311: 
+   312: app.use(cors());
+   313: 
+   314: app.use(
+   315: 
+   316:   express.json({
+   317: 
+   318:     limit: "10mb"
+   319: 
+   320:   })
+   321: 
+   322: );
+   323: 
+   324: /* 20101026
+   325: const networkSpeedLimiter = rateLimit({
+   326:   windowMs: 60 * 1000,
+   327:   max: 10,
+   328:   standardHeaders: true,
+   329:   legacyHeaders: false,
+   330:   message: {
+   331:     success: false,
+   332:     error: "Too many speed tests. Please try again shortly."
+   333:   }
+   334: });
+   335: */
+   336: app.get("/network-speed-test", (req, res) => {
+   337:   try {
+   338:     const payload = crypto.randomBytes(128 * 1024);
+   339: 
+   340:     res.set({
+   341:       "Content-Type": "application/octet-stream",
+   342:       "Content-Length": String(payload.length),
+   343:       "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+   344:       "Pragma": "no-cache",
+   345:       "Expires": "0",
+   346:       "X-Content-Type-Options": "nosniff"
+   347:     });
+   348: 
+   349:     return res.status(200).send(payload);
+   350:   } catch (err) {
+   351:     console.error("NETWORK SPEED TEST ERROR:", err);
+   352: 
+   353:     return res.status(500).json({
+   354:       success: false,
+   355:       error: "Network speed test failed"
+   356:     });
+   357:   }
+   358: });
+   359: 
+   360: 
+   361: const loginLimiter =
+   362:   rateLimit({
+   363: 
+   364:     windowMs:
+   365:       15 * 60 * 1000,
+   366: 
+   367:     max: 100,
+   368: 
+   369:     standardHeaders: true,
+   370: 
+   371:     legacyHeaders: false,
+   372: 
+   373:     message: {
+   374: 
+   375:       success: false,
+   376: 
+   377:       error:
+   378:         "Too many login attempts. Try again later."
+   379: 
+   380:     }
+   381: 
+   382:   });
+   383: 
+   384: const forgotPasswordLimiter =
+   385:   rateLimit({
+   386: 
+   387:     windowMs:
+   388:       15 * 60 * 1000,
+   389: 
+   390:     max: 100,
+   391: 
+   392:     standardHeaders: true,
+   393: 
+   394:     legacyHeaders: false,
+   395: 
+   396:     message: {
+   397: 
+   398:       success: false,
+   399: 
+   400:       error:
+   401:         "Too many password reset attempts."
+   402: 
+   403:     }
+   404: 
+   405:   });
+   406: 
+   407: app.use(
+   408: 
+   409:   express.urlencoded({
+   410: 
+   411:     extended: true,
+   412: 
+   413:     limit: "10mb"
+   414: 
+   415:   })
+   416: 
+   417: );
+   418: 
+   419: 
+   420: const SYSTEM_DOWN = false;
+   421: 
+   422: app.use((req, res, next) => {
+   423: 
+   424:   if (SYSTEM_DOWN) {
+   425: 
+   426:     return res.status(503).json({
+   427: 
+   428:       success: false,
+   429: 
+   430:       error:
+   431:         "System Under Maintenance"
+   432: 
+   433:     });
+   434: 
+   435:   }
+   436: 
+   437:   next();
+   438: 
+   439: });
+   440: 
+   441: const supabase =
+   442:   createClient(
+   443:     process.env.SUPABASE_URL,
+   444:     process.env.SUPABASE_SERVICE_KEY
+   445:   );
+   446: 
+   447:   startConnectorWatchdog({
+   448:     supabase,
+   449:     registry
+   450: });
+   451: 
+   452: 
+   453: startSyncBatchStatusMonitor({
+   454:     supabase
+   455: });
+   456: 
+   457: // Detect cleanup batches eligible for crash recovery.
+   458: async function findStaleCleanupBatches() {
+   459:     const cutoff = new Date(
+   460:         Date.now() - 30 * 60 * 1000
+   461:     ).toISOString();
+   462: 
+   463:     const { data, error } = await supabase
+   464:         .from("sync_batches")
+   465:         .select("batch_id, company_code, tally_owner")
+   466:         .eq("batch_status", "CLOSED")
+   467:         .eq("worker_status", "COMPLETED")
+   468:         .eq("batch_closed", true)

@@ -750,9 +750,16 @@ if (!socket || socket.connected !== true) {
  * Get Any Connector
  */
 function getAny() {
+    for (const [connectorId, socket] of connectors) {
+        if (
+            socket?.connected === true &&
+            socket.connectorIds?.has(connectorId)
+        ) {
+            return socket;
+        }
+    }
 
-    return connectors.values().next().value;
-
+    return null;
 }
 
 /* 060926
@@ -795,20 +802,22 @@ function registerPending(socket, connectorId) {
 
 }
 
-function getPending() {
-
-    return pendingConnectors.values().next().value;
-
-}
-// 060926
 function getPendingById(connectorId) {
-
     if (!connectorId) {
         return null;
     }
 
-    return pendingConnectorMap.get(connectorId) || null;
+    const socket = pendingConnectorMap.get(connectorId);
 
+    if (!socket || socket.connected !== true) {
+        return null;
+    }
+
+    if (!pendingConnectors.has(socket)) {
+        return null;
+    }
+
+    return socket;
 }
 
 

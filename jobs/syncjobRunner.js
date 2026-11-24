@@ -279,76 +279,74 @@ console.log(
             continue;
         }
 
-      console.log("🔎 OFFLINE TIMEOUT TOKEN DIAGNOSTIC:", {
-    batch_id: job.batch_id,
-    token_type: typeof job.execution_claim_token,
-    token_length: job.execution_claim_token?.length,
-    token_valid_uuid:
-        typeof job.execution_claim_token === "string" &&
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-            job.execution_claim_token
-        )
-});
-        const failedMarked =
-            await BatchStatusManager.markConnectorOfflineTimeoutFailed({
-                batch_id: job.batch_id,
-                execution_claim_token: job.execution_claim_token
-            });
+             let waitingMarked = false;
+        let waitingTransitionError = null;
 
-      if (failedMarked !== true) {
-    console.error(
-        "⛔ CONNECTOR OFFLINE TIMEOUT — ATOMIC FAILURE REJECTED:",
-        job.batch_id
-    );
+        try {
+            waitingMarked =
+                await BatchStatusManager.markWaitingConnector({
+                    batch_id: job.batch_id,
+                    execution_claim_token: job.execution_claim_token
+                });
+        } catch (error) {
+            waitingTransitionError = error;
+        }
 
-    let verifiedBatch;
+        if (waitingMarked !== true) {
+            let waitingBatch = null;
 
-    try {
-        verifiedBatch = await BatchStatusManager.loadBatch({
-            batch_id: job.batch_id
-        });
-    } catch (verifyError) {
-        throw new Error(
-            "CONNECTOR_OFFLINE_TIMEOUT_OUTCOME_UNKNOWN: " +
-            "Transition rejected and database verification failed: " +
-            verifyError.message
-        );
-    }
+            try {
+                waitingBatch = await BatchStatusManager.loadBatch({
+                    batch_id: job.batch_id
+                });
+            } catch (error) {
+                return {
+                    outcome: "WAITING_CONNECTOR_TRANSITION_UNVERIFIED",
+                    skipped: true,
+                    sync_completed: false,
+                    batch_id: job.batch_id,
+                    http_status: response.status,
+                    reason: error?.message || String(error)
+                };
+            }
 
-    const timeoutConfirmed =
-        verifiedBatch?.batch_id === job.batch_id &&
-        typeof verifiedBatch.execution_claim_token === "string" &&
-        verifiedBatch.execution_claim_token.toLowerCase() ===
-            job.execution_claim_token.toLowerCase() &&
-        verifiedBatch.batch_status === "FAILED" &&
-        verifiedBatch.worker_status === "FAILED" &&
-        verifiedBatch.current_stage === "FAILED" &&
-        verifiedBatch.error_message === "CONNECTOR_OFFLINE_TIMEOUT" &&
-        verifiedBatch.connector_retry_ready === false;
+            const waitingConfirmed =
+                waitingBatch?.batch_id === job.batch_id &&
+                typeof waitingBatch.execution_claim_token === "string" &&
+                waitingBatch.execution_claim_token.toLowerCase() ===
+                    job.execution_claim_token.toLowerCase() &&
+                waitingBatch.batch_status === "PENDING" &&
+                waitingBatch.worker_status === "PENDING" &&
+                waitingBatch.current_stage === "WAITING_CONNECTOR" &&
+                waitingBatch.worker_id == null &&
+                waitingBatch.batch_closed !== true &&
+                waitingBatch.cleanup_claim_token == null &&
+                waitingBatch.retry_claim_token == null;
 
-    if (timeoutConfirmed) {
+            if (!waitingConfirmed) {
+                return {
+                    outcome: waitingTransitionError
+                        ? "WAITING_CONNECTOR_TRANSITION_UNVERIFIED"
+                        : "WAITING_CONNECTOR_TRANSITION_REJECTED",
+                    skipped: true,
+                    sync_completed: false,
+                    batch_id: job.batch_id,
+                    http_status: response.status,
+                    reason: waitingTransitionError
+                        ? waitingTransitionError.message ||
+                            String(waitingTransitionError)
+                        : "Waiting state for this execution claim was not verified"
+                };
+            }
+        }
+
         return {
-            outcome: "CONNECTOR_OFFLINE_TIMEOUT",
+            outcome: "WAITING_CONNECTOR",
             skipped: true,
             sync_completed: false,
             batch_id: job.batch_id,
-            http_status: response.status
-        };
-    }
-
-    throw new Error(
-        "CONNECTOR_OFFLINE_TIMEOUT_TRANSITION_REJECTED: " +
-        "Expected terminal state not verified for batch " +
-        job.batch_id
-    );
-}
-
-        return {
-            outcome: "CONNECTOR_OFFLINE_TIMEOUT",
-            skipped: true,
-            sync_completed: false,
-            batch_id: job.batch_id,
-            http_status: response.status
+            http_status: response.status,
+            reason: "CONNECTOR_OFFLINE"
         };
     }
 

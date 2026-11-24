@@ -49,7 +49,8 @@ const {
     dispatchRecoveredWaitingBatch
 } = require("../workers/secondQueueExistingBatch");
 
-const ENABLE_WAITING_CONNECTOR_RECOVERY = false;
+const ENABLE_WAITING_CONNECTOR_RECOVERY =
+    process.env.ENABLE_WAITING_CONNECTOR_RECOVERY === "true";
 // ============================================================
 // RECOVER WAITING BATCHES WHEN TALLY COMPANY COMES BACK
 // ============================================================
@@ -816,18 +817,22 @@ if (!recoveryState || recoveryState.quarantined) {
     const claimed = await claimConnectorSocketOwnership(
         connectorId,
         socket.id
-    ).catch((error) => {
-        console.error(
-            "âŒ AUTO-REGISTER OWNERSHIP CLAIM FAILED",
-            {
-                socket_id: socket.id,
-                connector_id: connectorId,
-                error: error.message
-            }
-        );
+).catch((error) => {
+    console.error(
+        "[CONNECTOR IDENTIFY] OWNERSHIP CLAIM FAILED",
+        {
+            socket_id: socket.id,
+            connector_id: connectorId,
+            error: error?.message || String(error)
+        }
+    );
 
-             return { claimed: false, health: null };
-    });
+    return {
+        claimed: false,
+        health: null,
+        reason: "OWNERSHIP_CLAIM_ERROR"
+    };
+});
 
     if (!socket.connected && claimed.claimed) {
         console.warn(
@@ -1454,17 +1459,22 @@ if (!recoveryState || recoveryState.quarantined) {
             const claimed = await claimConnectorSocketOwnership(
                 connectorId,
                 socket.id
-            ).catch((error) => {
-                console.error(
-                    "âŒ CONNECTOR OWNERSHIP CLAIM FAILED",
-                    {
-                        socket_id: socket.id,
-                        connector_id: connectorId,
-                        error: error.message
-                    }
-                );
-                return { claimed: false, health: null };
-            });
+         ).catch((error) => {
+    console.error(
+        "[CONNECTOR REGISTER] OWNERSHIP CLAIM FAILED",
+        {
+            socket_id: socket.id,
+            connector_id: connectorId,
+            error: error?.message || String(error)
+        }
+    );
+
+    return {
+        claimed: false,
+        health: null,
+        reason: "OWNERSHIP_CLAIM_ERROR"
+    };
+});
 
                         if (!socket.connected) {
                 console.warn(

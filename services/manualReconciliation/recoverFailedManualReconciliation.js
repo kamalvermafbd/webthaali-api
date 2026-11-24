@@ -19,7 +19,9 @@ const {
     getManualReconcileCoordinatorLifecycle
 } = require("../../socketio/connectorOperationCoordinator");
 
-
+const {
+    inspectManualReconcileActiveOwnership
+} = require("../../socketio/connectorHealthStore");
 
 const {
     inspectManualReconcileFailureRedis,
@@ -529,7 +531,28 @@ async function recoverFailedManualReconciliation({
 ) {
     return blocked(attemptId, "ORIGINAL_EXECUTION_UNVERIFIED");
 }
+    // Recheck exact Redis ownership before requesting a failure fence.
+    // A healthy execution must not be interrupted by recovery.
+    try {
+        const ownership =
+            await inspectManualReconcileActiveOwnership({
+                connectorId: execution.connector_id,
+                socketId: execution.socket_id,
+                ownerToken: execution.owner_token
+            });
 
+        if (ownership.activeOwnershipVerified === true) {
+            return blocked(
+                attemptId,
+                "EXECUTION_STILL_ACTIVE"
+            );
+        }
+    } catch (_) {
+        return blocked(
+            attemptId,
+            "EXECUTION_OWNERSHIP_RECHECK_UNCERTAIN"
+        );
+    }
    
     // Durable intent only; this does not prove remote execution settlement.
     const result = await ensureManualReconcileFailureFenceIntent({

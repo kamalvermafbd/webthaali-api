@@ -61,6 +61,13 @@ function harness(options = {}) {
         structuredClone(baseline)
     ];
 
+    const UUID_REGEX =
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+const fenceId = randomUUID();
+
+let durableFenceEvidence = null;
+
     const inspection = options.inspection || {
         state: "EXECUTION_UNCERTAIN",
         reservationOwned: true
@@ -103,11 +110,13 @@ function harness(options = {}) {
                         eq() {
                             return {
                                 async maybeSingle() {
-                                    return {
-                                        data: null,
-                                        error: null
-                                    };
-                                }
+                                return {
+                                    data: durableFenceEvidence
+                                        ? structuredClone(durableFenceEvidence)
+                                        : null,
+                                    error: null
+                                };
+                            }
                             };
                         }
                     };
@@ -217,16 +226,47 @@ function harness(options = {}) {
                 throw new Error("database unavailable");
             }
 
-            return options.rpcResponse || {
-                data: [
-                    {
-                        fence_requested: true,
-                        reason: "FENCE_REQUESTED",
-                        fence_id: randomUUID()
-                    }
-                ],
-                error: null
-            };
+          const response = options.rpcResponse || {
+    data: [{
+        fence_requested: true,
+        reason: "FENCE_REQUESTED",
+        fence_id: fenceId
+    }],
+    error: null
+};
+
+if (
+    name === "request_manual_reconcile_failure_fence_v2" &&
+    !response.error
+) {
+    const reply = Array.isArray(response.data)
+        ? response.data.length === 1
+            ? response.data[0]
+            : null
+        : response.data;
+
+    if (
+        reply?.fence_requested === true &&
+        ["FENCE_REQUESTED", "ALREADY_REQUESTED"]
+            .includes(reply.reason) &&
+        typeof reply.fence_id === "string" &&
+        UUID_REGEX.test(reply.fence_id)
+    ) {
+        const execution = snapshots[0].execution;
+
+        durableFenceEvidence = {
+            attempt_id: attemptId,
+            execution_id: execution.execution_id,
+            connector_id: execution.connector_id,
+            socket_id: execution.socket_id,
+            owner_token: execution.owner_token,
+            fence_id: reply.fence_id,
+            fence_requested_at: "2026-11-20T00:00:00Z"
+        };
+    }
+}
+
+return response;
         }
     };
 
@@ -644,9 +684,9 @@ test("unconfirmed RPC response never dispatches", async () => {
     });
 
     assert.equal(
-        result.reason,
-        "FENCE_INTENT_NOT_CONFIRMED"
-    );
+    result.reason,
+    "FENCE_INTENT_OUTCOME_UNCERTAIN"
+);
 
     assert.equal(h.calls.transport.length, 0);
 });

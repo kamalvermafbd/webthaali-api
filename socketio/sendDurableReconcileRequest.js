@@ -269,14 +269,21 @@ async function sendDurableReconcileRequest(
             });
         }
 
-        timeout = setTimeout(() => {
-            finish(
-                uncertainError(
-                    "DURABLE_RECONCILE_CONNECTOR_TIMEOUT",
-                    requestId
-                )
-            );
-        }, RECONCILE_TIMEOUT_MS);
+       // Dedicated Manual Reconciliation execution must
+// not fail solely because Tally processing takes
+// longer than the standard response timeout.
+//
+// Disconnect and ownership-abort protections remain active.
+if (executionIdentity === undefined) {
+    timeout = setTimeout(() => {
+        finish(
+            uncertainError(
+                "DURABLE_RECONCILE_CONNECTOR_TIMEOUT",
+                requestId
+            )
+        );
+    }, RECONCILE_TIMEOUT_MS);
+}
 
         if (settled) return;
 

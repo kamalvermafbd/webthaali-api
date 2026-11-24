@@ -19,7 +19,8 @@ const {
     dispatchRecoveredWaitingBatch
 } = require("./secondQueueExistingBatch");
 
-const ENABLE_WAITING_CONNECTOR_RECOVERY = false;
+const ENABLE_WAITING_CONNECTOR_RECOVERY =
+    process.env.ENABLE_WAITING_CONNECTOR_RECOVERY === "true";
 
 let watchdogTimer = null;
 let watchdogRunning = false;

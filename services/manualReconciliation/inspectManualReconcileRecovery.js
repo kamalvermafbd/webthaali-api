@@ -2,7 +2,8 @@
 "use strict";
 
 const {
-    readManualReconcileReleaseReceipt
+    readManualReconcileReleaseReceipt,
+    inspectManualReconcileActiveOwnership
 } = require("../../socketio/connectorHealthStore");
 
 const UUID =
@@ -512,7 +513,16 @@ async function inspectManualReconcileRecovery({
             ? "CHECKPOINT_PRESENT_RELEASE_VERIFIED"
             : "CHECKPOINT_PRESENT_RELEASE_UNVERIFIED";
     } else if (execution) {
-        state = "EXECUTION_UNCERTAIN";
+    const ownership =
+        await inspectManualReconcileActiveOwnership({
+            connectorId: execution.connector_id,
+            socketId: execution.socket_id,
+            ownerToken: execution.owner_token
+        });
+
+    state = ownership.activeOwnershipVerified === true
+        ? "EXECUTION_ACTIVE"
+        : "EXECUTION_UNCERTAIN";
     } else if (operations.length === 0) {
         state = "ADMISSION_ONLY";
     }

@@ -156,81 +156,32 @@ if (prepareManualAcquisition) {
         observeManualWork(acquisitionPromise);
     }
 
-       let acquisitionTimer;
+   const acquired = await acquisitionPromise;
 
-    try {
-        const acquired = await Promise.race([
-            acquisitionPromise,
-            new Promise((_, reject) => {
-                acquisitionTimer = setTimeout(
-                    () => reject(new Error(
-                        `GLOBAL_CONNECTOR_ACQUISITION_TIMEOUT: ${id}`
-                    )),
-                    OPERATION_SETTLE_TIMEOUT_MS
-                );
-            })
-        ]);
+if (!acquired) {
+    throw new Error(
+        `MANUAL_RECONCILE_CONNECTOR_BUSY_AFTER_PREPARATION: ${id}`
+    );
+}
 
-        if (!acquired) {
-            throw new Error(
-                `MANUAL_RECONCILE_CONNECTOR_BUSY_AFTER_PREPARATION: ${id}`
-            );
-        }
+if (
+    !socket.connected ||
+    !socket.protocolReceiver ||
+    registry.get(id) !== socket
+) {
+    // Acquisition succeeded, but the socket changed.
+    // Keep the ownership marker until it can be resolved.
+    throw new Error(
+        `MANUAL_RECONCILE_CONNECTOR_CHANGED_AFTER_ACQUISITION: ${id}`
+    );
+}
 
-        if (
-            !socket.connected ||
-            !socket.protocolReceiver ||
-            registry.get(id) !== socket
-        ) {
-            throw new Error(
-                `MANUAL_RECONCILE_CONNECTOR_CHANGED_AFTER_ACQUISITION: ${id}`
-            );
-        }
-
-        return {
-            connectorId: id,
-            socketId: socket.id,
-            socket,
-            ownerToken
-        };
-    } catch (error) {
-        const acquisitionUncertain =
-            error.message?.startsWith(
-                "GLOBAL_CONNECTOR_ACQUISITION_TIMEOUT:"
-            ) ||
-            error.message?.startsWith(
-                "MANUAL_RECONCILE_CONNECTOR_CHANGED_AFTER_ACQUISITION:"
-            );
-
-        if (acquisitionUncertain) {
-            // Redis acquisition may have succeeded.
-            // Never release persistent markers without verification.
-            acquisitionPromise.then(
-                lateAcquired => {
-                    if (lateAcquired) {
-                        console.error(
-                            "[MANUAL RECONCILE] Acquisition requires verified recovery",
-                            { connectorId: id, socketId: socket.id }
-                        );
-                    }
-                },
-                lateError => {
-                    console.error(
-                        "[MANUAL RECONCILE] Late acquisition error",
-                        lateError
-                    );
-                }
-            );
-
-            if (socket.connected) {
-                socket.disconnect(true);
-            }
-        }
-
-        throw error;
-    } finally {
-        clearTimeout(acquisitionTimer);
-    }
+return {
+    connectorId: id,
+    socketId: socket.id,
+    socket,
+    ownerToken
+};
 }
         const acquisitionPromise = acquireConnectorAndSocketLock(
     id,

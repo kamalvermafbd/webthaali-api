@@ -1094,10 +1094,11 @@ const locked = connectorLocked || socketLocked;
 const inconsistentGlobalLock =
     Boolean(socketId) &&
     (
-        // Connector and socket locks must always exist together.
-(
-    connectorLocked !== socketLocked
-) ||
+               // A connector lock requires its matching socket lock.
+        // A socket-only lock may belong to another connector alias.
+        (
+            connectorLocked && !socketLocked
+        ) ||
 
         // Both locks exist but their owners differ.
         (
@@ -1931,7 +1932,94 @@ end
         connector_id: id
     };
 }
+async function inspectManualReconcileActiveOwnership({
+    connectorId,
+    socketId,
+    ownerToken
+}) {
+    const id = normalizeConnectorId(connectorId);
 
+    if (
+        typeof socketId !== "string" ||
+        !socketId.trim() ||
+        typeof ownerToken !== "string" ||
+        !ownerToken.trim()
+    ) {
+        throw new Error(
+            "MANUAL_RECONCILE_OWNERSHIP_IDENTITY_INVALID"
+        );
+    }
+
+    await ensureConnected();
+
+    const values = await redis.mget(
+        `billey:connector:operation-lock:${id}`,
+        `billey:socket:operation-lock:${socketId}`,
+        getConnectorActiveOperationKey(id),
+        getSocketActiveOperationKey(socketId),
+        getConnectorQuarantineKey(id),
+        getSocketQuarantineKey(socketId),
+        getHealthKey(id)
+    );
+
+    if (!Array.isArray(values) || values.length !== 7) {
+        throw new Error(
+            "MANUAL_RECONCILE_OWNERSHIP_READ_INVALID"
+        );
+    }
+
+    const [
+        connectorLock,
+        socketLock,
+        connectorMarker,
+        socketMarker,
+        connectorQuarantine,
+        socketQuarantine,
+        rawHealth
+    ] = values;
+
+    const health = rawHealth
+        ? JSON.parse(rawHealth)
+        : null;
+
+    const locksMatch =
+        connectorLock === ownerToken &&
+        socketLock === ownerToken;
+
+    const markersMatch =
+        connectorMarker === ownerToken &&
+        socketMarker === ownerToken;
+
+    const quarantined =
+        connectorQuarantine !== null ||
+        socketQuarantine !== null;
+
+    const socketMatches =
+        health?.socket_id === socketId;
+
+    const connected =
+        health?.connection_status === "CONNECTED";
+
+    return Object.freeze({
+        connectorId: id,
+        socketId,
+        locksMatch,
+        markersMatch,
+        quarantined,
+        socketMatches,
+        connected,
+
+        activeOwnershipVerified:
+            locksMatch &&
+            markersMatch &&
+            !quarantined &&
+            socketMatches &&
+            connected,
+
+        remoteSettlementVerified: false,
+        recoveryAuthorized: false
+    });
+}
 // Read-only, atomic recovery inspection.
 // This does NOT authorize remote settlement.
 async function inspectConnectorRecoveryState(connectorId) {
@@ -2253,6 +2341,7 @@ module.exports = {
        quarantineConnectorAndSocket,
     clearVerifiedConnectorRecovery,
     inspectConnectorRecoveryState,
+inspectManualReconcileActiveOwnership,
     recoverConnectorAfterReconnect,
     acquireHttpBatchExecutionGuard,
     updateConnectorTallyQueueStatus,

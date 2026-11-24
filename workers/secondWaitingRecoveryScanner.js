@@ -1,8 +1,8 @@
 
 "use strict";
 
-// Conservative scanner:
-// Never redispatch an already-assigned reservation.
+// Reconcile waiting recovery handoffs using the existing reservation.
+// Assigned rows retain their worker and dispatch generation.
 // Enable only after coordinated rollout and crash tests.
 
 const { createClient } = require("@supabase/supabase-js");
@@ -24,67 +24,55 @@ async function scanWaitingRecovery() {
     running = true;
 
     try {
-        const { data: batches, error } = await supabase
-            .from("sync_batches")
-            .select("*")
-            .eq("waiting_recovery_pending", true)
-            .eq("batch_status", "PENDING")
-            .eq("worker_status", "PENDING")
-            .eq("current_stage", "PENDING")
-            .order("last_activity_at", {
-                ascending: true
-            })
-            .limit(25);
+        let lastId = null;
 
-        if (error) {
-            throw error;
-        }
+        for (;;) {
+            let query = supabase
+                .from("sync_batches")
+                .select("*")
+                .eq("waiting_recovery_pending", true)
+                .eq("batch_status", "PENDING")
+                .eq("worker_status", "PENDING")
+                .eq("current_stage", "PENDING")
+                .order("id", { ascending: true })
+                .limit(25);
 
-        for (const batch of batches || []) {
-
-            // Reserved batches require reconciliation.
-            // Never infer that a missing Bull job means
-            // the previous execution never started.
-
-            if (batch.worker_id != null) {
-                console.warn(
-                    "[WAITING RECOVERY] RESERVED_REQUIRES_RECONCILIATION",
-                    {
-                        batch_id: batch.batch_id,
-                        dispatch_generation: batch.dispatch_generation,
-                        worker_id: batch.worker_id
-                    }
-                );
-
-                continue;
+            if (lastId !== null) {
+                query = query.gt("id", lastId);
             }
 
-            // Unreserved eligibility checks.
-            if (
-                batch.batch_closed === true ||
-                batch.cleanup_claim_token != null ||
-                batch.retry_claim_token != null ||
-                Number(batch.operation_count || 0) !== 0
-            ) {
-                continue;
+            const { data: batches, error } = await query;
+
+            if (error) {
+                throw error;
             }
 
-            try {
-                await dispatchRecoveredWaitingBatch(batch);
-            } catch (err) {
-                console.error(
-                    "[WAITING RECOVERY] DISPATCH_DEFERRED",
-                    batch.batch_id,
-                    err.message
-                );
+            if (!batches || batches.length === 0) {
+                break;
+            }
+
+            for (const batch of batches) {
+                try {
+                    await dispatchRecoveredWaitingBatch(batch);
+                } catch (err) {
+                    console.error(
+                        "[WAITING RECOVERY] DISPATCH_DEFERRED",
+                        batch.batch_id,
+                        err.message
+                    );
+                }
+            }
+
+            lastId = batches[batches.length - 1].id;
+
+            if (batches.length < 25) {
+                break;
             }
         }
-
     } finally {
         running = false;
     }
 }
-
 function startWaitingRecoveryScanner() {
 
     if (
