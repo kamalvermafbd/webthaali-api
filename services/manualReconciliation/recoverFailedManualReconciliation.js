@@ -553,7 +553,42 @@ async function recoverFailedManualReconciliation({
             "EXECUTION_OWNERSHIP_RECHECK_UNCERTAIN"
         );
     }
-   
+       // Do not fence an execution whose original local
+    // coordinator is still active.
+    const preFenceLifecycle =
+        getManualReconcileCoordinatorLifecycle(attemptId);
+
+    if (preFenceLifecycle !== null) {
+        const identityMatches =
+            preFenceLifecycle.attemptId === attemptId &&
+            preFenceLifecycle.executionId ===
+                execution.execution_id &&
+            preFenceLifecycle.serverInstanceId ===
+                execution.server_instance_id &&
+            preFenceLifecycle.connectorId ===
+                execution.connector_id &&
+            preFenceLifecycle.socketId ===
+                execution.socket_id &&
+            preFenceLifecycle.ownerToken ===
+                execution.owner_token;
+
+        if (!identityMatches) {
+            return blocked(
+                attemptId,
+                "PRE_FENCE_COORDINATOR_IDENTITY_MISMATCH"
+            );
+        }
+
+        if (
+            preFenceLifecycle.coordinatorExited !== true ||
+            preFenceLifecycle.pendingWork !== 0
+        ) {
+            return blocked(
+                attemptId,
+                "PRE_FENCE_COORDINATOR_STILL_ACTIVE"
+            );
+        }
+    }
     // Durable intent only; this does not prove remote execution settlement.
     const result = await ensureManualReconcileFailureFenceIntent({
         supabase,

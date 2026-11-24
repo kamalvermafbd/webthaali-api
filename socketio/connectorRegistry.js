@@ -749,6 +749,19 @@ if (!socket || socket.connected !== true) {
 /**
  * Get Any Connector
  */
+
+/**
+ * Get any connected pending connector.
+ */
+function getPending() {
+    for (const socket of pendingConnectors) {
+        if (socket?.connected === true) {
+            return socket;
+        }
+    }
+
+    return null;
+}
 function getAny() {
     for (const [connectorId, socket] of connectors) {
         if (
