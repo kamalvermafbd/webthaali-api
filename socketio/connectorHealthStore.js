@@ -244,7 +244,8 @@ async function setConnectorHealth(
             !key.startsWith("tally_queue_") &&
             key !== "socket_id" &&
             key !== "connection_status" &&
-            key !== "disconnected_since_ms"
+            key !== "disconnected_since_ms" &&
+key !== "socket_lease_renewed_at_ms"
     )
 );
 
@@ -347,7 +348,8 @@ async function updateConnectorHealthAtomic(
         and k ~= "connection_status"
         and k ~= "connector_id"
         and k ~= "shared_updated_at"
-        and k ~= "disconnected_since_ms" then
+        and k ~= "disconnected_since_ms"
+and k ~= "socket_lease_renewed_at_ms" then
         record[k] = v
     end
 end
@@ -2734,6 +2736,12 @@ health["tally_queue_generation"] = cjson.null
 health["tally_queue_connector_epoch"] = cjson.null
 health["tally_queue_reported_at"] = cjson.null
 health["tally_queue_reported_at_ms"] = cjson.null
+
+local leaseTime = redis.call("TIME")
+
+health["socket_lease_renewed_at_ms"] =
+    tonumber(leaseTime[1]) * 1000 +
+    math.floor(tonumber(leaseTime[2]) / 1000)
 
 health["shared_updated_at"] = ARGV[5]
 
