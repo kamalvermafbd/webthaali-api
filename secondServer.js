@@ -41670,7 +41670,8 @@ groupGuidResult = await executeDurableConnectorOperation({
     companyCode: company_code,
     tallyOwner: tally_owner,
     tallyCompanyGuid: companyGuid,
-    tallyCompanyName: company
+        tallyCompanyName: company,
+    operationType: syncOperationType
 });
 
 console.log(
