@@ -41312,7 +41312,8 @@ const result = await executeDurableConnectorOperation({
     companyCode: company_code,
     tallyOwner: tally_owner,
     tallyCompanyGuid: companyGuid,
-    tallyCompanyName: company
+    tallyCompanyName: company,
+operationType: syncOperationType
 });
 
 console.log("===== TALLY MASTER COUNTS =====");
@@ -41615,7 +41616,8 @@ voucherGuidResult =
     companyCode: company_code,
     tallyOwner: tally_owner,
     tallyCompanyGuid: companyGuid,
-    tallyCompanyName: company
+    tallyCompanyName: company,
+operationType: syncOperationType
 });
 
 /* 301026
@@ -41726,7 +41728,8 @@ ledgerGuidResult = await executeDurableConnectorOperation({
     companyCode: company_code,
     tallyOwner: tally_owner,
     tallyCompanyGuid: companyGuid,
-    tallyCompanyName: company
+    tallyCompanyName: company,
+operationType: syncOperationType
 });
 
 console.log(
@@ -41785,7 +41788,8 @@ stockGroupGuidResult = await executeDurableConnectorOperation({
     companyCode: company_code,
     tallyOwner: tally_owner,
     tallyCompanyGuid: companyGuid,
-    tallyCompanyName: company
+    tallyCompanyName: company,
+operationType: syncOperationType
 });
 
 console.log(
@@ -41844,7 +41848,8 @@ stockGuidResult = await executeDurableConnectorOperation({
     companyCode: company_code,
     tallyOwner: tally_owner,
     tallyCompanyGuid: companyGuid,
-    tallyCompanyName: company
+    tallyCompanyName: company,
+operationType: syncOperationType
 });
 
 console.log(
@@ -41903,7 +41908,8 @@ unitGuidResult = await executeDurableConnectorOperation({
     companyCode: company_code,
     tallyOwner: tally_owner,
     tallyCompanyGuid: companyGuid,
-    tallyCompanyName: company
+    tallyCompanyName: company,
+operationType: syncOperationType
 });
 
 console.log(
@@ -41962,7 +41968,8 @@ godownGuidResult = await executeDurableConnectorOperation({
     companyCode: company_code,
     tallyOwner: tally_owner,
     tallyCompanyGuid: companyGuid,
-    tallyCompanyName: company
+    tallyCompanyName: company,
+operationType: syncOperationType
 });
 
 console.log(
@@ -42021,7 +42028,8 @@ costCentreGuidResult = await executeDurableConnectorOperation({
     companyCode: company_code,
     tallyOwner: tally_owner,
     tallyCompanyGuid: companyGuid,
-    tallyCompanyName: company
+    tallyCompanyName: company,
+operationType: syncOperationType
 });
 
 console.log(
@@ -42555,7 +42563,8 @@ if(ledgerReconciliation?.missingGuids?.length){
     companyCode: company_code,
     tallyOwner: tally_owner,
     tallyCompanyGuid: companyGuid,
-    tallyCompanyName: company
+    tallyCompanyName: company,
+operationType: syncOperationType
 });
 
     if(!missingResult.success){
@@ -43171,7 +43180,8 @@ const missingResult = await executeDurableConnectorOperation({
     companyCode: company_code,
     tallyOwner: tally_owner,
     tallyCompanyGuid: companyGuid,
-    tallyCompanyName: company
+    tallyCompanyName: company,
+operationType: syncOperationType
 });
 
     if(!missingResult.success){
@@ -43558,7 +43568,8 @@ const missingResult = await executeDurableConnectorOperation({
     companyCode: company_code,
     tallyOwner: tally_owner,
     tallyCompanyGuid: companyGuid,
-    tallyCompanyName: company
+    tallyCompanyName: company,
+operationType: syncOperationType
 });
 
     fs.appendFileSync(
@@ -44310,7 +44321,8 @@ childMissingResult = await executeDurableConnectorOperation({
     companyCode: company_code,
     tallyOwner: tally_owner,
     tallyCompanyGuid: companyGuid,
-    tallyCompanyName: company
+    tallyCompanyName: company,
+operationType: syncOperationType
 });
 
     if (!childMissingResult.success) {
