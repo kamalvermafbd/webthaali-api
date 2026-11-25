@@ -30,7 +30,34 @@ const OPERATION_SETTLE_TIMEOUT_MS = 15 * 1000;
 
 const manualLifecycleObservations = new Map();
 
+const syncLifecycleObservations = new Map();
 
+function getSyncCoordinatorSettlement(requestId) {
+    const item = syncLifecycleObservations.get(requestId);
+
+    if (!item) {
+        return null;
+    }
+
+    return Object.freeze({
+        requestId: item.requestId,
+        batchId: item.batchId,
+        executionClaimToken: item.executionClaimToken,
+        connectorId: item.connectorId,
+        socketId: item.socketId,
+        ownerToken: item.ownerToken,
+        connectorEpoch: item.connectorEpoch,
+        operationType: item.operationType,
+        callbackSettled: item.callbackSettled,
+        coordinatorExited: item.coordinatorExited,
+        pendingWork: item.pending.size,
+        locallySettled:
+            item.callbackSettled === true &&
+            item.coordinatorExited === true &&
+            item.pending.size === 0,
+        settlementEligible: false
+    });
+}
 function getManualReconcileCoordinatorLifecycle(attemptId) {
     const item = manualLifecycleObservations.get(
         String(attemptId || "")
@@ -865,8 +892,31 @@ try {
 }
 
         // Shared with the outer finally for manual lifecycle classification.
-    let operationPromise = null;
-    let operationCompletedSafely = false;
+  let operationPromise = null;
+let operationCompletedSafely = false;
+
+const syncLifecycle = syncEvidenceRequested
+    ? {
+        requestId: options.syncRequestId,
+        batchId: options.syncBatchId,
+        executionClaimToken: options.syncExecutionClaimToken,
+        connectorId: lock.connectorId,
+        socketId: lock.socketId,
+        ownerToken: lock.ownerToken,
+        connectorEpoch: lock.connectorEpoch,
+        operationType,
+        callbackSettled: false,
+        coordinatorExited: false,
+        pending: new Set()
+    }
+    : null;
+
+if (syncLifecycle) {
+    syncLifecycleObservations.set(
+        syncLifecycle.requestId,
+        syncLifecycle
+    );
+}
 
     try {
 
@@ -901,6 +951,7 @@ operationAbortController.signal.addEventListener(
 
                 if (cancelResult?.then) {
     trackManualWork(cancelResult);
+    trackSyncWork(cancelResult);
 }
 
                 if (cancelResult?.catch) {
@@ -964,8 +1015,34 @@ console.warn(
 
     return ownershipFailure;
 }
+function trackSyncWork(work) {
+    if (!syncLifecycle) {
+        return work;
+    }
+
+    const pending = Promise.resolve(work);
+
+    if (syncLifecycle.pending.has(pending)) {
+        return pending;
+    }
+
+    syncLifecycle.pending.add(pending);
+
+    const removePending = () => {
+        syncLifecycle.pending.delete(pending);
+    };
+
+    pending.then(removePending, removePending);
+
+    return pending;
+}
+
 function bounded(promise, message) {
     let timer;
+
+    const pending = Promise.resolve(promise);
+
+    trackSyncWork(pending);
 
     const timeout = new Promise((_, reject) => {
         timer = setTimeout(
@@ -974,7 +1051,7 @@ function bounded(promise, message) {
         );
     });
 
-    return Promise.race([promise, timeout])
+    return Promise.race([pending, timeout])
         .finally(() => clearTimeout(timer));
 }
 function runOptInRedisCommand(command, message) {
@@ -1236,6 +1313,7 @@ function assertOwnership() {
         }
     };
 trackManualWork(work);
+trackSyncWork(work);
     work.then(
         () => {
             clearCheck();
@@ -1267,10 +1345,13 @@ trackManualWork(work);
 
             let resolveRenewalWork;
 
-if (manualLifecycle) {
-    trackManualWork(new Promise(resolve => {
+if (manualLifecycle || syncLifecycle) {
+    const renewalWork = new Promise(resolve => {
         resolveRenewalWork = resolve;
-    }));
+    });
+
+    trackManualWork(renewalWork);
+    trackSyncWork(renewalWork);
 }
 
             try {
@@ -1606,6 +1687,10 @@ return operation(
 trackManualWork(operationPromise);
 
 operationPromise.finally(() => {
+    if (syncLifecycle) {
+        syncLifecycle.callbackSettled = true;
+    }
+
     if (manualLifecycle) {
         manualLifecycle.callbackSettled = true;
 
@@ -2195,8 +2280,27 @@ if (quarantineConfirmed) {
 }
     }
     }
-       } finally {
-        if (manualLifecycle) {
+  } finally {
+   if (syncLifecycle) {
+    syncLifecycle.coordinatorExited = true;
+
+    // Bounded retention of process-local recovery evidence.
+    const cleanupTimer = setTimeout(() => {
+        if (
+            syncLifecycleObservations.get(
+                syncLifecycle.requestId
+            ) === syncLifecycle
+        ) {
+            syncLifecycleObservations.delete(
+                syncLifecycle.requestId
+            );
+        }
+    }, 30 * 60 * 1000);
+
+    cleanupTimer.unref();
+}
+
+    if (manualLifecycle) {
             manualLifecycle.admissionSealed = true;
             manualLifecycle.coordinatorExited = true;
 
@@ -2248,5 +2352,6 @@ if (quarantineConfirmed) {
 
 module.exports = {
     withGlobalConnectorLock,
-    getManualReconcileCoordinatorLifecycle
+    getManualReconcileCoordinatorLifecycle,
+    getSyncCoordinatorSettlement
 };

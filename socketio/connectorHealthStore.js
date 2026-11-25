@@ -1836,7 +1836,203 @@ async function readSyncConnectorReleaseReceipt(
 
     return receipt;
 }
+// ==========================================
+// VERIFIED SYNC QUARANTINE RECOVERY
+// ==========================================
 
+async function recoverSyncConnectorLockWithReceipt(context) {
+
+    const receipt =
+        buildSyncConnectorReleaseReceipt(context);
+
+    const {
+        recoveryAuthorized,
+        connectorEpoch,
+        operationGeneration,
+        quarantinedAt
+    } = context;
+
+    const UUID =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    const quarantineTimeMs =
+        Date.parse(quarantinedAt);
+
+    if (
+        recoveryAuthorized !== true ||
+        typeof connectorEpoch !== "string" ||
+        !UUID.test(connectorEpoch) ||
+        !Number.isSafeInteger(operationGeneration) ||
+        operationGeneration < 0 ||
+        !Number.isFinite(quarantineTimeMs)
+    ) {
+        throw new Error(
+            "SYNC_CONNECTOR_RECOVERY_EVIDENCE_INVALID"
+        );
+    }
+
+    const id = receipt.connectorId;
+    const sid = receipt.socketId;
+    const token = receipt.ownerToken;
+
+    await ensureConnected();
+
+    const result = await redis.eval(
+        `
+        local existing = redis.call("GET", KEYS[7])
+
+        -- Idempotent receipt replay.
+        -- Never modify current ownership on replay.
+        if existing then
+            if existing == ARGV[4] then
+                return 2
+            end
+
+            return -1
+        end
+
+        -- Both quarantine records must exist.
+        local connectorRaw = redis.call("GET", KEYS[1])
+        local socketRaw = redis.call("GET", KEYS[2])
+
+        if not connectorRaw or not socketRaw then
+            return 0
+        end
+
+        local connectorRecord = cjson.decode(connectorRaw)
+        local socketRecord = cjson.decode(socketRaw)
+
+        local function matches(record)
+            return record["connector_id"] == ARGV[1]
+                and record["socket_id"] == ARGV[2]
+                and record["owner_token"] == ARGV[3]
+                and record["operation_type"] == ARGV[5]
+                and record["quarantined_at"] == ARGV[6]
+        end
+
+        if not matches(connectorRecord)
+            or not matches(socketRecord) then
+            return 0
+        end
+
+        -- Verify original persistent ownership.
+        if redis.call("GET", KEYS[3]) ~= ARGV[3]
+            or redis.call("GET", KEYS[4]) ~= ARGV[3] then
+            return 0
+        end
+
+        -- Never recover while either lock exists.
+        if redis.call("EXISTS", KEYS[5]) == 1
+            or redis.call("EXISTS", KEYS[6]) == 1 then
+            return 0
+        end
+
+        local redisTime = redis.call("TIME")
+
+        local nowMs =
+            tonumber(redisTime[1]) * 1000 +
+            math.floor(tonumber(redisTime[2]) / 1000)
+
+        -- Five-minute quarantine eligibility.
+        if nowMs - tonumber(ARGV[7]) < 300000 then
+            return 0
+        end
+
+        -- Verify original connector process and socket.
+        local healthRaw = redis.call("GET", KEYS[8])
+
+        if not healthRaw then
+            return 0
+        end
+
+        local health = cjson.decode(healthRaw)
+
+        if health["connector_id"] ~= ARGV[1]
+            or health["socket_id"] ~= ARGV[2]
+            or health["connection_status"] ~= "CONNECTED"
+            or health["tally_queue_connector_epoch"] ~= ARGV[8] then
+            return 0
+        end
+
+        -- Queue must still match the observed idle generation.
+        if health["tally_queue_idle"] ~= true
+            or health["tally_queue_pending_operations"] ~= 0
+            or health["tally_queue_running_operations"] ~= 0
+            or health["tally_queue_generation"] ~= tonumber(ARGV[9]) then
+            return 0
+        end
+
+        local reportedAtMs =
+            tonumber(health["tally_queue_reported_at_ms"])
+
+        if not reportedAtMs
+            or reportedAtMs > nowMs
+            or nowMs - reportedAtMs > 15000 then
+            return 0
+        end
+
+        -- Persist release receipt and remove quarantine
+        -- ownership in one atomic Redis execution.
+        redis.call("SET", KEYS[7], ARGV[4])
+
+        redis.call(
+            "DEL",
+            KEYS[1],
+            KEYS[2],
+            KEYS[3],
+            KEYS[4]
+        )
+
+        return 1
+        `,
+        8,
+        getConnectorQuarantineKey(id),
+        getSocketQuarantineKey(sid),
+        getConnectorActiveOperationKey(id),
+        getSocketActiveOperationKey(sid),
+        `billey:connector:operation-lock:${id}`,
+        `billey:socket:operation-lock:${sid}`,
+        `billey:sync:release-receipt:${receipt.requestId}`,
+        getHealthKey(id),
+        id,
+        sid,
+        token,
+        JSON.stringify(receipt),
+        receipt.operationType,
+        quarantinedAt,
+        String(quarantineTimeMs),
+        connectorEpoch,
+        String(operationGeneration)
+    );
+
+    const code = Number(result);
+
+    if (code === -1) {
+        throw new Error(
+            "SYNC_CONNECTOR_RELEASE_RECEIPT_CONFLICT"
+        );
+    }
+
+    if (code === 0) {
+        return {
+            recovered: false,
+            replayed: false,
+            receipt: null
+        };
+    }
+
+    if (code !== 1 && code !== 2) {
+        throw new Error(
+            "SYNC_CONNECTOR_RECOVERY_RESULT_INVALID"
+        );
+    }
+
+    return {
+        recovered: true,
+        replayed: code === 2,
+        receipt
+    };
+}
  // ==========================================
  // MANUAL RECONCILIATION ATOMIC RELEASE RECEIPT
  // ==========================================
@@ -3339,8 +3535,9 @@ module.exports = {
     getSocketOperationStatus,
     acquireConnectorAndSocketLock,
     releaseConnectorAndSocketLock,
-    releaseSyncConnectorLockWithReceipt,
+        releaseSyncConnectorLockWithReceipt,
     readSyncConnectorReleaseReceipt,
+    recoverSyncConnectorLockWithReceipt,
     releaseManualReconcileLockWithReceipt,
     readManualReconcileReleaseReceipt,
     renewConnectorAndSocketLock,

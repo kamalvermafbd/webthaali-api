@@ -41157,6 +41157,25 @@ if (lifecycleStartResponse?.error) {
 }
 
 if (
+    lifecycleStartResult?.accepted === false &&
+    lifecycleStartResult?.invocation_id === null &&
+    [
+        "INVALID_ARGUMENTS",
+        "BATCH_NOT_FOUND",
+        "EXECUTION_CLAIM_INVALID"
+    ].includes(lifecycleStartResult?.decision)
+) {
+    httpExecutionStartUnverified = false;
+
+    return res.status(409).json({
+        success: false,
+        error_code: "HTTP_EXECUTION_NOT_STARTED",
+        reason: lifecycleStartResult.decision,
+        batch_id: sync_batch_id
+    });
+}
+
+if (
     lifecycleStartResult?.accepted !== true ||
     lifecycleStartResult?.decision !== "STARTED" ||
     typeof lifecycleStartResult?.invocation_id !== "string"
