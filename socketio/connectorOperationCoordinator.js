@@ -48,14 +48,22 @@ function getSyncCoordinatorSettlement(requestId) {
         ownerToken: item.ownerToken,
         connectorEpoch: item.connectorEpoch,
         operationType: item.operationType,
-        callbackSettled: item.callbackSettled,
-        coordinatorExited: item.coordinatorExited,
-        pendingWork: item.pending.size,
-        locallySettled:
-            item.callbackSettled === true &&
-            item.coordinatorExited === true &&
-            item.pending.size === 0,
-        settlementEligible: false
+       callbackStarted: item.callbackStarted,
+callbackSettled: item.callbackSettled,
+coordinatorExited: item.coordinatorExited,
+admissionSealed: item.admissionSealed,
+lateWorkDetected: item.lateWorkDetected,
+uncertainWorkDetected: item.uncertainWorkDetected,
+pendingWork: item.pending.size,
+locallySettled:
+    item.callbackStarted === true &&
+    item.callbackSettled === true &&
+    item.coordinatorExited === true &&
+    item.admissionSealed === true &&
+    item.lateWorkDetected === false &&
+    item.uncertainWorkDetected === false &&
+    item.pending.size === 0,
+settlementEligible: false
     });
 }
 function getManualReconcileCoordinatorLifecycle(attemptId) {
@@ -905,9 +913,13 @@ const syncLifecycle = syncEvidenceRequested
         ownerToken: lock.ownerToken,
         connectorEpoch: lock.connectorEpoch,
         operationType,
-        callbackSettled: false,
-        coordinatorExited: false,
-        pending: new Set()
+      callbackStarted: false,
+callbackSettled: false,
+coordinatorExited: false,
+admissionSealed: false,
+lateWorkDetected: false,
+uncertainWorkDetected: false,
+pending: new Set()
     }
     : null;
 
@@ -941,6 +953,10 @@ const identityEnabled = options?.exposeLockIdentity === true;
 operationAbortController.signal.addEventListener(
     "abort",
     () => {
+        if (syncLifecycle?.admissionSealed === true) {
+    syncLifecycle.lateWorkDetected = true;
+    return;
+}
         try {
             const receiver = lock.socket.protocolReceiver;
 
@@ -964,6 +980,9 @@ operationAbortController.signal.addEventListener(
                 }
             }
         } catch (error) {
+            if (syncLifecycle) {
+    syncLifecycle.uncertainWorkDetected = true;
+}
             console.error(
                 `[GLOBAL LOCK] Collection cancellation failed: ${lock.connectorId}`,
                 error
@@ -1022,17 +1041,25 @@ function trackSyncWork(work) {
 
     const pending = Promise.resolve(work);
 
+    if (syncLifecycle.admissionSealed === true) {
+        syncLifecycle.lateWorkDetected = true;
+    }
+
     if (syncLifecycle.pending.has(pending)) {
         return pending;
     }
 
     syncLifecycle.pending.add(pending);
 
-    const removePending = () => {
-        syncLifecycle.pending.delete(pending);
-    };
-
-    pending.then(removePending, removePending);
+    pending.then(
+        () => {
+            syncLifecycle.pending.delete(pending);
+        },
+        () => {
+            syncLifecycle.uncertainWorkDetected = true;
+            syncLifecycle.pending.delete(pending);
+        }
+    );
 
     return pending;
 }
@@ -1045,10 +1072,16 @@ function bounded(promise, message) {
     trackSyncWork(pending);
 
     const timeout = new Promise((_, reject) => {
-        timer = setTimeout(
-            () => reject(new Error(message)),
-            OPERATION_SETTLE_TIMEOUT_MS
-        );
+   timer = setTimeout(
+    () => {
+        if (syncLifecycle) {
+            syncLifecycle.uncertainWorkDetected = true;
+        }
+
+        reject(new Error(message));
+    },
+    OPERATION_SETTLE_TIMEOUT_MS
+);
     });
 
     return Promise.race([pending, timeout])
@@ -1064,6 +1097,13 @@ function runOptInRedisCommand(command, message) {
     }
 
       const pending = Promise.resolve().then(() => {
+        if (syncLifecycle?.admissionSealed === true) {
+    syncLifecycle.lateWorkDetected = true;
+
+    throw new Error(
+        "SYNC_CONNECTOR_REDIS_ADMISSION_CLOSED"
+    );
+}
         if (
             manualLifecycle &&
             (
@@ -1145,7 +1185,15 @@ function quarantineForCleanup(...args) {
             }
         }
 
-       return quarantineConnectorAndSocket(
+      if (syncLifecycle?.admissionSealed === true) {
+    syncLifecycle.lateWorkDetected = true;
+
+    throw new Error(
+        "SYNC_CONNECTOR_QUARANTINE_ADMISSION_CLOSED"
+    );
+}
+
+return quarantineConnectorAndSocket(
     ...args,
     operationType
 );
@@ -1200,6 +1248,16 @@ async function drainRenewalAndChecks() {
     }
 }
 function assertOwnership() {
+    if (syncLifecycle?.admissionSealed === true) {
+        syncLifecycle.lateWorkDetected = true;
+
+        return observedRejection(
+            new Error(
+                "SYNC_CONNECTOR_OWNERSHIP_ADMISSION_CLOSED"
+            )
+        );
+    }
+
     if (!lifecycleUsable()) {
         return observedRejection(
             ownershipFailure ||
@@ -1333,13 +1391,18 @@ trackSyncWork(work);
     return check;
 }
  try {
-        renewalTimer = setInterval(async () => {
-            if (
-    renewing ||
-    ownershipCheckPromise ||
-    ownershipRedisPromise ||
-    lockLost
-) return;
+      renewalTimer = setInterval(async () => {
+    if (syncLifecycle?.admissionSealed === true) {
+        syncLifecycle.lateWorkDetected = true;
+        return;
+    }
+
+    if (
+        renewing ||
+        ownershipCheckPromise ||
+        ownershipRedisPromise ||
+        lockLost
+    ) return;
 
             renewing = true;
 
@@ -1637,24 +1700,54 @@ if (operationAbortController.signal.aborted) {
             `Connector unavailable before callback execution: ${lock.connectorId}`
         );
     }
+if (syncLifecycle && !identityEnabled) {
+    if (syncLifecycle.admissionSealed) {
+        syncLifecycle.lateWorkDetected = true;
+        throw new Error(
+            "SYNC_CONNECTOR_CALLBACK_ADMISSION_CLOSED"
+        );
+    }
 
-   if (identityEnabled) {
-    callbackActive = true;
-    if (manualLifecycle) {
-    manualLifecycle.callbackStarted = true;
+    syncLifecycle.callbackStarted = true;
 }
 
+if (identityEnabled) {
+    callbackActive = true;
+
+    if (manualLifecycle) {
+        manualLifecycle.callbackStarted = true;
+    }
+
     return Promise.resolve()
-        .then(() => operation(
-            lock.socket,
-            operationAbortController.signal,
-            Object.freeze({
-                connectorId: lock.connectorId,
-                socketId: lock.socketId,
-                ownerToken: lock.ownerToken,
-                assertOwnership
-            })
-        ))
+        .then(() => {
+            if (syncLifecycle) {
+                if (syncLifecycle.admissionSealed) {
+                    syncLifecycle.lateWorkDetected = true;
+                    throw new Error(
+                        "SYNC_CONNECTOR_CALLBACK_ADMISSION_CLOSED"
+                    );
+                }
+
+                if (!lifecycleUsable()) {
+                    throw new Error(
+                        "SYNC_CONNECTOR_CALLBACK_NOT_USABLE"
+                    );
+                }
+
+                syncLifecycle.callbackStarted = true;
+            }
+
+            return operation(
+                lock.socket,
+                operationAbortController.signal,
+                Object.freeze({
+                    connectorId: lock.connectorId,
+                    socketId: lock.socketId,
+                    ownerToken: lock.ownerToken,
+                    assertOwnership
+                })
+            );
+        })
         .then(value => {
             if (ownershipFailure) {
                 throw ownershipFailure;
@@ -1686,9 +1779,12 @@ return operation(
 });
 trackManualWork(operationPromise);
 
+trackSyncWork(operationPromise);
+
 operationPromise.finally(() => {
     if (syncLifecycle) {
-        syncLifecycle.callbackSettled = true;
+        syncLifecycle.callbackSettled =
+            syncLifecycle.callbackStarted === true;
     }
 
     if (manualLifecycle) {
@@ -1854,7 +1950,7 @@ operationCompletedSafely = true;
 return receiptRequested ? completion : result;
  } finally {
 
-    if (lockLost) {
+  if (lockLost || syncLifecycle) {
     if (renewalTimer) {
         clearInterval(renewalTimer);
         renewalTimer = null;
@@ -1879,11 +1975,15 @@ if (operationPromise) {
     try {
         const abortPromise = new Promise((_, reject) => {
             const onAbort = () => {
-                settleTimer = setTimeout(() => {
-                    reject(new Error(
-                        `Global operation settle timeout: ${lock.connectorId}`
-                    ));
-                }, OPERATION_SETTLE_TIMEOUT_MS);
+             settleTimer = setTimeout(() => {
+    if (syncLifecycle) {
+        syncLifecycle.uncertainWorkDetected = true;
+    }
+
+    reject(new Error(
+        `Global operation settle timeout: ${lock.connectorId}`
+    ));
+}, OPERATION_SETTLE_TIMEOUT_MS);
             };
 
             abortListener = onAbort;
@@ -2282,7 +2382,8 @@ if (quarantineConfirmed) {
     }
   } finally {
    if (syncLifecycle) {
-    syncLifecycle.coordinatorExited = true;
+    syncLifecycle.admissionSealed = true;
+syncLifecycle.coordinatorExited = true;
 
     // Bounded retention of process-local recovery evidence.
     const cleanupTimer = setTimeout(() => {

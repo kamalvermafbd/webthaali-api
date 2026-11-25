@@ -10,7 +10,13 @@ const connectorRegistry = require("../socketio/connectorRegistry");
 
 const connectorHealthStore =
     require("../socketio/connectorHealthStore");
+const {
+    getSyncCoordinatorSettlement
+} = require("../socketio/connectorOperationCoordinator");
 
+const {
+    sendSyncExecutionObservationRequest
+} = require("../socketio/sendSyncExecutionObservationRequest");
 const { getSyncQueue } =
     require("./secondSyncQueue");
 
@@ -288,17 +294,16 @@ async function publishConnectorHealthToSharedStore(
             await connectorHealthStore.updateConnectorHealthIfSocketOwner(
                 health.connector_id,
                 localSocket.id,
-                {
-                    responsiveness: health.responsiveness,
-                    heartbeat_status: health.heartbeat_status,
-                    health_status: health.health_status,
-                    active_operation: health.active_operation,
-                    last_response_at: health.last_response_at,
-                    last_success_at: health.last_success_at,
-                    last_error: health.last_error,
-                    reasons: health.reasons,
-                    updated_at: health.updated_at
-                }
+             {
+    responsiveness: health.responsiveness,
+    heartbeat_status: health.heartbeat_status,
+    health_status: health.health_status,
+    last_response_at: health.last_response_at,
+    last_success_at: health.last_success_at,
+    last_error: health.last_error,
+    reasons: health.reasons,
+    updated_at: health.updated_at
+}
             );
 
         if (!result.updated) {
@@ -552,6 +557,314 @@ async function withSyncRecoveryTimeout(operation, message) {
         clearTimeout(timer);
     }
 }
+
+
+async function recoverVerifiedSyncQuarantine(
+    supabase,
+    identity
+) {
+    // ==========================================
+    // 1. Verify original Redis quarantine
+    // ==========================================
+
+    const recovery = await withSyncRecoveryTimeout(
+        () => connectorHealthStore
+            .inspectConnectorRecoveryState(
+                identity.connectorId
+            ),
+        "SYNC_QUARANTINE_INSPECTION_TIMEOUT"
+    );
+
+    if (
+        recovery?.quarantined !== true ||
+        recovery.recoveryEligible !== true ||
+        !Number.isFinite(recovery.quarantineAgeMs) ||
+        recovery.quarantineAgeMs < 300000 ||
+        recovery.connectorId !== identity.connectorId ||
+        recovery.operationType !== identity.operationType ||
+        recovery.oldSocketId !== identity.socketId ||
+        recovery.healthSocketId !== identity.socketId ||
+        recovery.ownerToken !== identity.ownerToken ||
+        recovery.hasActiveMarker !== true ||
+        recovery.markerMatchesOwner !== true ||
+        recovery.lockPresent !== false ||
+        !recovery.quarantinedAt
+    ) {
+        return null;
+    }
+
+    // ==========================================
+    // 2. Verify local coordinator settlement
+    // ==========================================
+
+    function getVerifiedLocalSettlement() {
+        const local = getSyncCoordinatorSettlement(
+            identity.requestId
+        );
+
+        if (
+            !local ||
+            local.requestId !== identity.requestId ||
+            local.batchId !== identity.batchId ||
+            local.executionClaimToken !==
+                identity.executionClaimToken ||
+            local.connectorId !== identity.connectorId ||
+            local.socketId !== identity.socketId ||
+            local.ownerToken !== identity.ownerToken ||
+            local.operationType !== identity.operationType ||
+            !local.connectorEpoch ||
+            local.callbackStarted !== true ||
+            local.callbackSettled !== true ||
+            local.coordinatorExited !== true ||
+            local.admissionSealed !== true ||
+            local.lateWorkDetected !== false ||
+            local.uncertainWorkDetected !== false ||
+            local.pendingWork !== 0 ||
+            local.locallySettled !== true
+        ) {
+            return null;
+        }
+
+        return local;
+    }
+
+    const local = getVerifiedLocalSettlement();
+
+    if (!local) {
+        return null;
+    }
+
+    // ==========================================
+    // 3. Verify durable HTTP termination
+    // ==========================================
+
+    const httpResponse = await withSyncRecoveryTimeout(
+        () => supabase.rpc(
+            "assess_sync_http_settlement",
+            {
+                p_batch_id: identity.batchId,
+                p_execution_claim_token:
+                    identity.executionClaimToken
+            }
+        ),
+        "SYNC_QUARANTINE_HTTP_CHECK_TIMEOUT"
+    );
+
+    if (httpResponse.error) {
+        throw httpResponse.error;
+    }
+
+    const http = Array.isArray(httpResponse.data)
+        ? httpResponse.data[0]
+        : httpResponse.data;
+
+    if (
+        http?.decision !== "TERMINATED" ||
+        http.execution_state !== "TERMINATED" ||
+        !http.terminated_at ||
+        ![
+            "HANDLER_COMPLETED_SUCCESS",
+            "HANDLER_EXITED"
+        ].includes(http.terminal_outcome)
+    ) {
+        return null;
+    }
+
+    // ==========================================
+    // 4. Verify exact durable operation
+    // ==========================================
+
+    const { data: operation, error } =
+        await withSyncRecoveryTimeout(
+            () => supabase
+                .from("sync_connector_operations")
+                .select(`
+                    request_id,
+                    batch_id,
+                    execution_claim_token,
+                    connector_id,
+                    socket_id,
+                    owner_token,
+                    operation_type,
+                    operation_name,
+                    company_code,
+                    tally_owner,
+                    tally_company_guid,
+                    payload_fingerprint,
+                    connector_epoch,
+                    state,
+                    dispatch_marked_at,
+                    result_verified_at,
+                    ownership_prepared_at,
+                    lock_acquired_at,
+                    lock_released_at
+                `)
+                .eq("request_id", identity.requestId)
+                .eq("batch_id", identity.batchId)
+                .eq(
+                    "execution_claim_token",
+                    identity.executionClaimToken
+                )
+                .maybeSingle(),
+            "SYNC_QUARANTINE_OPERATION_CHECK_TIMEOUT"
+        );
+
+    if (error) {
+        throw error;
+    }
+
+    if (
+        !operation ||
+        operation.request_id !== identity.requestId ||
+        operation.batch_id !== identity.batchId ||
+        operation.execution_claim_token !==
+            identity.executionClaimToken ||
+        operation.connector_id !== identity.connectorId ||
+        operation.socket_id !== identity.socketId ||
+        operation.owner_token !== identity.ownerToken ||
+        operation.operation_type !== identity.operationType ||
+        operation.connector_epoch !== local.connectorEpoch ||
+        operation.state !== "RESULT_VERIFIED" ||
+        !operation.dispatch_marked_at ||
+        !operation.result_verified_at ||
+        !operation.ownership_prepared_at ||
+        !operation.lock_acquired_at ||
+        operation.lock_released_at !== null ||
+        !operation.operation_name ||
+        !operation.company_code ||
+        !operation.tally_owner ||
+        !operation.tally_company_guid ||
+        !/^[0-9a-f]{64}$/i.test(
+            operation.payload_fingerprint || ""
+        )
+    ) {
+        return null;
+    }
+
+    // ==========================================
+    // 5. Observe original connector execution
+    // ==========================================
+
+    const socket = connectorRegistry.get(
+        identity.connectorId
+    );
+
+    if (
+        !socket ||
+        socket.connected !== true ||
+        socket.id !== identity.socketId ||
+        !socket.protocolReceiver
+    ) {
+        return null;
+    }
+
+    const observation =
+        await sendSyncExecutionObservationRequest({
+            connectorId: identity.connectorId,
+            expectedSocketId: identity.socketId,
+            expectedConnectorEpoch:
+                operation.connector_epoch,
+
+            requestId: identity.requestId,
+
+            identityScope: JSON.stringify([
+                "billey-tally-v1",
+                String(operation.connector_id),
+                String(operation.company_code),
+                String(operation.tally_owner)
+            ]),
+
+            operation: operation.operation_name,
+
+            companyIdentity:
+                `guid:${operation.tally_company_guid}`,
+
+            payloadFingerprint:
+                `sha256:${operation.payload_fingerprint}`,
+
+            timeoutMs: 5000
+        });
+
+    if (
+        observation?.requestId !== identity.requestId ||
+        observation.connectorId !== identity.connectorId ||
+        observation.socketId !== identity.socketId ||
+        observation.connectorEpoch !==
+            operation.connector_epoch ||
+        observation.executionKnown !== true ||
+        observation.identityMatches !== true ||
+        observation.executionFinished !== true ||
+        observation.locallyDrained !== true ||
+        !Number.isSafeInteger(
+            observation.operationGeneration
+        ) ||
+        observation.operationGeneration < 0
+    ) {
+        return null;
+    }
+
+    // ==========================================
+    // 6. Recheck local settlement and socket
+    // ==========================================
+
+    const finalLocal = getVerifiedLocalSettlement();
+
+    if (
+        !finalLocal ||
+        finalLocal.connectorEpoch !==
+            operation.connector_epoch ||
+        connectorRegistry.get(identity.connectorId) !==
+            socket ||
+        socket.connected !== true ||
+        socket.id !== identity.socketId ||
+        !socket.protocolReceiver
+    ) {
+        return null;
+    }
+
+    // ==========================================
+    // 7. Atomic Redis recovery and release receipt
+    // ==========================================
+
+    const result = await connectorHealthStore
+        .recoverSyncConnectorLockWithReceipt({
+            ...identity,
+
+            recoveryAuthorized: true,
+
+            connectorEpoch:
+                operation.connector_epoch,
+
+            operationGeneration:
+                observation.operationGeneration,
+
+            quarantinedAt:
+                recovery.quarantinedAt
+        });
+
+    if (
+        result?.recovered !== true ||
+        result.receipt?.redisReleaseConfirmed !== true
+    ) {
+        return null;
+    }
+
+    console.log(
+        "[CONNECTOR WATCHDOG] SYNC QUARANTINE RECOVERED",
+        {
+            request_id: identity.requestId,
+            batch_id: identity.batchId,
+            connector_id: identity.connectorId,
+            socket_id: identity.socketId,
+            operation_type: identity.operationType,
+            replayed: result.replayed === true
+        }
+    );
+
+    return result.receipt;
+}
+
+
 async function recoverPendingSyncReleaseConfirmations(supabase) {
     try {
         let query = supabase
@@ -628,18 +941,29 @@ async function recoverPendingSyncReleaseConfirmations(supabase) {
                         operation.operation_type
                 };
 
-                const receipt = await withSyncRecoveryTimeout(
+            let receipt = await withSyncRecoveryTimeout(
     () => connectorHealthStore
         .readSyncConnectorReleaseReceipt(identity),
     "SYNC_RELEASE_RECEIPT_READ_TIMEOUT"
 );
 
-                // Missing receipt is not release evidence.
-                if (
-                    receipt?.redisReleaseConfirmed !== true
-                ) {
-                    continue;
-                }
+if (receipt?.redisReleaseConfirmed !== true) {
+
+    if (
+        process.env.ENABLE_SYNC_QUARANTINE_RECOVERY !== "true"
+    ) {
+        continue;
+    }
+
+    receipt = await recoverVerifiedSyncQuarantine(
+        supabase,
+        identity
+    );
+
+    if (receipt?.redisReleaseConfirmed !== true) {
+        continue;
+    }
+}
 
                const {
     data: confirmed,
