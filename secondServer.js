@@ -451,9 +451,11 @@ const supabase =
 });
 
 
-startSyncBatchStatusMonitor({
-    supabase
-});
+if (process.env.ENABLE_SYNC_BATCH_STATUS_MONITOR === "true") {
+    startSyncBatchStatusMonitor({
+        supabase
+    });
+}
 
 // Detect cleanup batches eligible for crash recovery.
 async function findStaleCleanupBatches() {
