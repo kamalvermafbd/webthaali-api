@@ -1262,7 +1262,9 @@ if (universalLookupError) {
         // ----------------------------------------------------
         // 2. Check every batch
         // ----------------------------------------------------
-
+// Discovery cache for current watchdog cycle only.
+// Atomic SQL claims remain the final authority.
+const latestBatchByScope = new Map();
       for (const batch of batches) {
 
     try {
@@ -1336,6 +1338,16 @@ if (
     // Older FAILED batches must never be retried.
     // The SQL claim RPC independently rechecks this.
 
+    const latestBatchScopeKey = JSON.stringify([
+    companyCode,
+    tallyOwner
+]);
+
+let latestBatch;
+
+if (latestBatchByScope.has(latestBatchScopeKey)) {
+    latestBatch = latestBatchByScope.get(latestBatchScopeKey);
+} else {
     const { data: latestBatches, error: latestBatchError } =
         await supabase
             .from("sync_batches")
@@ -1350,7 +1362,19 @@ if (
         throw latestBatchError;
     }
 
-    const latestBatch = latestBatches?.[0];
+    latestBatch = latestBatches?.[0];
+
+    // Never cache errors, missing rows or malformed results.
+    if (
+        latestBatch?.id != null &&
+        latestBatch?.batch_id != null
+    ) {
+        latestBatchByScope.set(
+            latestBatchScopeKey,
+            latestBatch
+        );
+    }
+}
 
     if (!latestBatch || String(latestBatch.id) !== String(batch.id)) {
         console.log(
