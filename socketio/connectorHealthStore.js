@@ -497,20 +497,55 @@ end
         local currentSocket = record["socket_id"]
         local currentStatus = record["connection_status"]
 
-        if currentSocket
-            and currentSocket ~= ""
-            and currentSocket ~= ARGV[2]
-            and currentStatus ~= "DISCONNECTED" then
-            return "REJECTED_HEALTH:" .. cjson.encode({
-    reason = "OTHER_CONNECTED_SOCKET",
-    health = {
-        socket_id = currentSocket,
-        connection_status = currentStatus,
-        operation_status = record["operation_status"],
-        shared_updated_at = record["shared_updated_at"]
-    }
-})
-        end
+       if currentSocket
+    and currentSocket ~= ""
+    and currentSocket ~= ARGV[2]
+    and currentStatus ~= "DISCONNECTED" then
+
+    local now = redis.call("TIME")
+
+    local nowMs =
+        tonumber(now[1]) * 1000 +
+        math.floor(tonumber(now[2]) / 1000)
+
+    local renewedAt =
+        record["socket_lease_renewed_at_ms"]
+
+    local leaseExpired =
+        type(renewedAt) == "number"
+        and renewedAt > 0
+        and renewedAt <= nowMs
+        and (nowMs - renewedAt) >= 45000
+
+    local operationStatus =
+        record["operation_status"]
+
+    local activeOperation =
+        record["active_operation"]
+
+    local noActiveOperation =
+        activeOperation == nil
+        or activeOperation == cjson.null
+
+    local safeToConsiderTransfer =
+        currentStatus == "CONNECTED"
+        and leaseExpired
+        and operationStatus ~= "BUSY"
+        and noActiveOperation
+
+    if not safeToConsiderTransfer then
+        return "REJECTED_HEALTH:" .. cjson.encode({
+            reason = "OTHER_CONNECTED_SOCKET",
+            health = {
+                socket_id = currentSocket,
+                connection_status = currentStatus,
+                operation_status = operationStatus,
+                shared_updated_at =
+                    record["shared_updated_at"]
+            }
+        })
+    end
+end
     end
 
    
@@ -563,6 +598,12 @@ if previousSocket ~= ARGV[2] then
     record["tally_queue_reported_at"] = cjson.null
     record["tally_queue_reported_at_ms"] = cjson.null
 end
+
+local leaseTime = redis.call("TIME")
+
+record["socket_lease_renewed_at_ms"] =
+    tonumber(leaseTime[1]) * 1000 +
+    math.floor(tonumber(leaseTime[2]) / 1000)
 
 record["shared_updated_at"] = ARGV[3]
 
@@ -691,11 +732,12 @@ local becameDisconnected =
     and record["connection_status"] ~= "DISCONNECTED"
 
 for k, v in pairs(patch) do
-    if k ~= "connector_id"
-        and k ~= "socket_id"
-        and k ~= "shared_updated_at"
-        and k ~= "disconnected_since_ms"
-        and string.sub(k, 1, 12) ~= "tally_queue_" then
+  if k ~= "connector_id"
+    and k ~= "socket_id"
+    and k ~= "shared_updated_at"
+    and k ~= "disconnected_since_ms"
+    and k ~= "socket_lease_renewed_at_ms"
+    and string.sub(k, 1, 12) ~= "tally_queue_" then
         record[k] = v
     end
 end
@@ -922,7 +964,21 @@ async function renewConnectorSocketLease(
             return 0
         end
 
-        return redis.call("EXPIRE", KEYS[1], ARGV[2])
+local now = redis.call("TIME")
+
+record["socket_lease_renewed_at_ms"] =
+    tonumber(now[1]) * 1000 +
+    math.floor(tonumber(now[2]) / 1000)
+
+redis.call(
+    "SET",
+    KEYS[1],
+    cjson.encode(record),
+    "EX",
+    ARGV[2]
+)
+
+return 1
         `,
         1,
         getHealthKey(id),
