@@ -1,0 +1,2032 @@
+"use strict";
+
+const crypto = require("crypto");
+
+const registry = require("./connectorRegistry");
+
+const {
+    acquireConnectorAndSocketLock,
+    releaseConnectorAndSocketLock,
+    releaseManualReconcileLockWithReceipt,
+    renewConnectorAndSocketLock,
+    quarantineConnectorAndSocket,
+    getConnectorWatchdogStatus
+} = require("./connectorHealthStore");
+const {
+    OPERATION_TYPES,
+    resolveOperationType
+} = require("./connectorQuarantineManager");
+const LOCK_TTL_MS = 120000;
+const LOCK_RENEW_MS = 30000;
+const LOCK_WAIT_MS = 2000;
+
+const OPERATION_SETTLE_TIMEOUT_MS = 15 * 1000;
+
+// Process-local Manual Reconciliation lifecycle observation only.
+// NOT a durable settlement receipt or recovery authorization.
+
+const manualLifecycleObservations = new Map();
+
+
+function getManualReconcileCoordinatorLifecycle(attemptId) {
+    const item = manualLifecycleObservations.get(
+        String(attemptId || "")
+    );
+
+    if (!item) return null;
+
+    const pendingWork = item.pending.size;
+
+       const locallySettled =
+        item.coordinatorExited === true &&
+        item.admissionSealed === true &&
+        item.lateWorkDetected !== true &&
+        pendingWork === 0 &&
+        item.callbackStarted === true &&
+        item.callbackSettled === true &&
+        item.outcome === "LOCALLY_SETTLED_UNVERIFIED";
+
+const outcome =
+    item.outcome === "SUCCESS_RELEASED"
+        ? "SUCCESS_RELEASED"
+        : item.outcome === "ACQUISITION_UNVERIFIED"
+            ? "ACQUISITION_UNVERIFIED"
+            : item.lateWorkDetected === true
+                ? "LATE_WORK_UNVERIFIED"
+                : item.coordinatorExited !== true
+                    ? item.outcome
+                    : locallySettled
+                        ? "LOCALLY_SETTLED_UNVERIFIED"
+                        : "PENDING_WORK_UNVERIFIED";
+
+    return Object.freeze({
+        attemptId: item.attemptId,
+        executionId: item.executionId,
+        serverInstanceId: item.serverInstanceId,
+        connectorId: item.connectorId,
+        socketId: item.socketId,
+        ownerToken: item.ownerToken,
+        coordinatorExited: item.coordinatorExited,
+        pendingWork,
+        callbackSettled: item.callbackSettled,
+        locallySettled,
+        outcome,
+
+        // Process-local evidence is not durable SQL authorization.
+        recoveryAuthorized: false
+    });
+}
+
+// ==========================================
+// WAIT AND ACQUIRE GLOBAL CONNECTOR LOCK
+// ==========================================
+async function waitForConnectorLock(
+    connectorId,
+    maxWaitMs = undefined,
+    observeManualWork = null,
+    prepareManualAcquisition = null,
+    operationType = OPERATION_TYPES.UNKNOWN
+) {
+    const id = String(connectorId || "").trim();
+
+    if (
+        maxWaitMs !== undefined &&
+        (
+            !Number.isSafeInteger(maxWaitMs) ||
+            maxWaitMs <= 0
+        )
+    ) {
+        throw new Error("GLOBAL_CONNECTOR_WAIT_BUDGET_INVALID");
+    }
+
+    const deadline = maxWaitMs === undefined
+        ? null
+        : Date.now() + maxWaitMs;
+
+    function assertWaitBudget() {
+        if (deadline !== null && Date.now() >= deadline) {
+            const error = new Error(
+                `CONNECTOR_BUSY: ${id}`
+            );
+            error.code = "CONNECTOR_BUSY";
+            throw error;
+        }
+    }
+
+    if (!id) {
+        throw new Error("connectorId is required");
+    }
+
+  const ownerToken = crypto.randomUUID();
+
+   while (true) {
+     assertWaitBudget();
+        const socket = registry.get(id);
+
+        if (!socket?.connected) {
+            throw new Error(
+                `Connector disconnected: ${id}`
+            );
+        }
+
+        if (!socket.id) {
+            throw new Error(
+                `Socket ID missing: ${id}`
+            );
+        }
+
+        if (!socket.protocolReceiver) {
+            throw new Error(
+                `Protocol receiver missing: ${id}`
+            );
+        }
+// Manual-only: one durable preparation and one Redis
+// acquisition attempt. No retry with a prepared identity.
+if (prepareManualAcquisition) {
+    await prepareManualAcquisition({
+        connectorId: id,
+        socketId: socket.id,
+        ownerToken
+    });
+
+    const acquisitionPromise = acquireConnectorAndSocketLock(
+        id,
+        socket.id,
+        ownerToken,
+        { ttlMs: LOCK_TTL_MS }
+    );
+
+    if (observeManualWork) {
+        observeManualWork(acquisitionPromise);
+    }
+
+   const acquired = await acquisitionPromise;
+
+if (!acquired) {
+    throw new Error(
+        `MANUAL_RECONCILE_CONNECTOR_BUSY_AFTER_PREPARATION: ${id}`
+    );
+}
+
+if (
+    !socket.connected ||
+    !socket.protocolReceiver ||
+    registry.get(id) !== socket
+) {
+    // Acquisition succeeded, but the socket changed.
+    // Keep the ownership marker until it can be resolved.
+    throw new Error(
+        `MANUAL_RECONCILE_CONNECTOR_CHANGED_AFTER_ACQUISITION: ${id}`
+    );
+}
+
+return {
+    connectorId: id,
+    socketId: socket.id,
+    socket,
+    ownerToken
+};
+}
+        const acquisitionPromise = acquireConnectorAndSocketLock(
+    id,
+    socket.id,
+    ownerToken,
+    { ttlMs: LOCK_TTL_MS }
+);
+// Manual-only: track underlying Redis acquisition,
+// including completion after a timeout.
+if (observeManualWork) {
+    observeManualWork(acquisitionPromise);
+}
+let acquisitionTimer;
+
+const acquisitionTimeout = new Promise((_, reject) => {
+    acquisitionTimer = setTimeout(() => {
+        reject(
+            new Error(
+                `GLOBAL_CONNECTOR_ACQUISITION_TIMEOUT: ${id}`
+            )
+        );
+    }, OPERATION_SETTLE_TIMEOUT_MS);
+});
+
+let acquired;
+
+try {
+    acquired = await Promise.race([
+        acquisitionPromise,
+        acquisitionTimeout
+    ]);
+} catch (error) {
+    if (
+        error.message?.startsWith(
+            "GLOBAL_CONNECTOR_ACQUISITION_TIMEOUT:"
+        )
+    ) {
+        // The Redis command may still acquire the lock.
+        // Observe its eventual result without releasing markers.
+        acquisitionPromise.then(
+            lateAcquired => {
+                if (lateAcquired) {
+                    console.error(
+                        `[GLOBAL LOCK] Late acquisition requires verified recovery: ${id}`,
+                        { socketId: socket.id }
+                    );
+                }
+            },
+            lateError => {
+                console.error(
+                    `[GLOBAL LOCK] Late acquisition failed: ${id}`,
+                    lateError
+                );
+            }
+        );
+
+      // Acquisition timed out before operation dispatch.
+// Do not disconnect a healthy transport.
+// Any late successful acquisition retains its persistent
+// connector and socket ownership markers.
+console.warn(
+    `[GLOBAL LOCK] Acquisition timeout; socket retained: ${id}`,
+    {
+        socketId: socket.id,
+        ownerToken
+    }
+);
+    }
+
+    throw error;
+} finally {
+    clearTimeout(acquisitionTimer);
+}
+
+        if (acquired) {
+            // Socket must still be the registered connection.
+if (
+    !socket.connected ||
+    !socket.protocolReceiver ||
+    registry.get(id) !== socket
+) {
+const quarantinePromise = quarantineConnectorAndSocket(
+    id,
+    socket.id,
+    "CONNECTOR_CHANGED_DURING_LOCK_ACQUISITION",
+    ownerToken,
+    operationType
+);
+// Track acquisition-time quarantine until it settles.
+if (observeManualWork) {
+    observeManualWork(quarantinePromise);
+}
+let quarantineTimer;
+
+try {
+    await Promise.race([
+        quarantinePromise,
+        new Promise((_, reject) => {
+            quarantineTimer = setTimeout(() => {
+                reject(
+                    new Error(
+                        `GLOBAL_CONNECTOR_ACQUISITION_QUARANTINE_TIMEOUT: ${id}`
+                    )
+                );
+            }, OPERATION_SETTLE_TIMEOUT_MS);
+        })
+    ]);
+} finally {
+    clearTimeout(quarantineTimer);
+}
+
+    // Keep persistent markers for verified recovery.
+    // Do not release lock after uncertain socket transition.
+    throw new Error(
+        `Connector changed during lock acquisition: ${id}`
+    );
+}
+
+            return {
+                connectorId: id,
+                socketId: socket.id,
+                socket,
+                ownerToken
+            };
+        }
+
+     let watchdogTimer;
+
+const watchdogPromise = Promise.resolve().then(() =>
+    getConnectorWatchdogStatus(id)
+);
+// Track underlying watchdog Redis work.
+if (observeManualWork) {
+    observeManualWork(watchdogPromise);
+}
+let watchdog;
+
+try {
+    watchdog = await Promise.race([
+        watchdogPromise,
+        new Promise((_, reject) => {
+            watchdogTimer = setTimeout(() => {
+                reject(
+                    new Error(
+                        `GLOBAL_CONNECTOR_WATCHDOG_STATUS_TIMEOUT: ${id}`
+                    )
+                );
+            }, OPERATION_SETTLE_TIMEOUT_MS);
+        })
+    ]);
+} finally {
+    clearTimeout(watchdogTimer);
+}
+
+if (
+    !watchdog ||
+    typeof watchdog !== "object" ||
+    typeof watchdog.operation_status !== "string"
+) {
+    throw new Error(
+        `GLOBAL_CONNECTOR_WATCHDOG_STATUS_INVALID: ${id}`
+    );
+}
+
+if (watchdog.operation_status === "QUARANTINED") {
+    throw new Error(
+        `Connector recovery required (QUARANTINED): ${id}`
+    );
+}
+
+               assertWaitBudget();
+
+        const waitMs = deadline === null
+            ? LOCK_WAIT_MS
+            : Math.min(LOCK_WAIT_MS, deadline - Date.now());
+
+        await new Promise(resolve =>
+            setTimeout(resolve, waitMs)
+        );
+    }
+}
+
+// ==========================================
+// EXECUTE OPERATION UNDER GLOBAL LOCK
+// ==========================================
+
+async function withGlobalConnectorLock(
+    connectorId,
+    operation,
+    options = undefined
+) {
+     if (typeof operation !== "function") {
+        throw new Error("operation must be a function");
+    }
+
+    const UUID =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    const receiptRequested = options?.releaseEvidence === true;
+    const operationType = resolveOperationType(options);
+    let completionIdentity = null;
+
+       // Durable receipt writer is mandatory for Manual Reconciliation.
+    // Normal Sync callers do not use releaseEvidence.
+    const manualCoordinatorReceiptWriter = receiptRequested
+        ? options?.manualCoordinatorReceiptWriter
+        : null;
+
+    if (
+        receiptRequested &&
+        typeof manualCoordinatorReceiptWriter !== "function"
+    ) {
+        throw new Error(
+            "MANUAL_RECONCILE_DURABLE_RECEIPT_WRITER_REQUIRED"
+        );
+    }
+    if (receiptRequested) {
+        const identity = options?.completionIdentity;
+
+        if (
+            options?.exposeLockIdentity !== true ||
+            !identity ||
+            typeof identity !== "object" ||
+            Array.isArray(identity) ||
+            !UUID.test(identity.attemptId || "") ||
+            !UUID.test(identity.executionId || "") ||
+            !UUID.test(identity.serverInstanceId || "")
+        ) {
+            throw new Error(
+                "GLOBAL_CONNECTOR_COMPLETION_IDENTITY_INVALID"
+            );
+        }
+
+        completionIdentity = Object.freeze({
+            attemptId: identity.attemptId,
+            executionId: identity.executionId,
+            serverInstanceId: identity.serverInstanceId
+        });
+    }
+
+    const completion = receiptRequested
+        ? { result: null, releaseEvidence: null }
+        : null;
+       
+    // Reserve Manual Reconciliation attempt synchronously,
+    // before any asynchronous Redis lock acquisition.
+    // This prevents two requests with the same attemptId
+    // from both entering the lock acquisition path.
+    let manualLifecycle = null;
+
+    if (receiptRequested) {
+        if (
+            manualLifecycleObservations.has(
+                completionIdentity.attemptId
+            )
+        ) {
+            throw new Error(
+                "MANUAL_RECONCILE_LIFECYCLE_DUPLICATE"
+            );
+        }
+
+        manualLifecycle = {
+            ...completionIdentity,
+            connectorId: String(connectorId || "").trim(),
+            socketId: null,
+            ownerToken: null,
+           pending: new Set(),
+            coordinatorExited: false,
+            admissionSealed: false,
+            lateWorkDetected: false,
+            callbackSettled: false,
+            callbackStarted: false,
+            outcome: "ACQUIRING_LOCK"
+        };
+
+        manualLifecycleObservations.set(
+            manualLifecycle.attemptId,
+            manualLifecycle
+        );
+    }
+
+  // Manual-only F3-A durable exit finalization.
+  // This is local evidence, never remote Tally settlement.
+  function maybeFinalizeManualCoordinatorExit() {
+      const state = manualLifecycle;
+
+      if (!state ||
+          typeof manualCoordinatorReceiptWriter !== "function" ||
+          state.coordinatorExited !== true ||
+          state.admissionSealed !== true ||
+          state.lateWorkDetected === true ||
+          state.outcome === "SUCCESS_RELEASED" ||
+          state.callbackStarted !== true ||
+          state.callbackSettled !== true ||
+          state.pending.size !== 0 ||
+          !state.socketId ||
+          !state.ownerToken) {
+          return Promise.resolve(false);
+      }
+
+     if (state.receiptConfirmed === true) {
+    return Promise.resolve(true);
+}
+
+if (state.receiptPromise) {
+    return state.receiptPromise;
+}
+
+state.outcome = "LOCALLY_SETTLED_UNVERIFIED";
+
+      const receipt = Object.freeze({
+          attemptId: state.attemptId,
+          executionId: state.executionId,
+          serverInstanceId: state.serverInstanceId,
+          connectorId: state.connectorId,
+          socketId: state.socketId,
+          ownerToken: state.ownerToken,
+          coordinatorExited: true,
+          admissionSealed: true,
+          lateWorkDetected: false,
+          pendingWork: 0,
+          callbackStarted: true,
+          callbackSettled: true,
+          locallySettled: true,
+          outcome: "LOCALLY_SETTLED_UNVERIFIED"
+      });
+
+   const writePromise = Promise.resolve()
+    .then(async () => {
+        if (
+            state.lateWorkDetected === true ||
+            state.admissionSealed !== true ||
+            state.coordinatorExited !== true ||
+            state.pending.size !== 0 ||
+            state.outcome !== "LOCALLY_SETTLED_UNVERIFIED"
+        ) {
+            return false;
+        }
+
+        await manualCoordinatorReceiptWriter(receipt);
+
+        if (
+            state.lateWorkDetected === true ||
+            state.pending.size !== 0 ||
+            state.outcome !== "LOCALLY_SETTLED_UNVERIFIED"
+        ) {
+            return false;
+        }
+
+        state.receiptConfirmed = true;
+        return true;
+    })
+    .catch(error => {
+        console.error(
+            "[MANUAL RECONCILE] Durable coordinator receipt failed",
+            {
+                attemptId: state.attemptId,
+                executionId: state.executionId,
+                error
+            }
+        );
+
+        return false;
+    })
+    .finally(() => {
+        if (state.receiptPromise === writePromise) {
+            state.receiptPromise = null;
+        }
+    });
+
+state.receiptPromise = writePromise;
+
+return writePromise;
+  }
+// Manual Reconciliation only.
+// Shared, bounded retry for eligible durable exit receipts.
+function retryManualCoordinatorExitReceipt() {
+    const state = manualLifecycle;
+
+    if (!state) {
+        return Promise.resolve(false);
+    }
+
+    if (state.receiptRetryPromise) {
+        return state.receiptRetryPromise;
+    }
+
+    const work = Promise.resolve()
+        .then(async () => {
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                const confirmed =
+                    await maybeFinalizeManualCoordinatorExit();
+
+                if (confirmed === true) {
+                    return true;
+                }
+
+                // Retry only for an eligible settled coordinator.
+                // Never manufacture evidence for pending/unsafe work.
+                if (
+                    state.coordinatorExited !== true ||
+                    state.admissionSealed !== true ||
+                    state.callbackStarted !== true ||
+                    state.callbackSettled !== true ||
+                    state.pending.size !== 0 ||
+                    state.lateWorkDetected === true ||
+                    state.outcome !== "LOCALLY_SETTLED_UNVERIFIED"
+                ) {
+                    return false;
+                }
+
+                if (attempt < 3) {
+                    await new Promise(resolve =>
+                        setTimeout(resolve, attempt * 250)
+                    );
+                }
+            }
+
+            return false;
+        })
+        .finally(() => {
+            if (state.receiptRetryPromise === work) {
+                state.receiptRetryPromise = null;
+            }
+        });
+
+    state.receiptRetryPromise = work;
+
+    return work;
+}
+// F3-B: Persist an observed unsafe coordinator state.
+// This is Manual Reconciliation only.
+function notifyManualCoordinatorUnsafe() {
+    const state = manualLifecycle;
+
+    if (!state || state.lateWorkDetected !== true) {
+        return Promise.resolve(false);
+    }
+
+    if (
+        !state.socketId ||
+        !state.ownerToken ||
+        typeof manualCoordinatorReceiptWriter !== "function"
+    ) {
+        return Promise.resolve(false);
+    }
+
+    if (state.unsafeNotificationPromise) {
+        return state.unsafeNotificationPromise;
+    }
+
+    const receipt = Object.freeze({
+        attemptId: state.attemptId,
+        executionId: state.executionId,
+        serverInstanceId: state.serverInstanceId,
+        connectorId: state.connectorId,
+        socketId: state.socketId,
+        ownerToken: state.ownerToken,
+        coordinatorExited: state.coordinatorExited,
+        admissionSealed: true,
+        pendingWork: state.pending.size,
+        callbackStarted: state.callbackStarted,
+        callbackSettled: state.callbackSettled,
+        lateWorkDetected: true,
+        locallySettled: false,
+        outcome: "LATE_WORK_UNVERIFIED"
+    });
+
+    const pending = Promise.resolve()
+        .then(() => manualCoordinatorReceiptWriter(receipt))
+        .then(() => true);
+
+    state.unsafeNotificationPromise = pending;
+
+    pending.catch(error => {
+        console.error(
+            "[MANUAL RECONCILE] Durable unsafe notification failed",
+            {
+                attemptId: state.attemptId,
+                error
+            }
+        );
+
+        // Keep retry possible after an uncertain failure.
+        if (state.unsafeNotificationPromise === pending) {
+            state.unsafeNotificationPromise = null;
+        }
+    });
+
+    return pending;
+}
+  function observeAcquisitionWork(work) {
+      if (!manualLifecycle) return work;
+
+      const promise = Promise.resolve(work);
+
+      if (manualLifecycle.admissionSealed) {
+    manualLifecycle.lateWorkDetected = true;
+    manualLifecycle.outcome = "LATE_WORK_UNVERIFIED";
+
+    void notifyManualCoordinatorUnsafe().catch(() => {
+        // Error already logged; unsafe state remains latched.
+    });
+
+    promise.catch(() => {});
+    return promise;
+}
+
+      manualLifecycle.pending.add(promise);
+
+      const onSettled = () => {
+          manualLifecycle.pending.delete(promise);
+
+          if (manualLifecycle.coordinatorExited === true) {
+              void retryManualCoordinatorExitReceipt();
+          }
+      };
+
+      promise.then(onSettled, onSettled);
+
+      return promise;
+  }
+let lock;
+
+try {
+ lock = await waitForConnectorLock(
+    connectorId,
+    options?.lockWaitMs,
+    manualLifecycle ? observeAcquisitionWork : null,
+    receiptRequested
+        ? options?.prepareManualAcquisition
+        : null,
+    operationType
+);
+   } catch (error) {
+    if (manualLifecycle) {
+        manualLifecycle.admissionSealed = true;
+        manualLifecycle.coordinatorExited = true;
+        manualLifecycle.outcome = "ACQUISITION_UNVERIFIED";
+
+        // Acquisition may have completed remotely.
+        // Preserve persistent markers for verified recovery.
+    }
+
+    throw error;
+}
+
+    if (manualLifecycle) {
+        manualLifecycle.connectorId = lock.connectorId;
+        manualLifecycle.socketId = lock.socketId;
+        manualLifecycle.ownerToken = lock.ownerToken;
+        manualLifecycle.outcome = "RUNNING";
+    }
+
+
+   function trackManualWork(promise) {
+    if (!manualLifecycle) return promise;
+
+    return observeAcquisitionWork(promise);
+}
+
+        // Shared with the outer finally for manual lifecycle classification.
+    let operationPromise = null;
+    let operationCompletedSafely = false;
+
+    try {
+
+  let renewalTimer = null;
+let renewing = false;
+let lockLost = false;
+
+// Tracks explicit ownership verification separately from timer renewal.
+let ownershipCheckPromise = null;
+let ownershipRedisPromise = null;
+
+let callbackActive = false;
+let ownershipFailure = null;
+let settlementFailure = null;
+
+// Opt-in only: existing sync callers retain their current behavior.
+const identityEnabled = options?.exposeLockIdentity === true;
+    
+
+    const operationAbortController = new AbortController();
+
+operationAbortController.signal.addEventListener(
+    "abort",
+    () => {
+        try {
+            const receiver = lock.socket.protocolReceiver;
+
+            if (typeof receiver?.cancelCollection === "function") {
+                const cancelResult = receiver.cancelCollection(
+                    "Global connector operation aborted"
+                );
+
+                if (cancelResult?.then) {
+    trackManualWork(cancelResult);
+}
+
+                if (cancelResult?.catch) {
+                    cancelResult.catch(error => {
+                        console.error(
+                            `[GLOBAL LOCK] Collection cancellation failed: ${lock.connectorId}`,
+                            error
+                        );
+                    });
+                }
+            }
+        } catch (error) {
+            console.error(
+                `[GLOBAL LOCK] Collection cancellation failed: ${lock.connectorId}`,
+                error
+            );
+        }
+    },
+    { once: true }
+);   
+function observedRejection(error) {
+    const promise = Promise.reject(error);
+    promise.catch(() => {});
+    return promise;
+}
+
+function lifecycleUsable() {
+    return (
+        callbackActive &&
+        !lockLost &&
+        !ownershipFailure &&
+        !operationAbortController.signal.aborted &&
+        lock.socket.connected === true &&
+        !!lock.socket.protocolReceiver &&
+        registry.get(lock.connectorId) === lock.socket
+    );
+}
+function markOwnershipFailure(error) {
+    if (ownershipFailure) {
+        return ownershipFailure;
+    }
+
+    ownershipFailure = error;
+    lockLost = true;
+
+    if (renewalTimer) {
+        clearInterval(renewalTimer);
+        renewalTimer = null;
+    }
+
+    if (!operationAbortController.signal.aborted) {
+        operationAbortController.abort(error);
+    }
+
+    // Operation abort triggers settlement handling.
+// Preserve transport until quarantine is evaluated.
+console.warn(
+    `[GLOBAL LOCK] Ownership failure; operation aborted: ${lock.connectorId}`,
+    { socketId: lock.socketId }
+);
+
+    return ownershipFailure;
+}
+function bounded(promise, message) {
+    let timer;
+
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(
+            () => reject(new Error(message)),
+            OPERATION_SETTLE_TIMEOUT_MS
+        );
+    });
+
+    return Promise.race([promise, timeout])
+        .finally(() => clearTimeout(timer));
+}
+function runOptInRedisCommand(command, message) {
+    if (ownershipRedisPromise) {
+        return observedRejection(
+            markOwnershipFailure(
+                new Error("GLOBAL_CONNECTOR_REDIS_COMMAND_ALREADY_PENDING")
+            )
+        );
+    }
+
+      const pending = Promise.resolve().then(() => {
+        if (
+            manualLifecycle &&
+            (
+                manualLifecycle.admissionSealed === true ||
+                manualLifecycle.lateWorkDetected === true
+            )
+        ) {
+            throw new Error(
+                "MANUAL_RECONCILE_REDIS_ADMISSION_CLOSED"
+            );
+        }
+
+        if (
+            lockLost ||
+            ownershipFailure ||
+            operationAbortController.signal.aborted ||
+            !lock.socket.connected ||
+            !lock.socket.protocolReceiver ||
+            registry.get(lock.connectorId) !== lock.socket
+        ) {
+            throw ownershipFailure ||
+                new Error("GLOBAL_CONNECTOR_REDIS_COMMAND_NOT_USABLE");
+        }
+
+        return command();
+    });
+
+    ownershipRedisPromise = pending;
+
+    trackManualWork(pending);
+
+    const clearPending = () => {
+        if (ownershipRedisPromise === pending) {
+            ownershipRedisPromise = null;
+        }
+    };
+
+    pending.then(clearPending, clearPending);
+
+    return bounded(pending, message).catch(error => {
+        throw markOwnershipFailure(error);
+    });
+}
+function quarantineForCleanup(...args) {
+       if (!identityEnabled) {
+        const pending = Promise.resolve().then(() =>
+            quarantineConnectorAndSocket(
+    ...args,
+    operationType
+)
+        );
+
+        return bounded(
+            pending,
+            `GLOBAL_CONNECTOR_DEFAULT_QUARANTINE_TIMEOUT: ${lock.connectorId}`
+        );
+    }
+
+    const work = Promise.resolve().then(async () => {
+        // Wait for a check that may not yet have submitted Redis work.
+        const pendingCheck = ownershipCheckPromise;
+
+        if (pendingCheck) {
+            try {
+                await pendingCheck;
+            } catch (_) {
+                // Failed checks still require quarantine.
+            }
+        }
+
+        // Wait for the actual Redis command, including late settlement.
+        const pendingRedis = ownershipRedisPromise;
+
+        if (pendingRedis) {
+            try {
+                await pendingRedis;
+            } catch (_) {
+                // Uncertain ownership still requires quarantine.
+            }
+        }
+
+       return quarantineConnectorAndSocket(
+    ...args,
+    operationType
+);
+    });
+trackManualWork(work);
+    return bounded(
+        work,
+        `Global quarantine timeout: ${lock.connectorId}`
+    );
+}
+async function drainRenewalAndChecks() {
+     if (!identityEnabled) {
+        const deadline = Date.now() + OPERATION_SETTLE_TIMEOUT_MS;
+
+        while (renewing || ownershipCheckPromise) {
+            if (Date.now() >= deadline) {
+                markOwnershipFailure(
+                    new Error(
+                        `GLOBAL_CONNECTOR_DEFAULT_RENEWAL_DRAIN_TIMEOUT: ${lock.connectorId}`
+                    )
+                );
+
+                // Redis command may still complete later.
+                // Never assume ownership has safely settled.
+                return;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        return;
+    }
+
+    const deadline = Date.now() + OPERATION_SETTLE_TIMEOUT_MS;
+
+    while (
+        renewing ||
+        ownershipCheckPromise ||
+        ownershipRedisPromise
+    ) {
+        if (Date.now() >= deadline) {
+    markOwnershipFailure(
+        new Error("GLOBAL_CONNECTOR_OWNERSHIP_DRAIN_TIMEOUT")
+    );
+
+    // Pending Redis command may still be executing.
+    // Never treat timeout as confirmed settlement.
+    return;
+}
+
+        await new Promise(resolve => setTimeout(resolve, 50));
+    }
+}
+function assertOwnership() {
+    if (!lifecycleUsable()) {
+        return observedRejection(
+            ownershipFailure ||
+            new Error("GLOBAL_CONNECTOR_OWNERSHIP_CHECK_NOT_ACTIVE")
+        );
+    }
+
+   if (ownershipCheckPromise) {
+    return observedRejection(
+        new Error("GLOBAL_CONNECTOR_OWNERSHIP_CHECK_IN_PROGRESS")
+    );
+}
+
+    let resolveCheck;
+    let rejectCheck;
+
+    const check = new Promise((resolve, reject) => {
+        resolveCheck = resolve;
+        rejectCheck = reject;
+    });
+
+    // Reserve synchronously to prevent overlapping checks.
+    ownershipCheckPromise = check;
+    check.catch(() => {});
+
+    let finished = false;
+    let timeout;
+
+    const cleanup = () => {
+        clearTimeout(timeout);
+        operationAbortController.signal.removeEventListener(
+            "abort",
+            onAbort
+        );
+    };
+
+    function fail(error) {
+        if (finished) return;
+
+        finished = true;
+        cleanup();
+
+        rejectCheck(markOwnershipFailure(error));
+    }
+
+    function onAbort() {
+        fail(
+            operationAbortController.signal.reason instanceof Error
+                ? operationAbortController.signal.reason
+                : new Error("GLOBAL_CONNECTOR_OWNERSHIP_CHECK_ABORTED")
+        );
+    }
+
+    timeout = setTimeout(
+        () => fail(
+            new Error("GLOBAL_CONNECTOR_OWNERSHIP_CHECK_TIMEOUT")
+        ),
+        OPERATION_SETTLE_TIMEOUT_MS
+    );
+
+    operationAbortController.signal.addEventListener(
+        "abort",
+        onAbort,
+        { once: true }
+    );
+
+    if (operationAbortController.signal.aborted) {
+        onAbort();
+    }
+
+    const work = Promise.resolve().then(async () => {
+        while (renewing || ownershipRedisPromise) {
+    if (finished || !lifecycleUsable()) {
+        throw ownershipFailure ||
+            new Error("GLOBAL_CONNECTOR_OWNERSHIP_CHECK_ABORTED");
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+}
+
+        if (finished || !lifecycleUsable()) {
+            throw ownershipFailure ||
+                new Error("GLOBAL_CONNECTOR_OWNERSHIP_CHECK_ABORTED");
+        }
+
+        const renewed = await runOptInRedisCommand(
+    () => renewConnectorAndSocketLock(
+        lock.connectorId,
+        lock.socketId,
+        lock.ownerToken,
+        LOCK_TTL_MS
+    ),
+    `GLOBAL_CONNECTOR_OWNERSHIP_RENEW_TIMEOUT: ${lock.connectorId}`
+);
+
+        if (!renewed) {
+            throw new Error(
+                `Global lock ownership lost: ${lock.connectorId}`
+            );
+        }
+
+        if (finished || !lifecycleUsable()) {
+            throw ownershipFailure ||
+                new Error("GLOBAL_CONNECTOR_OWNERSHIP_CHECK_ABORTED");
+        }
+    });
+
+    const clearCheck = () => {
+        if (ownershipCheckPromise === check) {
+            ownershipCheckPromise = null;
+        }
+    };
+trackManualWork(work);
+    work.then(
+        () => {
+            clearCheck();
+
+            if (finished) return;
+
+            finished = true;
+            cleanup();
+            resolveCheck(true);
+        },
+        error => {
+            clearCheck();
+            fail(error);
+        }
+    ).catch(fail);
+
+    return check;
+}
+ try {
+        renewalTimer = setInterval(async () => {
+            if (
+    renewing ||
+    ownershipCheckPromise ||
+    ownershipRedisPromise ||
+    lockLost
+) return;
+
+            renewing = true;
+
+            let resolveRenewalWork;
+
+if (manualLifecycle) {
+    trackManualWork(new Promise(resolve => {
+        resolveRenewalWork = resolve;
+    }));
+}
+
+            try {
+                const renewed = identityEnabled
+    ? await runOptInRedisCommand(
+        () => renewConnectorAndSocketLock(
+            lock.connectorId,
+            lock.socketId,
+            lock.ownerToken,
+            LOCK_TTL_MS
+        ),
+        `GLOBAL_CONNECTOR_TIMER_RENEW_TIMEOUT: ${lock.connectorId}`
+    )
+       : await bounded(
+        renewConnectorAndSocketLock(
+            lock.connectorId,
+            lock.socketId,
+            lock.ownerToken,
+            LOCK_TTL_MS
+        ),
+        `GLOBAL_CONNECTOR_DEFAULT_TIMER_RENEW_TIMEOUT: ${lock.connectorId}`
+    );
+
+                if (!renewed) {
+    lockLost = true;
+
+    const error = new Error(
+        `Global lock ownership lost: ${lock.connectorId}`
+    );
+
+    console.error(
+        `[GLOBAL LOCK] Ownership lost: ${lock.connectorId}`
+    );
+
+    operationAbortController.abort(error);
+
+   let quarantineConfirmed = false;
+
+try {
+    const quarantineResult = await quarantineForCleanup(
+        lock.connectorId,
+        lock.socketId,
+        "GLOBAL_LOCK_OWNERSHIP_LOST",
+        lock.ownerToken
+    );
+
+    quarantineConfirmed =
+        quarantineResult?.quarantined === true;
+
+} catch (quarantineError) {
+    console.error(
+        `[GLOBAL LOCK] Quarantine failed: ${lock.connectorId}`,
+        quarantineError
+    );
+}
+
+if (quarantineConfirmed) {
+    console.warn(
+        `[GLOBAL LOCK] Ownership lost; quarantined socket retained: ${lock.connectorId}`,
+        { socketId: lock.socketId }
+    );
+} else if (lock.socket.connected) {
+    lock.socket.disconnect(true);
+}
+}
+   } catch (error) {
+    lockLost = true;
+
+    console.error(
+        `[GLOBAL LOCK] Renewal failed: ${lock.connectorId}`,
+        error
+    );
+
+    operationAbortController.abort(error);
+
+  let quarantineConfirmed = false;
+
+try {
+    const quarantineResult = await quarantineForCleanup(
+        lock.connectorId,
+        lock.socketId,
+        "GLOBAL_LOCK_RENEWAL_ERROR",
+        lock.ownerToken
+    );
+
+    quarantineConfirmed =
+        quarantineResult?.quarantined === true;
+
+} catch (quarantineError) {
+    console.error(
+        `[GLOBAL LOCK] Renewal quarantine failed: ${lock.connectorId}`,
+        quarantineError
+    );
+}
+
+if (quarantineConfirmed) {
+    console.warn(
+        `[GLOBAL LOCK] Renewal error quarantined; socket retained: ${lock.connectorId}`,
+        { socketId: lock.socketId }
+    );
+} else if (lock.socket.connected) {
+    lock.socket.disconnect(true);
+}
+} finally {
+    renewing = false;
+
+    if (resolveRenewalWork) {
+        resolveRenewalWork();
+    }
+}
+        }, LOCK_RENEW_MS);
+
+        if (
+    !lock.socket.connected ||
+    !lock.socket.protocolReceiver ||
+    registry.get(lock.connectorId) !== lock.socket
+) {
+    lockLost = true;
+
+   await quarantineForCleanup(
+    lock.connectorId,
+    lock.socketId,
+    "CONNECTOR_UNAVAILABLE_BEFORE_OPERATION",
+    lock.ownerToken
+);
+
+    throw new Error(
+        `Connector unavailable before operation: ${lock.connectorId}`
+    );
+}
+
+const result = await new Promise((resolve, reject) => {
+    let settled = false;
+
+  const cleanup = () => {
+    lock.socket.off("disconnect", onDisconnect);
+
+    operationAbortController.signal.removeEventListener(
+        "abort",
+        onOperationAbort
+    );
+};
+
+const onOperationAbort = () => {
+    if (settled) return;
+
+    settled = true;
+    lockLost = true;
+
+    cleanup();
+
+    const error =
+        ownershipFailure ||
+        operationAbortController.signal.reason ||
+        new Error(
+            `Global connector operation aborted: ${lock.connectorId}`
+        );
+
+    reject(error);
+};
+
+  const onDisconnect = () => {
+    if (settled) return;
+
+    settled = true;
+    lockLost = true;
+    cleanup();
+
+    const error = ownershipFailure || new Error(
+        `Connector disconnected during operation: ${lock.connectorId}`
+    );
+
+    operationAbortController.abort(error);
+
+   quarantineForCleanup(
+    lock.connectorId,
+    lock.socketId,
+    "CONNECTOR_DISCONNECTED_DURING_OPERATION",
+    lock.ownerToken
+).then(
+        () => reject(error),
+        (quarantineError) => {
+            console.error(
+                `[GLOBAL LOCK] Disconnect quarantine failed: ${lock.connectorId}`,
+                quarantineError
+            );
+
+            // Preserve original disconnect error.
+            if (error && typeof error === "object") {
+                error.quarantineError = quarantineError;
+            }
+
+            reject(error);
+        }
+    );
+};
+    lock.socket.once("disconnect", onDisconnect);
+
+    operationAbortController.signal.addEventListener(
+    "abort",
+    onOperationAbort,
+    { once: true }
+);
+
+if (operationAbortController.signal.aborted) {
+    onOperationAbort();
+    return;
+}
+
+    if (!lock.socket.connected) {
+        onDisconnect();
+        return;
+    }
+
+    Promise.resolve()
+        .then(() => {
+    if (
+    settled ||
+    lockLost ||
+    operationAbortController.signal.aborted ||
+    !lock.socket.connected ||
+    !lock.socket.protocolReceiver ||
+    registry.get(lock.connectorId) !== lock.socket
+) {
+    throw new Error(
+        `Connector unavailable or lock lost before operation started: ${lock.connectorId}`
+    );
+}
+  operationPromise = Promise.resolve().then(() => {
+    if (
+        settled ||
+        lockLost ||
+        operationAbortController.signal.aborted ||
+        !lock.socket.connected ||
+        !lock.socket.protocolReceiver ||
+        registry.get(lock.connectorId) !== lock.socket
+    ) {
+        throw new Error(
+            `Connector unavailable before callback execution: ${lock.connectorId}`
+        );
+    }
+
+   if (identityEnabled) {
+    callbackActive = true;
+    if (manualLifecycle) {
+    manualLifecycle.callbackStarted = true;
+}
+
+    return Promise.resolve()
+        .then(() => operation(
+            lock.socket,
+            operationAbortController.signal,
+            Object.freeze({
+                connectorId: lock.connectorId,
+                socketId: lock.socketId,
+                ownerToken: lock.ownerToken,
+                assertOwnership
+            })
+        ))
+        .then(value => {
+            if (ownershipFailure) {
+                throw ownershipFailure;
+            }
+
+         if (ownershipCheckPromise) {
+    throw markOwnershipFailure(
+        new Error(
+            "GLOBAL_CONNECTOR_OWNERSHIP_CHECK_UNSETTLED"
+        )
+    );
+}
+
+            if (receiptRequested) {
+                completion.result = value;
+            }
+
+            return value;
+        })
+        .finally(() => {
+            callbackActive = false;
+        });
+}
+
+return operation(
+    lock.socket,
+    operationAbortController.signal
+);
+});
+trackManualWork(operationPromise);
+
+operationPromise.finally(() => {
+    if (manualLifecycle) {
+        manualLifecycle.callbackSettled = true;
+
+        if (manualLifecycle.coordinatorExited === true) {
+            void retryManualCoordinatorExitReceipt();
+        }
+    }
+}).catch(() => {});
+        return operationPromise;
+        })
+        .then(
+            (value) => {
+                if (settled) return;
+
+                settled = true;
+                cleanup();
+                resolve(value);
+            },
+           (error) => {
+    if (settled) return;
+
+    settled = true;
+    lockLost = true;
+    cleanup();
+// Diagnostic only: NOT remote settlement proof.
+console.error("[GLOBAL LOCK] Operation failed; quarantine required", {
+    connector_id: lock.connectorId,
+    socket_id: lock.socketId,
+    reason: "OPERATION_FAILED_REMOTE_STATE_UNKNOWN",
+    error_code: error?.code || null,
+    error_message: error?.message || String(error),
+    request_dispatched: error?.requestDispatched ?? null,
+    manual_attempt_id: completionIdentity?.attemptId || null,
+    manual_execution_id: completionIdentity?.executionId || null
+});
+    quarantineForCleanup(
+    lock.connectorId,
+    lock.socketId,
+    "OPERATION_FAILED_REMOTE_STATE_UNKNOWN",
+    lock.ownerToken
+).then(
+        () => reject(error),
+        (quarantineError) => {
+            console.error(
+                `[GLOBAL LOCK] Failure quarantine failed: ${lock.connectorId}`,
+                quarantineError
+            );
+
+            // Preserve the original operation error and its
+            // requestDispatched metadata.
+            if (error && typeof error === "object") {
+                error.quarantineError = quarantineError;
+            }
+
+            reject(error);
+        }
+    );
+}
+        );
+});
+
+// Stop future timer renewals for every operation
+// before draining and final ownership verification.
+if (renewalTimer) {
+    clearInterval(renewalTimer);
+    renewalTimer = null;
+}
+
+// Wait for already-running renewals and ownership checks.
+await drainRenewalAndChecks();
+    if (
+    lockLost ||
+    operationAbortController.signal.aborted ||
+    !lock.socket.connected ||
+    !lock.socket.protocolReceiver ||
+    registry.get(lock.connectorId) !== lock.socket
+) {
+    lockLost = true;
+
+    throw new Error(
+        `Connector lock or connection lost: ${lock.connectorId}`
+    );
+}
+        let stillOwned = false;
+
+try {
+ stillOwned = identityEnabled
+    ? await runOptInRedisCommand(
+        () => renewConnectorAndSocketLock(
+            lock.connectorId,
+            lock.socketId,
+            lock.ownerToken,
+            LOCK_TTL_MS
+        ),
+        `GLOBAL_CONNECTOR_FINAL_RENEW_TIMEOUT: ${lock.connectorId}`
+    )
+      : await bounded(
+        renewConnectorAndSocketLock(
+            lock.connectorId,
+            lock.socketId,
+            lock.ownerToken,
+            LOCK_TTL_MS
+        ),
+        `GLOBAL_CONNECTOR_DEFAULT_FINAL_RENEW_TIMEOUT: ${lock.connectorId}`
+    );
+} catch (error) {
+    lockLost = true;
+
+    console.error(
+        `[GLOBAL LOCK] Final renewal failed: ${lock.connectorId}`,
+        error
+    );
+
+    operationAbortController.abort(error);
+
+   // Defer transport handling to unsafe finalization.
+
+    throw error;
+}
+     if (!stillOwned) {
+    lockLost = true;
+
+    const error = new Error(
+        `Global lock ownership lost: ${lock.connectorId}`
+    );
+
+    console.error(
+        `[GLOBAL LOCK] Final ownership check failed: ${lock.connectorId}`
+    );
+
+    operationAbortController.abort(error);
+
+   // Unsafe finalization handles quarantine confirmation
+// and the transport safety fallback.
+
+    throw error;
+}
+
+      if (renewalTimer) {
+    clearInterval(renewalTimer);
+    renewalTimer = null;
+}
+
+await drainRenewalAndChecks();
+
+if (
+    lockLost ||
+    operationAbortController.signal.aborted ||
+    !lock.socket.connected ||
+    !lock.socket.protocolReceiver ||
+    registry.get(lock.connectorId) !== lock.socket
+) {
+    lockLost = true;
+
+    throw new Error(
+        `Connector became unavailable before completion: ${lock.connectorId}`
+    );
+}
+
+operationCompletedSafely = true;
+return receiptRequested ? completion : result;
+ } finally {
+
+    if (lockLost) {
+    if (renewalTimer) {
+        clearInterval(renewalTimer);
+        renewalTimer = null;
+    }
+}
+
+    await drainRenewalAndChecks();
+    if (
+    lockLost &&
+    !operationAbortController.signal.aborted
+) {
+    operationAbortController.abort(
+        new Error(
+            `Global connector operation failed: ${lock.connectorId}`
+        )
+    );
+}
+if (operationPromise) {
+    let settleTimer = null;
+    let abortListener = null;
+
+    try {
+        const abortPromise = new Promise((_, reject) => {
+            const onAbort = () => {
+                settleTimer = setTimeout(() => {
+                    reject(new Error(
+                        `Global operation settle timeout: ${lock.connectorId}`
+                    ));
+                }, OPERATION_SETTLE_TIMEOUT_MS);
+            };
+
+            abortListener = onAbort;
+
+            if (operationAbortController.signal.aborted) {
+                onAbort();
+            } else {
+                operationAbortController.signal.addEventListener(
+                    "abort",
+                    onAbort,
+                    { once: true }
+                );
+            }
+        });
+
+        // No fixed timeout while the operation is healthy.
+        await Promise.race([
+            operationPromise,
+            abortPromise
+        ]);
+
+    } catch (error) {
+    lockLost = true;
+
+    console.error(
+        `[GLOBAL LOCK] Pending operation failed: ${lock.connectorId}`,
+        error
+    );
+
+ try {
+    const quarantineResult = await quarantineForCleanup(
+        lock.connectorId,
+        lock.socketId,
+        "PENDING_OPERATION_FAILED",
+        lock.ownerToken
+    );
+
+    if (quarantineResult?.quarantined !== true) {
+        throw new Error("CONNECTOR_QUARANTINE_UNVERIFIED");
+    }
+
+    console.warn(
+        `[GLOBAL LOCK] Pending operation quarantined; socket retained: ${lock.connectorId}`,
+        { socketId: lock.socketId }
+    );
+
+} catch (quarantineError) {
+    console.error(
+        `[GLOBAL LOCK] Pending operation quarantine failed: ${lock.connectorId}`,
+        quarantineError
+    );
+
+    if (lock.socket.connected) {
+        lock.socket.disconnect(true);
+    }
+}
+  if (error.message?.startsWith(
+    "Global operation settle timeout:"
+)) {
+    lockLost = true;
+
+    if (renewalTimer) {
+        clearInterval(renewalTimer);
+        renewalTimer = null;
+    }
+
+    await drainRenewalAndChecks();
+
+    try {
+        await quarantineForCleanup(
+            lock.connectorId,
+            lock.socketId,
+            "OPERATION_SETTLE_TIMEOUT",
+            lock.ownerToken
+        );
+    } catch (quarantineError) {
+        console.error(
+            `[GLOBAL LOCK] Settlement quarantine failed: ${lock.connectorId}`,
+            quarantineError
+        );
+
+        if (error && typeof error === "object") {
+            error.quarantineError = quarantineError;
+        }
+    }
+
+    if (!identityEnabled) {
+        throw error;
+    }
+
+    // Preserve the first ownership failure as the primary error.
+// Settlement timeout is secondary diagnostic evidence.
+if (ownershipFailure) {
+    if (ownershipFailure !== error) {
+        ownershipFailure.settlementError = error;
+    }
+
+    settlementFailure = ownershipFailure;
+} else {
+    settlementFailure = error;
+}
+}
+    } finally {
+        if (settleTimer) {
+            clearTimeout(settleTimer);
+        }
+
+        if (abortListener) {
+            operationAbortController.signal.removeEventListener(
+                "abort",
+                abortListener
+            );
+        }
+    }
+}
+
+if (renewalTimer) {
+    clearInterval(renewalTimer);
+    renewalTimer = null;
+}
+
+await drainRenewalAndChecks();
+
+if (
+    !operationCompletedSafely ||
+    lockLost ||
+    operationAbortController.signal.aborted ||
+    (
+        identityEnabled &&
+        (
+            ownershipFailure ||
+            ownershipCheckPromise ||
+            ownershipRedisPromise
+        )
+    ) ||
+    !lock.socket.connected ||
+    !lock.socket.protocolReceiver ||
+    registry.get(lock.connectorId) !== lock.socket
+) {
+    console.error(
+        `[GLOBAL LOCK] Unsafe operation retained for recovery: ${lock.connectorId}`
+    );
+
+    // Keep persistent markers until verified safe recovery.
+    if (!operationAbortController.signal.aborted) {
+    operationAbortController.abort(
+        new Error(
+            `Unsafe connector operation: ${lock.connectorId}`
+        )
+    );
+}
+
+let quarantineConfirmed = false;
+
+try {
+    const quarantineResult = await quarantineForCleanup(
+        lock.connectorId,
+        lock.socketId,
+        "UNSAFE_OPERATION_FINALIZATION",
+        lock.ownerToken
+    );
+
+    quarantineConfirmed =
+        quarantineResult?.quarantined === true;
+
+} catch (quarantineError) {
+    console.error(
+        `[GLOBAL LOCK] Unsafe finalization quarantine failed: ${lock.connectorId}`,
+        quarantineError
+    );
+}
+
+if (quarantineConfirmed) {
+    console.warn(
+        `[GLOBAL LOCK] Unsafe operation quarantined; socket retained: ${lock.connectorId}`,
+        { socketId: lock.socketId }
+    );
+} else if (lock.socket.connected) {
+    lock.socket.disconnect(true);
+}
+
+if (settlementFailure) {
+    throw settlementFailure;
+}
+
+if (operationCompletedSafely) {
+    throw new Error(
+        `GLOBAL_CONNECTOR_UNSAFE_FINALIZATION: ${lock.connectorId}`
+    );
+}
+} else {
+    try {
+   const releaseResult = receiptRequested
+    ? await runOptInRedisCommand(
+        () => releaseManualReconcileLockWithReceipt({
+            connectorId: lock.connectorId,
+            socketId: lock.socketId,
+            ownerToken: lock.ownerToken,
+            attemptId: completionIdentity.attemptId,
+            executionId: completionIdentity.executionId,
+            serverInstanceId: completionIdentity.serverInstanceId
+        }),
+        `GLOBAL_CONNECTOR_RELEASE_TIMEOUT: ${lock.connectorId}`
+    )
+    : identityEnabled
+        ? await runOptInRedisCommand(
+            () => releaseConnectorAndSocketLock(
+                lock.connectorId,
+                lock.socketId,
+                lock.ownerToken
+            ),
+            `GLOBAL_CONNECTOR_RELEASE_TIMEOUT: ${lock.connectorId}`
+        )
+        : await bounded(
+            releaseConnectorAndSocketLock(
+                lock.connectorId,
+                lock.socketId,
+                lock.ownerToken
+            ),
+            `GLOBAL_CONNECTOR_DEFAULT_RELEASE_TIMEOUT: ${lock.connectorId}`
+        );
+
+const released = receiptRequested
+    ? (
+        releaseResult?.released === true &&
+        releaseResult?.replayed === false
+    )
+    : releaseResult === true;
+
+if (!released) {
+    throw new Error(
+        `Global lock release ownership mismatch: ${lock.connectorId}`
+    );
+}
+// The release command has resolved successfully.
+// Allow its pending-command tracker to clear before
+// validating the release evidence.
+if (receiptRequested) {
+    await drainRenewalAndChecks();
+
+    if (
+        !completionIdentity ||
+        !operationCompletedSafely ||
+        lockLost ||
+        ownershipFailure ||
+        ownershipCheckPromise ||
+        renewing ||
+        ownershipRedisPromise ||
+        operationAbortController.signal.aborted
+    ) {
+        throw new Error(
+            `GLOBAL_CONNECTOR_RELEASE_EVIDENCE_UNSAFE: ${lock.connectorId}`
+        );
+    }
+}
+// Recheck after asynchronous Redis release.
+// Socket or registry may have changed while release was pending.
+if (
+    lockLost ||
+    operationAbortController.signal.aborted ||
+    !lock.socket.connected ||
+    !lock.socket.protocolReceiver ||
+    registry.get(lock.connectorId) !== lock.socket
+) {
+    throw new Error(
+        `GLOBAL_CONNECTOR_UNSAFE_AFTER_RELEASE: ${lock.connectorId}`
+    );
+}
+
+// Only expose release evidence after confirmed Redis release
+// and final socket/registry validation.
+if (receiptRequested) {
+    const receipt = releaseResult?.receipt;
+
+    if (
+        !receipt ||
+        receipt.attemptId !== completionIdentity.attemptId ||
+        receipt.executionId !== completionIdentity.executionId ||
+        receipt.serverInstanceId !== completionIdentity.serverInstanceId ||
+        receipt.connectorId !== lock.connectorId ||
+        receipt.socketId !== lock.socketId ||
+        receipt.ownerToken !== lock.ownerToken ||
+        receipt.redisReleaseConfirmed !== true
+    ) {
+        throw new Error(
+            `GLOBAL_CONNECTOR_RELEASE_RECEIPT_INVALID: ${lock.connectorId}`
+        );
+    }
+
+    completion.releaseEvidence = Object.freeze({
+        ...receipt
+    });
+}
+} catch (error) {
+    lockLost = true;
+
+    operationAbortController.abort();
+
+    console.error(
+        `[GLOBAL LOCK] Release failed: ${lock.connectorId}`,
+        error
+    );
+
+  let quarantineConfirmed = false;
+
+try {
+    const quarantineResult = await quarantineForCleanup(
+        lock.connectorId,
+        lock.socketId,
+        "GLOBAL_LOCK_RELEASE_FAILED",
+        lock.ownerToken
+    );
+
+    quarantineConfirmed =
+        quarantineResult?.quarantined === true;
+
+} catch (quarantineError) {
+    console.error(
+        `[GLOBAL LOCK] Release quarantine failed: ${lock.connectorId}`,
+        quarantineError
+    );
+}
+
+if (quarantineConfirmed) {
+    console.warn(
+        `[GLOBAL LOCK] Connector quarantined; socket retained: ${lock.connectorId}`,
+        { socketId: lock.socketId }
+    );
+} else if (lock.socket.connected) {
+    lock.socket.disconnect(true);
+}
+
+       throw error;
+}
+}
+    }
+    
+       } finally {
+        if (manualLifecycle) {
+            manualLifecycle.admissionSealed = true;
+            manualLifecycle.coordinatorExited = true;
+
+            const successReleased =
+                operationCompletedSafely === true &&
+                completion?.releaseEvidence?.redisReleaseConfirmed === true;
+
+            if (successReleased) {
+                manualLifecycle.outcome = "SUCCESS_RELEASED";
+            } else if (manualLifecycle.lateWorkDetected === true) {
+                manualLifecycle.outcome = "LATE_WORK_UNVERIFIED";
+            } else if (
+                manualLifecycle.callbackStarted === true &&
+                manualLifecycle.callbackSettled === true &&
+                manualLifecycle.pending.size === 0
+            ) {
+                manualLifecycle.outcome = "LOCALLY_SETTLED_UNVERIFIED";
+            } else {
+                manualLifecycle.outcome = "PENDING_WORK_UNVERIFIED";
+            }
+
+          if (manualLifecycle.lateWorkDetected === true) {
+    await notifyManualCoordinatorUnsafe();
+} else {
+    const receiptConfirmed =
+    await retryManualCoordinatorExitReceipt();
+
+    if (
+        receiptConfirmed !== true &&
+        manualLifecycle.outcome ===
+            "LOCALLY_SETTLED_UNVERIFIED"
+    ) {
+        console.error(
+            "[MANUAL RECONCILE] DURABLE EXIT RECEIPT UNCONFIRMED",
+            {
+                attemptId: manualLifecycle.attemptId,
+                executionId: manualLifecycle.executionId,
+                connectorId: manualLifecycle.connectorId,
+                socketId: manualLifecycle.socketId,
+                pendingWork: manualLifecycle.pending.size
+            }
+        );
+    }
+}
+        }
+    }
+
+}
+
+module.exports = {
+    withGlobalConnectorLock,
+    getManualReconcileCoordinatorLifecycle
+};

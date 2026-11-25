@@ -218,13 +218,14 @@ async function main() {
         true,
         "Failure injection was not reached"
     );
-
-    assert.ok(
+    assert.equal(
         events.some(item =>
             item.event === "connector:registration:status" &&
-            item.payload?.reason === "REGISTRATION_ERROR"
+            item.payload?.connector_id === connectorId &&
+            item.payload?.registered === false
         ),
-        "Expected registration error event"
+        false,
+        "BUG: Existing registration incorrectly rejected"
     );
 
     console.log("PASS: Actual handler exception triggered");

@@ -7,12 +7,18 @@ const registry = require("./connectorRegistry");
 const {
     acquireConnectorAndSocketLock,
     releaseConnectorAndSocketLock,
+    releaseSyncConnectorLockWithReceipt,
+    readSyncConnectorReleaseReceipt,
     releaseManualReconcileLockWithReceipt,
     renewConnectorAndSocketLock,
-    quarantineConnectorAndSocket,
-    getConnectorWatchdogStatus
+       quarantineConnectorAndSocket,
+    getConnectorWatchdogStatus,
+    getConnectorHealth
 } = require("./connectorHealthStore");
-
+const {
+    OPERATION_TYPES,
+    resolveOperationType
+} = require("./connectorQuarantineManager");
 const LOCK_TTL_MS = 120000;
 const LOCK_RENEW_MS = 30000;
 const LOCK_WAIT_MS = 2000;
@@ -81,7 +87,9 @@ async function waitForConnectorLock(
     connectorId,
     maxWaitMs = undefined,
     observeManualWork = null,
-    prepareManualAcquisition = null
+    prepareManualAcquisition = null,
+    operationType = OPERATION_TYPES.UNKNOWN,
+    prepareSyncOwnership = null
 ) {
     const id = String(connectorId || "").trim();
 
@@ -113,7 +121,9 @@ async function waitForConnectorLock(
         throw new Error("connectorId is required");
     }
 
-  const ownerToken = crypto.randomUUID();
+const ownerToken = crypto.randomUUID();
+let preparedSocketId = null;
+let preparedConnectorEpoch = null;
 
    while (true) {
      assertWaitBudget();
@@ -183,6 +193,90 @@ return {
     ownerToken
 };
 }
+        // Durable ownership preparation for First/Normal Sync.
+        if (prepareSyncOwnership) {
+            if (
+                preparedSocketId !== null &&
+                preparedSocketId !== socket.id
+            ) {
+                throw new Error(
+                    `SYNC_CONNECTOR_PREPARED_SOCKET_CHANGED: ${id}`
+                );
+            }
+
+          if (preparedSocketId === null) {
+    let preparationTimer;
+
+    try {
+        await Promise.race([
+            Promise.resolve().then(async () => {
+                const health = await getConnectorHealth(id);
+
+                const connectorEpoch =
+                    health?.tally_queue_connector_epoch;
+
+                if (
+                    !health ||
+                    health.connector_id !== id ||
+                    health.socket_id !== socket.id ||
+                    health.connection_status !== "CONNECTED" ||
+                    typeof connectorEpoch !== "string" ||
+                    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                        connectorEpoch
+                    )
+                ) {
+                    throw new Error(
+                        `SYNC_CONNECTOR_EPOCH_UNVERIFIED: ${id}`
+                    );
+                }
+
+                if (
+                    !socket.connected ||
+                    !socket.protocolReceiver ||
+                    registry.get(id) !== socket
+                ) {
+                    throw new Error(
+                        `SYNC_CONNECTOR_CHANGED_BEFORE_PREPARATION: ${id}`
+                    );
+                }
+
+                await prepareSyncOwnership({
+                    connectorId: id,
+                    socketId: socket.id,
+                    ownerToken,
+                    connectorEpoch
+                });
+                preparedConnectorEpoch = connectorEpoch;
+            }),
+            new Promise((_, reject) => {
+                preparationTimer = setTimeout(() => {
+                    reject(
+                        new Error(
+                            `SYNC_CONNECTOR_OWNERSHIP_PREPARATION_TIMEOUT: ${id}`
+                        )
+                    );
+                }, OPERATION_SETTLE_TIMEOUT_MS);
+            })
+        ]);
+
+        preparedSocketId = socket.id;
+    } finally {
+        clearTimeout(preparationTimer);
+    }
+}
+
+            assertWaitBudget();
+
+            if (
+                !socket.connected ||
+                !socket.protocolReceiver ||
+                registry.get(id) !== socket
+            ) {
+                throw new Error(
+                    `SYNC_CONNECTOR_CHANGED_AFTER_PREPARATION: ${id}`
+                );
+            }
+        }
         const acquisitionPromise = acquireConnectorAndSocketLock(
     id,
     socket.id,
@@ -267,7 +361,8 @@ const quarantinePromise = quarantineConnectorAndSocket(
     id,
     socket.id,
     "CONNECTOR_CHANGED_DURING_LOCK_ACQUISITION",
-    ownerToken
+    ownerToken,
+    operationType
 );
 // Track acquisition-time quarantine until it settles.
 if (observeManualWork) {
@@ -299,12 +394,13 @@ try {
     );
 }
 
-            return {
-                connectorId: id,
-                socketId: socket.id,
-                socket,
-                ownerToken
-            };
+        return {
+    connectorId: id,
+    socketId: socket.id,
+    socket,
+    ownerToken,
+    connectorEpoch: preparedConnectorEpoch
+};
         }
 
      let watchdogTimer;
@@ -380,6 +476,30 @@ async function withGlobalConnectorLock(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
     const receiptRequested = options?.releaseEvidence === true;
+    const operationType = resolveOperationType(options);
+    const syncEvidenceRequested =
+    options?.prepareSyncOwnership != null ||
+    options?.confirmSyncLockAcquired != null ||
+    options?.confirmSyncLockReleased != null;
+
+if (
+    syncEvidenceRequested &&
+    (
+        receiptRequested ||
+        !["FIRST_SYNC", "NORMAL_SYNC"].includes(operationType) ||
+        typeof options.prepareSyncOwnership !== "function" ||
+        typeof options.confirmSyncLockAcquired !== "function" ||
+        typeof options.confirmSyncLockReleased !== "function" ||
+        !UUID.test(options.syncRequestId || "") ||
+        typeof options.syncBatchId !== "string" ||
+        !options.syncBatchId.trim() ||
+        !UUID.test(options.syncExecutionClaimToken || "")
+    )
+) {
+    throw new Error(
+        "INVALID_SYNC_CONNECTOR_EVIDENCE_OPTIONS"
+    );
+}
     let completionIdentity = null;
 
        // Durable receipt writer is mandatory for Manual Reconciliation.
@@ -705,13 +825,17 @@ function notifyManualCoordinatorUnsafe() {
 let lock;
 
 try {
-    lock = await waitForConnectorLock(
+ lock = await waitForConnectorLock(
     connectorId,
     options?.lockWaitMs,
     manualLifecycle ? observeAcquisitionWork : null,
     receiptRequested
         ? options?.prepareManualAcquisition
-        : null
+        : null,
+    operationType,
+    receiptRequested
+        ? null
+        : options?.prepareSyncOwnership
 );
    } catch (error) {
     if (manualLifecycle) {
@@ -909,7 +1033,10 @@ function runOptInRedisCommand(command, message) {
 function quarantineForCleanup(...args) {
        if (!identityEnabled) {
         const pending = Promise.resolve().then(() =>
-            quarantineConnectorAndSocket(...args)
+            quarantineConnectorAndSocket(
+    ...args,
+    operationType
+)
         );
 
         return bounded(
@@ -941,7 +1068,10 @@ function quarantineForCleanup(...args) {
             }
         }
 
-        return quarantineConnectorAndSocket(...args);
+       return quarantineConnectorAndSocket(
+    ...args,
+    operationType
+);
     });
 trackManualWork(work);
     return bounded(
@@ -1271,7 +1401,51 @@ if (quarantineConfirmed) {
         `Connector unavailable before operation: ${lock.connectorId}`
     );
 }
+if (syncEvidenceRequested) {
+      await bounded(
+        Promise.resolve().then(() =>
+            options.confirmSyncLockAcquired({
+                connectorId: lock.connectorId,
+                socketId: lock.socketId,
+                ownerToken: lock.ownerToken
+            })
+        ),
+        `SYNC_CONNECTOR_SQL_ACQUISITION_CONFIRMATION_TIMEOUT: ${lock.connectorId}`
+    );
 
+    if (
+        lockLost ||
+        operationAbortController.signal.aborted ||
+        !lock.socket.connected ||
+        registry.get(lock.connectorId) !== lock.socket
+    ) {
+        throw new Error(
+            "SYNC_CONNECTOR_UNAVAILABLE_AFTER_LOCK_CONFIRMATION"
+        );
+    }
+        const health = await bounded(
+        getConnectorHealth(lock.connectorId),
+        `SYNC_CONNECTOR_EPOCH_CHECK_TIMEOUT: ${lock.connectorId}`
+    );
+
+    if (
+        !health ||
+        health.connector_id !== lock.connectorId ||
+        health.socket_id !== lock.socketId ||
+        health.connection_status !== "CONNECTED" ||
+        !lock.connectorEpoch ||
+        health.tally_queue_connector_epoch !== lock.connectorEpoch ||
+        lockLost ||
+        operationAbortController.signal.aborted ||
+        !lock.socket.connected ||
+        !lock.socket.protocolReceiver ||
+        registry.get(lock.connectorId) !== lock.socket
+    ) {
+        throw new Error(
+            `SYNC_CONNECTOR_EPOCH_CHANGED_BEFORE_OPERATION: ${lock.connectorId}`
+        );
+    }
+}
 const result = await new Promise((resolve, reject) => {
     let settled = false;
 
@@ -1816,7 +1990,66 @@ if (operationCompletedSafely) {
     );
 }
 } else {
+    if (syncEvidenceRequested) {
+    const releaseIdentity = {
+        requestId: options.syncRequestId,
+        batchId: options.syncBatchId,
+        executionClaimToken: options.syncExecutionClaimToken,
+        connectorId: lock.connectorId,
+        socketId: lock.socketId,
+        ownerToken: lock.ownerToken,
+        operationType
+    };
+
+    let receipt;
+
     try {
+        const releaseResult =
+                       await bounded(
+                releaseSyncConnectorLockWithReceipt(
+                    releaseIdentity
+                ),
+                `SYNC_CONNECTOR_REDIS_RELEASE_TIMEOUT: ${lock.connectorId}`
+            );
+
+        if (releaseResult?.released === true) {
+            receipt = releaseResult.receipt;
+        }
+    } catch (error) {
+        console.error(
+            "[GLOBAL LOCK] Sync release response unconfirmed",
+            releaseIdentity,
+            error
+        );
+    }
+
+    if (!receipt) {
+               receipt = await bounded(
+            readSyncConnectorReleaseReceipt(
+                releaseIdentity
+            ),
+            `SYNC_CONNECTOR_RELEASE_RECEIPT_READ_TIMEOUT: ${lock.connectorId}`
+        );
+    }
+
+    if (receipt?.redisReleaseConfirmed !== true) {
+        throw new Error(
+            "SYNC_CONNECTOR_RELEASE_UNCONFIRMED"
+        );
+    }
+
+     await bounded(
+        Promise.resolve().then(() =>
+            options.confirmSyncLockReleased(
+                releaseIdentity
+            )
+        ),
+        `SYNC_CONNECTOR_SQL_RELEASE_CONFIRMATION_TIMEOUT: ${lock.connectorId}`
+    );
+
+} else {
+    try {
+        
    const releaseResult = receiptRequested
     ? await runOptInRedisCommand(
         () => releaseManualReconcileLockWithReceipt({
@@ -1957,11 +2190,11 @@ if (quarantineConfirmed) {
     lock.socket.disconnect(true);
 }
 
-       throw error;
+              throw error;
 }
 }
     }
-    
+    }
        } finally {
         if (manualLifecycle) {
             manualLifecycle.admissionSealed = true;

@@ -163,9 +163,9 @@ function assertErrorStatus(result, connectorId) {
             item.event === "connector:registration:status" &&
             item.payload?.connector_id === connectorId &&
             item.payload?.registered === false &&
-            item.payload?.reason === "REGISTRATION_ERROR"
+                        item.payload?.reason === "PROTOCOL_ACTIVATION_FAILED"
         ),
-        `Expected REGISTRATION_ERROR for ${connectorId}`
+        `Expected PROTOCOL_ACTIVATION_FAILED for ${connectorId}`
     );
 
     assert.equal(

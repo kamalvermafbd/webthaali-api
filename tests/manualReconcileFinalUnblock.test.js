@@ -79,6 +79,8 @@ function setup(overrides = {}) {
         socket_id: "socket-test",
         owner_token: ownerToken,
         coordinator_server_instance_id: serverInstanceId,
+        coordinator_unsafe_detected: false,
+        coordinator_unsafe_detected_at: null,
         recovery_state: "SETTLED",
         remote_execution_fenced: true,
         redis_cleanup_confirmed: true,
@@ -243,6 +245,32 @@ function setup(overrides = {}) {
 }
 
 const cases = [
+
+    [
+    "unsafe coordinator blocks Redis unblock",
+    {
+        evidence: {
+            coordinator_unsafe_detected: true,
+            recovery_state: "SETTLED",
+            terminal_closed_at: "2026-01-01"
+        }
+    },
+    false,
+    "COORDINATOR_UNSAFE_OR_UNVERIFIED",
+    0
+],
+[
+    "unverified coordinator blocks Redis unblock",
+    {
+        evidence: {
+            recovery_state: "SETTLED",
+            terminal_closed_at: "2026-01-01"
+        }
+    },
+    false,
+    "COORDINATOR_UNSAFE_OR_UNVERIFIED",
+    0
+],
     [
         "confirmed SQL unblock succeeds",
         {},
@@ -301,9 +329,10 @@ const cases = [
         "SQL evidence invalid",
         {
             evidence: {
-                recovery_state: "SETTLED",
-                terminal_closed_at: "2026-01-01"
-            }
+    coordinator_unsafe_detected: false,
+    recovery_state: "SETTLED",
+    terminal_closed_at: "2026-01-01"
+}
         },
         false,
         "SQL_CLOSED_RECOVERY_EVIDENCE_INVALID",

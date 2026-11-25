@@ -528,7 +528,193 @@ async function ensureWaitingConnectorSince(supabase, batch) {
     return persisted;
 }
 
+// ============================================================
+// DURABLE SYNC RELEASE CONFIRMATION RECOVERY
+// FIRST_SYNC / NORMAL_SYNC
+// ============================================================
 
+let syncReleaseRecoveryCursor = null;
+async function withSyncRecoveryTimeout(operation, message) {
+    let timer;
+
+    try {
+        return await Promise.race([
+            Promise.resolve().then(operation),
+            new Promise((_, reject) => {
+                timer = setTimeout(() => {
+                    const error = new Error(message);
+                    error.code = "SYNC_RECOVERY_TIMEOUT";
+                    reject(error);
+                }, 5000);
+            })
+        ]);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+async function recoverPendingSyncReleaseConfirmations(supabase) {
+    try {
+        let query = supabase
+            .from("sync_connector_operations")
+            .select(`
+                request_id,
+                batch_id,
+                execution_claim_token,
+                connector_id,
+                socket_id,
+                owner_token,
+                operation_type
+            `)
+            .in("operation_type", [
+                "FIRST_SYNC",
+                "NORMAL_SYNC"
+            ])
+            .not("ownership_prepared_at", "is", null)
+            .not("owner_token", "is", null)
+            .not("socket_id", "is", null)
+            .not("lock_acquired_at", "is", null)
+            .is("lock_released_at", null)
+            .order("request_id", { ascending: true })
+            .limit(25);
+
+        if (syncReleaseRecoveryCursor !== null) {
+            query = query.gt(
+                "request_id",
+                syncReleaseRecoveryCursor
+            );
+        }
+
+      const { data, error } = await withSyncRecoveryTimeout(
+    () => query,
+    "SYNC_RELEASE_RECOVERY_QUERY_TIMEOUT"
+);
+
+        if (error) {
+            throw error;
+        }
+
+        const operations = data || [];
+
+        if (operations.length === 0) {
+            syncReleaseRecoveryCursor = null;
+            return;
+        }
+
+        for (const operation of operations) {
+            syncReleaseRecoveryCursor =
+                operation.request_id;
+
+            try {
+                const identity = {
+                    requestId:
+                        operation.request_id,
+
+                    batchId:
+                        operation.batch_id,
+
+                    executionClaimToken:
+                        operation.execution_claim_token,
+
+                    connectorId:
+                        operation.connector_id,
+
+                    socketId:
+                        operation.socket_id,
+
+                    ownerToken:
+                        operation.owner_token,
+
+                    operationType:
+                        operation.operation_type
+                };
+
+                const receipt = await withSyncRecoveryTimeout(
+    () => connectorHealthStore
+        .readSyncConnectorReleaseReceipt(identity),
+    "SYNC_RELEASE_RECEIPT_READ_TIMEOUT"
+);
+
+                // Missing receipt is not release evidence.
+                if (
+                    receipt?.redisReleaseConfirmed !== true
+                ) {
+                    continue;
+                }
+
+               const {
+    data: confirmed,
+    error: confirmError
+} = await withSyncRecoveryTimeout(
+    () => supabase.rpc(
+        "confirm_sync_connector_lock_released",
+        {
+            p_request_id: identity.requestId,
+            p_batch_id: identity.batchId,
+            p_execution_claim_token:
+                identity.executionClaimToken,
+            p_connector_id: identity.connectorId,
+            p_socket_id: identity.socketId,
+            p_owner_token: identity.ownerToken
+        }
+    ),
+    "SYNC_RELEASE_CONFIRMATION_TIMEOUT"
+);
+
+                if (
+                    confirmError ||
+                    confirmed !== true
+                ) {
+                    throw new Error(
+                        confirmError?.message ||
+                        "SYNC_RELEASE_CONFIRMATION_REJECTED"
+                    );
+                }
+
+                console.log(
+                    "[CONNECTOR WATCHDOG] SYNC RELEASE CONFIRMATION RECOVERED",
+                    {
+                        request_id:
+                            identity.requestId,
+
+                        batch_id:
+                            identity.batchId,
+
+                        connector_id:
+                            identity.connectorId,
+
+                        operation_type:
+                            identity.operationType
+                    }
+                );
+
+         } catch (error) {
+    console.error(
+        "[CONNECTOR WATCHDOG] SYNC RELEASE RECOVERY DEFERRED",
+        {
+            request_id: operation.request_id,
+            connector_id: operation.connector_id,
+            error: error.message
+        }
+    );
+
+    if (error.code === "SYNC_RECOVERY_TIMEOUT") {
+        return;
+    }
+}
+        }
+
+        if (operations.length < 25) {
+            syncReleaseRecoveryCursor = null;
+        }
+
+    } catch (error) {
+        console.error(
+            "[CONNECTOR WATCHDOG] SYNC RELEASE RECOVERY ERROR",
+            error.message
+        );
+       
+    }
+}
 // ------------------------------------------------------------
 // CHECK CONNECTOR WATCHDOG
 // ------------------------------------------------------------
@@ -548,7 +734,8 @@ async function checkConnectorWatchdog({
 discoverRegisteredConnectors(registry || connectorRegistry);
 
 refreshRegisteredConnectorHealth(registry || connectorRegistry);
-
+// Recover pending durable sync release confirmations.
+await recoverPendingSyncReleaseConfirmations(supabase);
 // Detect expired CONNECTOR_OFFLINE_TIMEOUT retry reservations.
 // Recovery is limited to DB-eligible, token-matched, non-active BullMQ jobs.
 const { data: expiredRetryReservations, error: expiredRetryError } =

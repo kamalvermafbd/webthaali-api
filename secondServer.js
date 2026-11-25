@@ -41104,7 +41104,22 @@ if (postGuardBatchStateChanged) {
         batch_id: sync_batch_id
     });
 }
+const { resolveSyncOperationType } =
+    require("./socketio/connectorQuarantineManager");
 
+const syncOperationType = await resolveSyncOperationType({
+    supabase,
+    companyCode: executionBatch.company_code,
+    tallyOwner: executionBatch.tally_owner,
+    batchId: sync_batch_id
+});
+
+console.log("[SYNC OPERATION TYPE]", {
+    batch_id: sync_batch_id,
+    company_code: executionBatch.company_code,
+    tally_owner: executionBatch.tally_owner,
+    operation_type: syncOperationType
+});
 // Register durable HTTP invocation before sync side effects.
 httpExecutionStartUnverified = true;
 

@@ -216,14 +216,14 @@ async function main() {
         item.payload?.reason === "HEALTH_UPDATE_UNVERIFIED"
     );
 
-    assert.equal(
+      assert.equal(
         failures.length,
-        1,
-        "Expected HEALTH_UPDATE_UNVERIFIED rejection"
+        0,
+        "BUG: Existing registration incorrectly rejected"
     );
 
     console.log(
-        "PASS: HEALTH_UPDATE_UNVERIFIED emitted"
+        "PASS: No false rejection of existing registration"
     );
 
     const successEvents = events.filter(item =>
@@ -242,39 +242,124 @@ async function main() {
         "PASS: No false registration success"
     );
 
-    // Fail-closed safety: unverified ownership must
-    // not remain usable through the local registry.
+      // A failed repeat-registration attempt must not
+    // destroy a previously established local mapping.
     assert.equal(
         registry.get(connectorId),
-        null,
-        "BUG: Unverified connector remains available"
+        socket,
+        "BUG: Existing connector mapping removed"
     );
 
     assert.equal(
         socket.connectorIds.has(connectorId),
-        false,
-        "BUG: Unverified alias remains registered"
+        true,
+        "BUG: Existing connector alias removed"
     );
 
     assert.equal(
         socket.companyRegistrations.size,
-        0,
-        "BUG: Unverified company context remains active"
+        1,
+        "BUG: Existing company context removed"
     );
 
     console.log(
-        "PASS: Unverified connector removed locally"
+        "PASS: Existing registration preserved"
     );
-
     assert.equal(
         socket.directRegistrationInProgress,
         false,
         "BUG: Registration in-progress flag stuck"
     );
 
-    console.log(
+        console.log(
         "PASS: Registration in-progress flag cleared"
     );
+
+    // Verify rollback of a newly acquired registration.
+    const newConnectorId = "TEST-HEALTH-FAILURE-002";
+    const previousHealthCalls = healthCalls;
+
+    events.length = 0;
+
+    try {
+        assert.equal(
+            registry.get(newConnectorId),
+            null
+        );
+
+        registerHandler({
+            connector_id: newConnectorId,
+            company_code: "TEST-COMPANY-NEW",
+            company_guid: "TEST-GUID-NEW",
+            tally_owner: "USER"
+        });
+
+        await socket.registrationQueue.tail;
+
+        assert.ok(
+            healthCalls > previousHealthCalls,
+            "New registration health failure was not reached"
+        );
+
+        const newFailures = events.filter(item =>
+            item.event === "connector:registration:status" &&
+            item.payload?.connector_id === newConnectorId &&
+            item.payload?.registered === false &&
+            item.payload?.reason === "HEALTH_UPDATE_UNVERIFIED"
+        );
+
+        assert.equal(
+            newFailures.length,
+            1,
+            "Expected new registration rejection"
+        );
+
+        assert.equal(
+            events.some(item =>
+                item.event === "connector:registration:status" &&
+                item.payload?.connector_id === newConnectorId &&
+                item.payload?.registered === true
+            ),
+            false,
+            "BUG: Unverified new registration succeeded"
+        );
+
+        assert.equal(
+            registry.get(newConnectorId),
+            null,
+            "BUG: Unverified new connector remains registered"
+        );
+
+        assert.equal(
+            socket.connectorIds.has(newConnectorId),
+            false,
+            "BUG: Unverified new alias remains registered"
+        );
+
+        assert.equal(
+            registry.get(connectorId),
+            socket,
+            "BUG: Existing connector mapping damaged"
+        );
+
+        assert.equal(
+            socket.companyRegistrations.size,
+            1,
+            "BUG: Existing company context damaged"
+        );
+
+        assert.equal(
+            socket.directRegistrationInProgress,
+            false,
+            "BUG: Registration flag stuck"
+        );
+
+        console.log(
+            "PASS: New unverified registration safely revoked"
+        );
+       } finally {
+        registry.remove(newConnectorId, socket);
+    }
 }
 
 main()

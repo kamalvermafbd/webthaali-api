@@ -197,7 +197,17 @@ try {
 }
 }
 
-return transferResult;
+                return transferResult;
+            },
+                        {
+                operationType: executionContext.operation_type,
+                prepareSyncOwnership: executionContext.prepare_ownership,
+                confirmSyncLockAcquired: executionContext.confirm_lock_acquired,
+                confirmSyncLockReleased: executionContext.confirm_lock_released,
+                syncRequestId: executionContext.request_id,
+                syncBatchId: executionContext.batch_id,
+                syncExecutionClaimToken:
+                    executionContext.execution_claim_token
             }
         );
 
@@ -1115,8 +1125,16 @@ socket.emit(
         booksBeginningFrom: payload.booksBeginningFrom,
         chunkIndex: chunk.chunkIndex,
         totalChunks: chunk.totalChunks,
-        payloadSize: chunk.payloadSize,
-        data: chunk.data
+       payloadSize: chunk.payloadSize,
+data: chunk.data,
+
+...(durableRequestId
+    ? {
+        identityScope: executionContext.identity_scope,
+        companyIdentity: executionContext.company_identity,
+        payloadFingerprint: executionContext.payload_fingerprint
+    }
+    : {})
     }
 );
 
@@ -1172,7 +1190,15 @@ socket.emit(
 
             totalItems: items.length,
 
-            completedAt: new Date().toISOString()
+...(durableRequestId
+    ? {
+        identityScope: executionContext.identity_scope,
+        companyIdentity: executionContext.company_identity,
+        payloadFingerprint: executionContext.payload_fingerprint
+    }
+    : {}),
+
+completedAt: new Date().toISOString()
 
         }
 
@@ -1258,6 +1284,19 @@ if (isExplicitOutcomeUnknown) {
     connectorError.outcomeUnknown = true;
 
     // An uncertainty report is not a settled connector result.
+    connectorError.connectorResponseReceived = false;
+} else if (
+    durableRequestId &&
+    (
+        data.outcomeUnknown === true ||
+        [
+            "DUPLICATE_TALLY_REQUEST",
+            "TALLY_REQUEST_IDENTITY_CONFLICT",
+            "DURABLE_SYNC_SESSION_LOST"
+        ].includes(data.error)
+    )
+) {
+    connectorError.outcomeUnknown = true;
     connectorError.connectorResponseReceived = false;
 } else if (
     data.outcomeUnknown === true &&

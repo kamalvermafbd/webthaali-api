@@ -286,7 +286,9 @@ return response;
     const coordinatorPath = require.resolve(
         "../socketio/connectorOperationCoordinator"
     );
-
+    const healthStorePath = require.resolve(
+        "../socketio/connectorHealthStore"
+    );
     const coordinatorLifecycle =
         options.lifecycle === undefined
             ? null
@@ -408,7 +410,25 @@ if (resolved === observationSenderPath) {
             }
     };
 }
+        if (resolved === healthStorePath) {
+            return {
+                inspectManualReconcileActiveOwnership:
+                    async () => {
+                        if (options.ownershipThrows) {
+                            throw new Error(
+                                "TEST_OWNERSHIP_RECHECK_UNAVAILABLE"
+                            );
+                        }
 
+                        return {
+                            activeOwnershipVerified:
+                                options.activeOwnershipVerified === true,
+                            remoteSettlementVerified: false,
+                            recoveryAuthorized: false
+                        };
+                    }
+            };
+        }
         if (resolved === coordinatorPath) {
             return {
                 getManualReconcileCoordinatorLifecycle:
@@ -423,10 +443,7 @@ if (resolved === observationSenderPath) {
         }
 
    
-        if (
-            resolved === failureStorePath &&
-            options.drainRpcMode === "confirmed"
-        ) {
+               if (resolved === failureStorePath) {
             return {
                 
                 readManualReconcileFailureCleanupReceipt:
@@ -919,13 +936,18 @@ test("pending coordinator work blocks recovery", async () => {
         attemptId
     });
 
-    assert.equal(
+      assert.equal(
         result.reason,
-        "COORDINATOR_DRAIN_NOT_VERIFIED"
+        "PRE_FENCE_COORDINATOR_STILL_ACTIVE"
     );
     assert.equal(result.recovered, false);
-    assert.equal(result.coordinatorDrainVerified, false);
-    assert.equal(h.calls.rpc.length, 2);
+    assert.equal(result.recoveryRequired, true);
+    assert.equal(result.settlementEligible, false);
+    assert.equal(h.calls.rpc.length, 0);
+    assert.equal(h.calls.transport.length, 0);
+    assert.equal(h.calls.observation.length, 0);
+    assert.equal(h.calls.redisStages, 0);
+    assert.equal(h.calls.sqlSettlements, 0);
 });
 
 test("coordinator identity mismatch blocks recovery", async () => {
@@ -946,13 +968,18 @@ test("coordinator identity mismatch blocks recovery", async () => {
         attemptId
     });
 
-    assert.equal(
+        assert.equal(
         result.reason,
-        "COORDINATOR_DRAIN_NOT_VERIFIED"
+        "PRE_FENCE_COORDINATOR_IDENTITY_MISMATCH"
     );
     assert.equal(result.recovered, false);
-    assert.equal(result.coordinatorDrainVerified, false);
-    assert.equal(h.calls.rpc.length, 2);
+    assert.equal(result.recoveryRequired, true);
+    assert.equal(result.settlementEligible, false);
+    assert.equal(h.calls.rpc.length, 0);
+    assert.equal(h.calls.transport.length, 0);
+    assert.equal(h.calls.observation.length, 0);
+    assert.equal(h.calls.redisStages, 0);
+    assert.equal(h.calls.sqlSettlements, 0);
 });
 
 test("valid coordinator drain reaches durable SQL evidence", async () => {

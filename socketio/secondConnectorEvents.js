@@ -516,9 +516,9 @@ socket.identificationInProgress = true;
 
     try {
 
-        const rawQueueStatus = data?.tally_queue_status;
+     const rawQueueStatus = data?.tally_queue_status;
 
-        const isValidQueueStatus =
+const isValidQueueStatus =
     rawQueueStatus !== null &&
     typeof rawQueueStatus === "object" &&
     !Array.isArray(rawQueueStatus) &&
@@ -526,23 +526,33 @@ socket.identificationInProgress = true;
     Number.isSafeInteger(rawQueueStatus.pendingOperations) &&
     rawQueueStatus.pendingOperations >= 0 &&
     Number.isSafeInteger(rawQueueStatus.runningOperations) &&
-       rawQueueStatus.runningOperations >= 0 &&
+    rawQueueStatus.runningOperations >= 0 &&
     Number.isSafeInteger(rawQueueStatus.operationGeneration) &&
     rawQueueStatus.operationGeneration >= 0 &&
-  (
-    rawQueueStatus.idle === false ||
     (
-        rawQueueStatus.pendingOperations === 0 &&
-        rawQueueStatus.runningOperations === 0
-    )
-)
+        rawQueueStatus.connectorEpoch == null ||
+        (
+            typeof rawQueueStatus.connectorEpoch === "string" &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                rawQueueStatus.connectorEpoch
+            )
+        )
+    ) &&
+    (
+        rawQueueStatus.idle === false ||
+        (
+            rawQueueStatus.pendingOperations === 0 &&
+            rawQueueStatus.runningOperations === 0
+        )
+    );
 
 const tallyQueueStatus = isValidQueueStatus
     ? {
         idle: rawQueueStatus.idle,
         pendingOperations: rawQueueStatus.pendingOperations,
         runningOperations: rawQueueStatus.runningOperations,
-        operationGeneration: rawQueueStatus.operationGeneration
+        operationGeneration: rawQueueStatus.operationGeneration,
+        connectorEpoch: rawQueueStatus.connectorEpoch ?? null
     }
     : null;
 
@@ -552,16 +562,26 @@ const isNewerQueueStatus =
     tallyQueueStatus !== null &&
     (
         !previousQueueStatus ||
-        tallyQueueStatus.operationGeneration >
-            previousQueueStatus.operationGeneration ||
         (
-            tallyQueueStatus.operationGeneration ===
-                previousQueueStatus.operationGeneration &&
-            tallyQueueStatus.idle === previousQueueStatus.idle &&
-            tallyQueueStatus.pendingOperations ===
-                previousQueueStatus.pendingOperations &&
-            tallyQueueStatus.runningOperations ===
-                previousQueueStatus.runningOperations
+            (
+                previousQueueStatus.connectorEpoch == null ||
+                previousQueueStatus.connectorEpoch ===
+                    tallyQueueStatus.connectorEpoch
+            ) &&
+            (
+                tallyQueueStatus.operationGeneration >
+                    previousQueueStatus.operationGeneration ||
+                (
+                    tallyQueueStatus.operationGeneration ===
+                        previousQueueStatus.operationGeneration &&
+                    tallyQueueStatus.idle ===
+                        previousQueueStatus.idle &&
+                    tallyQueueStatus.pendingOperations ===
+                        previousQueueStatus.pendingOperations &&
+                    tallyQueueStatus.runningOperations ===
+                        previousQueueStatus.runningOperations
+                )
+            )
         )
     );
 
@@ -2342,6 +2362,15 @@ if (
         data.runningOperations >= 0 &&
         Number.isSafeInteger(data.operationGeneration) &&
         data.operationGeneration >= 0 &&
+        (
+    data.connectorEpoch == null ||
+    (
+        typeof data.connectorEpoch === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            data.connectorEpoch
+        )
+    )
+) &&
        (
     data.idle === false ||
     (
@@ -2359,11 +2388,12 @@ if (
     }
 
     const status = {
-        idle: data.idle,
-        pendingOperations: data.pendingOperations,
-        runningOperations: data.runningOperations,
-        operationGeneration: data.operationGeneration
-    };
+    idle: data.idle,
+    pendingOperations: data.pendingOperations,
+    runningOperations: data.runningOperations,
+    operationGeneration: data.operationGeneration,
+    connectorEpoch: data.connectorEpoch ?? null
+};
 
     const connectorIds = [
         ...new Set([

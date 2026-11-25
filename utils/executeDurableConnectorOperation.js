@@ -217,7 +217,8 @@ async function executeDurableConnectorOperation(options) {
         companyCode,
         tallyOwner,
         tallyCompanyGuid,
-        tallyCompanyName
+        tallyCompanyName,
+        operationType
     } = options;
 
     if (
@@ -399,7 +400,96 @@ if (
     throw error;
 }
     const requestId = claim[0].request_id;
+   const prepareOwnership = async ({
+    connectorId: lockedConnectorId,
+    socketId,
+    ownerToken,
+    connectorEpoch
+}) => {
+    if (
+        lockedConnectorId !== String(connectorId) ||
+        !socketId ||
+        !ownerToken ||
+        typeof connectorEpoch !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            connectorEpoch
+        ) ||
+        !["FIRST_SYNC", "NORMAL_SYNC"].includes(operationType)
+    ) {
+        throw new Error(
+            "INVALID_SYNC_CONNECTOR_OWNERSHIP_CONTEXT"
+        );
+    }
 
+    const { data, error } = await supabase.rpc(
+        "prepare_sync_connector_ownership",
+        {
+            p_request_id: requestId,
+            p_batch_id: batchId,
+            p_execution_claim_token: executionClaimToken,
+            p_connector_id: String(connectorId),
+            p_socket_id: socketId,
+            p_owner_token: ownerToken,
+            p_operation_type: operationType,
+            p_connector_epoch: connectorEpoch
+        }
+    );
+
+    if (error || data !== true) {
+        throw new Error(
+            "SYNC_CONNECTOR_OWNERSHIP_PREPARATION_UNCONFIRMED: " +
+            (error?.message || "Ownership not authorized")
+        );
+    }
+
+    return true;
+};
+    const confirmLockEvidence = async (
+        rpcName,
+        { connectorId: lockedConnectorId, socketId, ownerToken }
+    ) => {
+        if (
+            lockedConnectorId !== String(connectorId) ||
+            !socketId ||
+            !ownerToken
+        ) {
+            throw new Error(
+                "INVALID_SYNC_LOCK_EVIDENCE_CONTEXT"
+            );
+        }
+
+        const { data, error } = await supabase.rpc(
+            rpcName,
+            {
+                p_request_id: requestId,
+                p_batch_id: batchId,
+                p_execution_claim_token: executionClaimToken,
+                p_connector_id: lockedConnectorId,
+                p_socket_id: socketId,
+                p_owner_token: ownerToken
+            }
+        );
+
+        if (error || data !== true) {
+            throw new Error(
+                `${rpcName}: ${error?.message || "Confirmation rejected"}`
+            );
+        }
+
+        return true;
+    };
+
+    const confirmLockAcquired = identity =>
+        confirmLockEvidence(
+            "confirm_sync_connector_lock_acquired",
+            identity
+        );
+
+    const confirmLockReleased = identity =>
+        confirmLockEvidence(
+            "confirm_sync_connector_lock_released",
+            identity
+        );
   const beforeDispatch = async () => {
     let data;
     let error;
@@ -566,6 +656,10 @@ const verifyAfterTransfer = async (result, signal) => {
                 batch_id: batchId,
                 execution_claim_token: executionClaimToken,
                 request_id: requestId,
+                operation_type: operationType,
+                prepare_ownership: prepareOwnership,
+confirm_lock_acquired: confirmLockAcquired,
+confirm_lock_released: confirmLockReleased,
 
                 identity_scope: JSON.stringify([
                     "billey-tally-v1",
