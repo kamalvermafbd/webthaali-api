@@ -3,7 +3,7 @@
 // Watches RUNNING + WAITING_CONNECTOR sync batches
 // ============================================================
 
-const WATCH_INTERVAL_MS = 15 * 1000;       // 15 seconds
+const WATCH_INTERVAL_MS = 8 * 60 * 60 * 1000; // 8 hours (Temporary)
 const HEARTBEAT_TIMEOUT_MS = 90 * 1000;     // 90 seconds
 const CONNECTOR_RECOVERY_TIMEOUT_MS = 30 * 1000; // 30 seconds
 const connectorRegistry = require("../socketio/connectorRegistry");
